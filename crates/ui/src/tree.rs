@@ -7,7 +7,7 @@ use crate::color::Color;
 use crate::geometry::{Axis, Count, Extent, Point, Px, Rect, Vector};
 use crate::id::Id;
 use crate::input::{Button, Buttons, Input, Pinch, Pointer};
-use crate::layout::{Align, Layout, ScrollAxes, Sides, Size, Stacking, Style};
+use crate::layout::{Align, Direction, Hold, Layout, ScrollAxes, Sides, Size, Stacking, Style};
 use crate::text::{Label, Text, Wrap};
 
 const LEAST_WRAP: Count = Count::new(12);
@@ -83,6 +83,7 @@ pub struct Placement {
     pub content: Extent,
     pub scroll_offset: Point,
     pub scroll_axes: ScrollAxes,
+    pub hold: Hold,
     layer: Layer,
 }
 
@@ -223,6 +224,12 @@ struct Element {
     lines: Vec<Label>,
     rect: Rect,
     clip: Rect,
+    keep: Option<Extent>,
+}
+
+enum Pull {
+    Absent,
+    Short(Px),
 }
 
 impl Element {
@@ -273,7 +280,10 @@ impl Element {
         let (value, least) = match self.layout.size_along(axis) {
             Size::Exact(value) => (value, value),
             Size::Grow => (Px::ZERO, least),
-            Size::Fit => (fit, least.min(fit)),
+            Size::Fit => {
+                let kept = self.keep.map_or(fit, |keep| fit.max(keep.along(axis)));
+                (kept, least.min(kept))
+            }
         };
         let room = match (axis, self.layout.size_along(axis)) {
             (Axis::Vertical, Size::Fit) => self.scrollbar_room(),
@@ -509,7 +519,81 @@ impl Element {
             content: self.content,
             scroll_offset: self.layout.scroll_offset(),
             scroll_axes: self.layout.scroll_axes,
+            hold: self.layout.hold,
             layer,
+        }
+    }
+
+    fn has(&self, id: Id) -> bool {
+        self.id == Some(id) || self.children.iter().any(|child| child.has(id))
+    }
+
+    fn holds_within(&self, scroller: Id, id: Id) -> bool {
+        if self.id == Some(scroller) {
+            return self.has(id);
+        }
+        self.children
+            .iter()
+            .any(|child| child.holds_within(scroller, id))
+    }
+
+    fn translate(&mut self, by: Point, bound: Rect) {
+        self.position = self.position + by;
+        self.rect = Rect::at(self.rect.origin() + by, self.rect.extent());
+        self.clip = Rect::at(self.clip.origin() + by, self.clip.extent()).intersect(bound);
+        for child in &mut self.children {
+            child.translate(by, bound);
+        }
+    }
+
+    fn pull(&mut self, held: &Held, axis: Axis, screen: Rect, kept: &mut Kept) -> Pull {
+        if self.id == Some(held.id) {
+            return Pull::Short(held.rect.origin().along(axis) - self.rect.origin().along(axis));
+        }
+        for index in 0..self.children.len() {
+            let Some(child) = self.children.get_mut(index) else {
+                continue;
+            };
+            match child.pull(held, axis, screen, kept) {
+                Pull::Absent => {}
+                Pull::Short(short) if short == Px::ZERO => return Pull::Short(Px::ZERO),
+                Pull::Short(short) => return self.absorb(axis, short, screen, kept),
+            }
+        }
+        Pull::Absent
+    }
+
+    fn absorb(&mut self, axis: Axis, short: Px, screen: Rect, kept: &mut Kept) -> Pull {
+        match axis {
+            Axis::Vertical => {
+                let Some(id) = self
+                    .id
+                    .filter(|_| self.layout.clips() && self.layout.scroll_axes.has(Axis::Vertical))
+                else {
+                    return Pull::Short(short);
+                };
+                let scroll = self.layout.scroll_offset();
+                let most = (self.content.height - self.rect.height).max(Px::ZERO);
+                let wanted = (scroll.vertical - short).clamp(Px::ZERO, most.max(scroll.vertical));
+                if wanted == scroll.vertical {
+                    return Pull::Short(short);
+                }
+                self.layout.scroll = Some(scroll.with(Axis::Vertical, wanted));
+                self.place(self.position, self.clip, screen);
+                kept.corrections.insert(id, wanted);
+                Pull::Short(short - (scroll.vertical - wanted))
+            }
+            Axis::Horizontal => {
+                if self.layout.direction != Direction::Row {
+                    return Pull::Short(short);
+                }
+                let bound = self.clip.intersect(self.rect);
+                let by = Point::new(short, Px::ZERO);
+                for child in self.laid_out_mut() {
+                    child.translate(by, bound);
+                }
+                Pull::Short(Px::ZERO)
+            }
         }
     }
 
@@ -684,6 +768,19 @@ impl Aim {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Held {
+    id: Id,
+    rect: Rect,
+}
+
+#[derive(Default)]
+struct Kept {
+    corrections: BTreeMap<Id, Px>,
+    given: BTreeMap<Id, Px>,
+    moved: Vec<Id>,
+}
+
 #[derive(Default)]
 pub struct Ui {
     roots: Vec<Element>,
@@ -697,6 +794,8 @@ pub struct Ui {
     pointer: Pointer,
     size: Extent,
     capture: Capture,
+    held: Option<Held>,
+    kept: Kept,
 }
 
 impl Ui {
@@ -707,6 +806,7 @@ impl Ui {
     pub fn begin(&mut self, input: &Input) {
         self.roots.clear();
         self.stack.clear();
+        let before = self.size;
         self.size = input.size;
         self.pointer = input.pointer;
         self.aim = self.aim.advance(input, self.last_mouse);
@@ -724,6 +824,7 @@ impl Ui {
                 (Reverse(visible.width.wide() * visible.height.wide()), **id)
             })
             .map(|(id, _)| *id);
+        self.hold(input, before);
         let pressed = input.pointer.pressed.contains(Button::Left);
         if pressed {
             self.active = self.hot;
@@ -731,6 +832,50 @@ impl Ui {
         if !input.pointer.down.contains(Button::Left) && !pressed {
             self.active = None;
         }
+    }
+
+    fn hold(&mut self, input: &Input, before: Extent) {
+        let resized = before != input.size;
+        let mouse = input.pointer.mouse;
+        let wheeled = input.pointer.wheel != Vector::ZERO || input.pointer.pinch != Pinch::ZERO;
+        if self
+            .held
+            .is_some_and(|held| resized || wheeled || !held.rect.contains(mouse))
+        {
+            self.held = None;
+        }
+        let steady = |id: Id| {
+            self.previous
+                .get(&id)
+                .filter(|placement| placement.hold == Hold::Steady)
+                .map(|placement| Held {
+                    id,
+                    rect: placement.rect,
+                })
+        };
+        match self.held {
+            Some(held) if self.hot == Some(held.id) => {}
+            Some(held) => {
+                let in_place = self
+                    .previous
+                    .get(&held.id)
+                    .is_some_and(|placement| placement.rect.intersect(held.rect) == held.rect);
+                if in_place {
+                    self.held = self.hot.and_then(steady);
+                } else {
+                    self.hot = None;
+                }
+            }
+            None => self.held = self.hot.and_then(steady),
+        }
+    }
+
+    pub const fn holding(&self) -> bool {
+        self.held.is_some()
+    }
+
+    pub fn settling(&self) -> bool {
+        !self.kept.corrections.is_empty()
     }
 
     pub const fn hot(&self) -> Option<Id> {
@@ -793,6 +938,10 @@ impl Ui {
             lines: Vec::new(),
             rect: Rect::default(),
             clip: Rect::default(),
+            keep: self
+                .held
+                .filter(|held| Some(held.id) == id)
+                .map(|held| held.rect.extent()),
         });
         id.map(|id| self.interaction(id)).unwrap_or_default()
     }
@@ -839,6 +988,18 @@ impl Ui {
     }
 
     pub fn scroll_by_wheel(&mut self, id: Id, offset: &mut Point) -> Point {
+        let asked = offset.vertical;
+        if self
+            .kept
+            .given
+            .get(&id)
+            .is_some_and(|given| *given != asked)
+        {
+            self.kept.moved.push(id);
+        }
+        if let Some(corrected) = self.kept.corrections.remove(&id) {
+            *offset = offset.with(Axis::Vertical, corrected);
+        }
         let mouse = self.pointer.mouse;
         let inside = self.previous.get(&id).is_some_and(|placement| {
             self.capture.reaches(placement)
@@ -863,6 +1024,7 @@ impl Ui {
         if !left_down {
             self.scroll_drag = None;
         }
+        self.kept.given.insert(id, offset.vertical);
         *offset
     }
 
@@ -932,6 +1094,26 @@ impl Ui {
             let at = root.layout.floating.unwrap_or_default();
             root.place(at, screen, screen);
         }
+        let moved = mem::take(&mut self.kept.moved);
+        if let Some(held) = self.held
+            && moved.iter().any(|scroller| {
+                self.roots
+                    .iter()
+                    .any(|root| root.holds_within(*scroller, held.id))
+            })
+        {
+            self.held = None;
+        }
+        if let Some(held) = self.held {
+            for axis in [Axis::Vertical, Axis::Horizontal] {
+                for root in &mut self.roots {
+                    if !matches!(root.pull(&held, axis, screen, &mut self.kept), Pull::Absent) {
+                        break;
+                    }
+                }
+            }
+        }
+
         self.previous.clear();
         for root in &self.roots {
             root.record(&mut self.previous, Layer::Base);

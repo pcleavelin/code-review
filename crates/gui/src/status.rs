@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use domain::{Line, LineCount};
+use domain::Line;
 use platform::BUNDLED_FAMILY;
 use ui::{Count, Label};
 
@@ -48,12 +48,6 @@ pub(crate) enum Status {
         pattern: Label,
         shown: HitsShown,
     },
-    LineOutside {
-        line: Label,
-        last: LineCount,
-    },
-    NoLineNumber(Label),
-    NoFileOpen,
     NoDefinitionOf(Label),
     DefinedOutside {
         file: PathBuf,
@@ -100,9 +94,6 @@ impl Status {
                 shown: HitsShown::First,
                 ..
             }
-            | Self::LineOutside { .. }
-            | Self::NoLineNumber(_)
-            | Self::NoFileOpen
             | Self::NoDefinitionOf(_)
             | Self::NoDefinition => Tone::Warning,
             Self::LayoutUnsaved(_)
@@ -149,15 +140,6 @@ impl fmt::Display for Status {
             Self::CommandFailed(error) => write!(formatter, "error: {}", error.as_str()),
             Self::RegexRefused(reason) => write!(formatter, "bad regex: {}", reason.as_str()),
             Self::Hits { .. } => self.hits(formatter),
-            Self::LineOutside { line, last } => write!(
-                formatter,
-                "line {} is outside 1-{last}; went to the nearest",
-                line.as_str()
-            ),
-            Self::NoLineNumber(text) => {
-                write!(formatter, "'{}' is not a line number", text.as_str())
-            }
-            Self::NoFileOpen => formatter.write_str("no file open in the Source view"),
             Self::NoDefinitionOf(word) => {
                 write!(
                     formatter,

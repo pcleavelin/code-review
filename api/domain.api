@@ -216,7 +216,7 @@ review::diff::pub fn hunks(&self) -> &[Hunk]
 review::diff::pub fn added(&self) -> LineCount
 review::diff::pub fn removed(&self) -> LineCount
 review::diff::pub fn hash(&self) -> TextHash
-review::diff::pub fn commentable(&self, side: Side, line: Line) -> bool
+review::diff::pub fn commentable(&self, side: Side, lines: Span) -> bool
 review::diff::pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow>
 review::state::pub enum Side { Old, New, }
 review::state::pub const fn name(self) -> Spelling
@@ -226,8 +226,10 @@ review::state::pub const fn get(self) -> u32
 review::state::pub struct DraftText(String);
 review::state::pub fn new(text: &str) -> Option<Self>
 review::state::pub fn as_str(&self) -> &str
-review::state::pub struct Draft { pub id: DraftId, pub file: RelativePath, pub side: Side, pub line: Line, pub text: DraftText, pub reply: Option<ThreadId>, }
-review::state::pub struct DraftOn { pub file: RelativePath, pub side: Side, pub line: Line, pub reply: Option<ThreadId>, }
+review::state::pub struct Draft { pub id: DraftId, pub file: RelativePath, pub side: Side, pub start: Option<Line>, pub line: Line, pub text: DraftText, pub reply: Option<ThreadId>, }
+review::state::pub fn lines(&self) -> Span
+review::state::pub struct DraftOn { pub file: RelativePath, pub side: Side, pub start: Option<Line>, pub line: Line, pub reply: Option<ThreadId>, }
+review::state::pub fn lines(&self) -> Span
 review::state::pub enum Standing { New, Updated, Reviewing, Reviewed, }
 review::state::pub struct Mark { pub hash: TextHash, pub commit: CommitId, }
 review::state::pub enum Seen { Unseen, Changed, Seen, }

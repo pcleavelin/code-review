@@ -989,3 +989,155 @@ fn an_overlay_takes_the_pointer_only_while_everything_is_captured_and_draws_unde
     );
     assert_eq!(texts_drawn(&mut popup_open), ["(0, 0) o", "(50, 50) p"]);
 }
+
+fn toolbar(ui: &mut Ui, frame: &Input, label: &str, buttons: &[&str]) {
+    ui.begin(frame);
+    ui.open(Kind::None, Layout::row().grow(), Style::default(), None);
+    ui.leaf(text(label), Layout::row(), Style::default(), None);
+    for name in buttons {
+        ui.leaf(
+            text(name),
+            Layout::row().steady(),
+            Style::default(),
+            Some(Id::new(name)),
+        );
+    }
+    ui.close();
+    ui.end(&mut Cells);
+}
+
+#[test]
+fn a_button_under_the_pointer_stays_put_while_the_label_before_it_grows() {
+    let mut ui = Ui::default();
+    let mut frame = input(400, 100);
+    frame.pointer.mouse = Point::new(px(20), px(5));
+    toolbar(&mut ui, &frame, "a", &["next", "prev"]);
+    let before = ui.placement(Id::new("next")).unwrap().rect;
+    toolbar(&mut ui, &frame, "a", &["next", "prev"]);
+    toolbar(&mut ui, &frame, "abcdef", &["next", "prev"]);
+    assert_eq!(ui.placement(Id::new("next")).unwrap().rect, before);
+    frame.pointer.mouse = Point::new(px(300), px(50));
+    toolbar(&mut ui, &frame, "abcdef", &["next", "prev"]);
+    toolbar(&mut ui, &frame, "abcdef", &["next", "prev"]);
+    assert_eq!(ui.placement(Id::new("next")).unwrap().rect.left, px(48));
+}
+
+#[test]
+fn a_button_under_the_pointer_keeps_its_width_when_its_text_shrinks() {
+    let mut ui = Ui::default();
+    let mut frame = input(400, 100);
+    frame.pointer.mouse = Point::new(px(20), px(5));
+    let shown = |held: &mut Ui, pointer: &Input, word: &str| {
+        held.begin(pointer);
+        held.open(Kind::None, Layout::row().grow(), Style::default(), None);
+        held.leaf(
+            text(word),
+            Layout::row().steady(),
+            Style::default(),
+            Some(Id::new("toggle")),
+        );
+        held.leaf(
+            text("x"),
+            Layout::row().steady(),
+            Style::default(),
+            Some(Id::new("after")),
+        );
+        held.close();
+        held.end(&mut Cells);
+    };
+    shown(&mut ui, &frame, "mark seen");
+    shown(&mut ui, &frame, "mark seen");
+    let after = ui.placement(Id::new("after")).unwrap().rect;
+    shown(&mut ui, &frame, "seen");
+    assert_eq!(ui.placement(Id::new("after")).unwrap().rect, after);
+}
+
+#[test]
+fn what_slides_under_a_vanished_button_takes_no_click_until_the_pointer_leaves() {
+    let mut ui = Ui::default();
+    let mut frame = input(400, 100);
+    frame.pointer.mouse = Point::new(px(4), px(5));
+    toolbar(&mut ui, &frame, "", &["remove", "other"]);
+    toolbar(&mut ui, &frame, "", &["remove", "other"]);
+    toolbar(&mut ui, &frame, "", &["other"]);
+    frame.pointer.pressed.insert(Button::Left);
+    ui.begin(&frame);
+    let blocked = ui.leaf(
+        text("other"),
+        Layout::row().steady(),
+        Style::default(),
+        Some(Id::new("other")),
+    );
+    assert!(!blocked.clicked());
+    ui.end(&mut Cells);
+    frame.pointer.pressed = Buttons::NONE;
+    frame.pointer.mouse = Point::new(px(300), px(90));
+    toolbar(&mut ui, &frame, "", &["other"]);
+    frame.pointer.mouse = Point::new(px(4), px(5));
+    toolbar(&mut ui, &frame, "", &["other"]);
+    frame.pointer.pressed.insert(Button::Left);
+    ui.begin(&frame);
+    let other = ui.leaf(
+        text("other"),
+        Layout::row().steady(),
+        Style::default(),
+        Some(Id::new("other")),
+    );
+    assert!(other.clicked());
+}
+
+fn listing(ui: &mut Ui, frame: &Input, offset: &mut Point, above: usize) {
+    let id = Id::new("listing");
+    ui.begin(frame);
+    ui.scroll_by_wheel(id, offset);
+    ui.open(
+        Kind::None,
+        Layout::column()
+            .width(px(100))
+            .height(px(60))
+            .scroll(*offset),
+        Style::default(),
+        Some(id),
+    );
+    for row in 0..above {
+        ui.leaf(
+            Kind::None,
+            Layout::row().width(px(100)).height(px(10)),
+            Style::default(),
+            Some(Id::new("line").nth(row)),
+        );
+    }
+    ui.leaf(
+        text("more"),
+        Layout::row().steady(),
+        Style::default(),
+        Some(Id::new("more")),
+    );
+    for _ in 0..10 {
+        ui.leaf(
+            Kind::None,
+            Layout::row().width(px(100)).height(px(10)),
+            Style::default(),
+            None,
+        );
+    }
+    ui.close();
+    ui.end(&mut Cells);
+}
+
+#[test]
+fn rows_appearing_above_a_button_under_the_pointer_scroll_it_back_and_the_scroll_is_kept() {
+    let mut ui = Ui::default();
+    let mut frame = input(400, 100);
+    frame.pointer.mouse = Point::new(px(4), px(25));
+    let mut offset = Point::default();
+    listing(&mut ui, &frame, &mut offset, 2);
+    listing(&mut ui, &frame, &mut offset, 2);
+    let before = ui.placement(Id::new("more")).unwrap().rect;
+    listing(&mut ui, &frame, &mut offset, 4);
+    assert_eq!(ui.placement(Id::new("more")).unwrap().rect, before);
+    assert!(ui.settling());
+    listing(&mut ui, &frame, &mut offset, 4);
+    assert_eq!(offset, Point::new(px(0), px(20)));
+    assert_eq!(ui.placement(Id::new("more")).unwrap().rect, before);
+}

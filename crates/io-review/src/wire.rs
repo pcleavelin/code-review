@@ -73,6 +73,7 @@ pub(crate) struct WireDraft {
     pub(crate) path: String,
     pub(crate) text: String,
     pub(crate) reply: Option<String>,
+    pub(crate) start: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -128,11 +129,18 @@ fn mark(fields: &[&str]) -> Option<WireMark> {
 }
 
 fn draft(fields: &[&str]) -> Option<WireDraft> {
-    let (reply, fields) = match fields {
-        [id, side, line, path, text] => (None, [*id, *side, *line, *path, *text]),
-        [id, side, line, path, text, reply] => {
-            (Some(unescape(reply)), [*id, *side, *line, *path, *text])
-        }
+    let (reply, start, fields) = match fields {
+        [id, side, line, path, text] => (None, None, [*id, *side, *line, *path, *text]),
+        [id, side, line, path, text, reply] => (
+            Some(unescape(reply)),
+            None,
+            [*id, *side, *line, *path, *text],
+        ),
+        [id, side, line, path, text, reply, start] => (
+            Some(unescape(reply)).filter(|reply| !reply.is_empty()),
+            Some(start.parse().ok()?),
+            [*id, *side, *line, *path, *text],
+        ),
         _ => return None,
     };
     let [id, side, line, path, text] = fields;
@@ -143,6 +151,7 @@ fn draft(fields: &[&str]) -> Option<WireDraft> {
         path: unescape(path),
         text: unescape(text),
         reply,
+        start,
     })
 }
 
@@ -186,10 +195,14 @@ pub(crate) fn render(review: &WireReview) -> String {
         )
     });
     let drafts = review.drafts.iter().map(|draft| {
-        let reply = draft
-            .reply
-            .as_ref()
-            .map_or_else(String::new, |reply| format!("{tab}{}", escape(reply)));
+        let reply = match (&draft.reply, draft.start) {
+            (None, None) => String::new(),
+            (reply, None) => format!("{tab}{}", escape(reply.as_deref().unwrap_or_default())),
+            (reply, Some(start)) => format!(
+                "{tab}{}{tab}{start}",
+                escape(reply.as_deref().unwrap_or_default())
+            ),
+        };
         format!(
             "{}{tab}{}{tab}{}{tab}{}{tab}{}{tab}{}{reply}",
             Record::Draft.name(),

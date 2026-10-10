@@ -175,9 +175,10 @@ impl Dump for Reviewing {
         }
         for draft in opened.review.drafts() {
             lines.line(format_args!(
-                "draft {} {}:{} {:?} reply={} {}",
+                "draft {} {}:{}-{} {:?} reply={} {}",
                 draft.id,
                 draft.file,
+                draft.lines().start().number(),
                 draft.line.number(),
                 draft.side,
                 Optional(draft.reply.as_ref().map(ToString::to_string)),

@@ -265,7 +265,7 @@ impl Container {
                 Some(id),
             ),
             Self::Folded => Shape::new(
-                Layout::column().grow_width(),
+                Layout::row().grow_width(),
                 Style::background(FOLD_FILL),
                 None,
             ),
@@ -460,7 +460,7 @@ impl Frame<'_> {
         let size = self.metrics.font;
         self.ui.leaf(
             text_kind(vec![Run::new(text, color)], size, Wrap::None),
-            Layout::row().padding(BUTTON_PADDING),
+            Layout::row().padding(BUTTON_PADDING).steady(),
             Style::background(background).border(Sides::ALL, BORDER),
             Some(id),
         )
@@ -499,7 +499,8 @@ impl Frame<'_> {
             Layout::row()
                 .padding(TAB_PADDING)
                 .gap(SMALL_GAP)
-                .cross(Align::Center),
+                .cross(Align::Center)
+                .steady(),
             Style {
                 background,
                 border: if active { Sides::TOP } else { Sides::NONE },
@@ -548,8 +549,9 @@ impl Frame<'_> {
         let layout = match cells {
             Some(cells) => Layout::row()
                 .padding(SMALL_BUTTON_PADDING)
-                .width(cells.of(self.cell_width()) + SMALL_BUTTON_EXTRA),
-            None => Layout::row().padding(SMALL_BUTTON_PADDING),
+                .width(cells.of(self.cell_width()) + SMALL_BUTTON_EXTRA)
+                .steady(),
+            None => Layout::row().padding(SMALL_BUTTON_PADDING).steady(),
         };
         let size = self.metrics.font;
         self.ui.leaf(
@@ -585,14 +587,35 @@ impl Frame<'_> {
             text_kind(vec![Run::new(text, color)], size, Wrap::None),
             Layout::row()
                 .padding(BUTTON_PADDING)
-                .width(NAV_BUTTON.of(self.cell_width()) + NAV_BUTTON_EXTRA),
+                .width(NAV_BUTTON.of(self.cell_width()) + NAV_BUTTON_EXTRA)
+                .steady(),
             Style::background(if hovered && enabled { HOVER } else { PANEL })
                 .border(Sides::ALL, BORDER),
             Some(id),
         )
     }
 
-    pub(crate) fn code_line(&mut self, runs: Vec<Run>, target: Target) -> Interaction {
+    pub(crate) fn inline_button(&mut self, runs: Vec<Run>, target: Target) -> Interaction {
+        let id = target.id();
+        let hovered = self.ui.interaction(id).hovered();
+        let size = self.metrics.font;
+        self.ui.leaf(
+            text_kind(runs, size, Wrap::None),
+            Layout::row().steady(),
+            Style {
+                background: hovered.then_some(HOVER),
+                ..Style::NONE
+            },
+            Some(id),
+        )
+    }
+
+    pub(crate) fn marked_code_line(
+        &mut self,
+        runs: Vec<Run>,
+        target: Target,
+        marked: Option<ui::Color>,
+    ) -> Interaction {
         let id = target.id();
         let hovered = self.ui.interaction(id).hovered();
         let size = self.metrics.font;
@@ -600,7 +623,7 @@ impl Frame<'_> {
             text_kind(runs, size, Wrap::Clip),
             Layout::row().grow_width(),
             Style {
-                background: hovered.then_some(HOVER),
+                background: marked.or(hovered.then_some(HOVER)),
                 ..Style::NONE
             },
             Some(id),
@@ -718,7 +741,7 @@ impl Frame<'_> {
                     size,
                     Wrap::None,
                 ),
-                Layout::row().padding(ROW_PADDING),
+                Layout::row().padding(ROW_PADDING).steady(),
                 Style {
                     background: action_hovered.then_some(SELECTED),
                     ..Style::NONE

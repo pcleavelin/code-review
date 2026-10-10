@@ -68,7 +68,6 @@ pub(crate) enum Which {
     Command,
     SymbolFilter,
     ViewSearch,
-    GoToLine,
     Palette,
     Draft,
     Summary,
@@ -87,7 +86,6 @@ impl Which {
             Self::Command => ids::COMMAND_FIELD,
             Self::SymbolFilter => ids::FILTER_FIELD,
             Self::ViewSearch => ids::VIEW_FIELD,
-            Self::GoToLine => ids::LINE_FIELD,
             Self::Palette => ids::PALETTE_FIELD,
             Self::Draft => ids::DRAFT_FIELD,
             Self::Summary => ids::SUMMARY_FIELD,
@@ -103,7 +101,6 @@ impl Which {
             | Self::Command
             | Self::SymbolFilter
             | Self::ViewSearch
-            | Self::GoToLine
             | Self::Palette
             | Self::Inbox
             | Self::Pin => FieldShape::Single,
@@ -753,7 +750,6 @@ pub(crate) struct Fields {
     command: Field,
     filter: Field,
     view_search: Field,
-    line: Field,
     palette: Field,
     draft: Field,
     summary: Field,
@@ -775,7 +771,6 @@ impl Fields {
             Which::Command => &self.command,
             Which::SymbolFilter => &self.filter,
             Which::ViewSearch => &self.view_search,
-            Which::GoToLine => &self.line,
             Which::Palette => &self.palette,
             Which::Draft => &self.draft,
             Which::Summary => &self.summary,
@@ -790,7 +785,6 @@ impl Fields {
             Which::Command => &mut self.command,
             Which::SymbolFilter => &mut self.filter,
             Which::ViewSearch => &mut self.view_search,
-            Which::GoToLine => &mut self.line,
             Which::Palette => &mut self.palette,
             Which::Draft => &mut self.draft,
             Which::Summary => &mut self.summary,
@@ -801,6 +795,10 @@ impl Fields {
 
     pub(crate) fn focused(&self) -> Option<Which> {
         self.focused.map(|holding| holding.which)
+    }
+
+    pub(crate) fn focused_at(&self) -> Option<Id> {
+        self.focused.map(|holding| holding.id)
     }
 
     pub(crate) fn focus(&mut self, which: Which) {

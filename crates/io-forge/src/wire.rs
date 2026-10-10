@@ -665,9 +665,19 @@ pub(crate) struct WireDiffRefs {
 pub(crate) struct WireComment {
     pub(crate) path: String,
     pub(crate) side: Side,
+    pub(crate) start: Option<u32>,
     pub(crate) line: u32,
     pub(crate) body: String,
     pub(crate) reply: Option<String>,
+}
+
+impl WireComment {
+    fn spanned_body(&self) -> String {
+        match self.start {
+            Some(start) => format!("(lines {start}-{})\n\n{}", self.line, self.body),
+            None => self.body.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -841,12 +851,20 @@ impl Api {
             .iter()
             .filter(|comment| comment.reply.is_none())
             .map(|comment| {
-                json!({
+                let mut value = json!({
                     "path": comment.path,
                     "line": comment.line,
                     "side": WireSide::of(comment.side).name(),
                     "body": comment.body,
-                })
+                });
+                if let (Some(start), Some(object)) = (comment.start, value.as_object_mut()) {
+                    object.insert("start_line".to_owned(), json!(start));
+                    object.insert(
+                        "start_side".to_owned(),
+                        json!(WireSide::of(comment.side).name()),
+                    );
+                }
+                value
             })
             .collect();
         if comments.is_empty() && review.body.is_none() && review.decision == Decision::Comment {
@@ -891,7 +909,7 @@ impl Api {
                 };
                 json!({
                     "path": comment.path,
-                    "body": comment.body,
+                    "body": comment.spanned_body(),
                     "new_position": new_position,
                     "old_position": old_position,
                 })
@@ -935,7 +953,7 @@ impl Api {
                 position.insert(line_key.to_owned(), json!(comment.line));
                 Request::post(
                     format!("{merge_request}/discussions"),
-                    Some(json!({"body": comment.body, "position": position})),
+                    Some(json!({"body": comment.spanned_body(), "position": position})),
                 )
             })
             .collect();

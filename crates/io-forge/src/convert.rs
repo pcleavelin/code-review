@@ -22,6 +22,7 @@ fn comment(draft: &Draft) -> WireComment {
     WireComment {
         path: draft.file.as_str().to_owned(),
         side: draft.side,
+        start: draft.start.map(Line::number),
         line: draft.line.number(),
         body: draft.text.as_str().to_owned(),
         reply: draft

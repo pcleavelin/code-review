@@ -57,6 +57,7 @@ fn marks_and_drafts_with_awkward_text_survive_a_round_trip() {
             side: Side::Old,
             line: Line::new(9),
             reply: None,
+            start: None,
         },
         DraftText::new("first line\n\tsecond \\ line").unwrap(),
     );
@@ -66,6 +67,7 @@ fn marks_and_drafts_with_awkward_text_survive_a_round_trip() {
             side: Side::New,
             line: Line::new(2),
             reply: ThreadId::new("4711"),
+            start: None,
         },
         DraftText::new("agreed").unwrap(),
     );

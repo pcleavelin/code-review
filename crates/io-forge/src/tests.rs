@@ -349,6 +349,7 @@ fn drafts() -> Vec<Draft> {
             line: Line::new(9),
             text: DraftText::new("rename this").unwrap(),
             reply: None,
+            start: None,
         },
         Draft {
             id: DraftId::new(2),
@@ -357,6 +358,7 @@ fn drafts() -> Vec<Draft> {
             line: Line::new(0),
             text: DraftText::new("why removed?").unwrap(),
             reply: None,
+            start: None,
         },
     ]
 }
@@ -862,6 +864,7 @@ fn drafts_with_replies() -> Vec<Draft> {
         line: Line::new(9),
         text: DraftText::new(text).unwrap(),
         reply: ThreadId::new(thread),
+        start: None,
     };
     drafts.push(reply(3, "done", "1001"));
     drafts.push(reply(4, "will do", "issue-501"));

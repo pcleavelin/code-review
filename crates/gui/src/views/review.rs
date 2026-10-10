@@ -1,5 +1,5 @@
 use domain::{
-    ChangeKind, Decision, Draft, DraftOn, Note, NoteKind, RelativePath, Seen, Side, Thread,
+    ChangeKind, Decision, Draft, DraftOn, Note, NoteKind, RelativePath, Seen, Side, Span, Thread,
     ThreadState,
 };
 use ui::{Count, Icon, Label, Run};
@@ -34,6 +34,14 @@ fn kind_word(kind: ChangeKind) -> Label {
         ChangeKind::Deleted => "deleted",
         ChangeKind::Modified => "modified",
         ChangeKind::Renamed => "renamed",
+    })
+}
+
+pub(super) fn lines_word(lines: Span) -> Label {
+    Label::new(if lines.start() == lines.end() {
+        format!("line {}", lines.end().number())
+    } else {
+        format!("lines {}-{}", lines.start().number(), lines.end().number())
     })
 }
 
@@ -213,7 +221,33 @@ fn state_word(state: ThreadState) -> Label {
     })
 }
 
-pub(super) fn thread_box(frame: &mut Frame<'_>, thread: &Thread) {
+fn pending_reply(frame: &mut Frame<'_>, draft: &Draft) {
+    frame.start(Container::FillRow);
+    frame.label_runs(vec![
+        Run::new("you", ORANGE),
+        Run::new("  draft reply, sent with the review", WEAK),
+    ]);
+    frame.grow();
+    let remove = ids::DRAFT_REMOVE.with(&Label::new(draft.id.to_string()));
+    if frame.small_button("remove", remove).clicked() {
+        frame.push(Action::Review(ReviewAct::RemoveDraft(draft.id)));
+    }
+    frame.attach_tip(remove);
+    frame.finish();
+    frame.note(draft.text.as_str(), TEXT, Padding::Step);
+}
+
+pub(super) fn replies_to<'model>(model: &'model Model, thread: &Thread) -> Vec<&'model Draft> {
+    model
+        .review
+        .opened()
+        .into_iter()
+        .flat_map(|opened| opened.review.drafts())
+        .filter(|draft| draft.reply.as_ref() == Some(&thread.id))
+        .collect()
+}
+
+pub(super) fn thread_box(model: &Model, frame: &mut Frame<'_>, thread: &Thread) {
     frame.start(Container::Comment {
         look: thread_look(thread.state),
         id: ids::thread_box().with(thread.id.as_str()),
@@ -235,12 +269,16 @@ pub(super) fn thread_box(frame: &mut Frame<'_>, thread: &Thread) {
                 side: place.side,
                 line: place.line,
                 reply: Some(thread.id.clone()),
+                start: None,
             })));
         }
         frame.attach_tip(reply);
     }
     frame.finish();
     notes(frame, thread);
+    for draft in replies_to(model, thread) {
+        pending_reply(frame, draft);
+    }
     frame.finish();
 }
 
@@ -259,8 +297,8 @@ pub(super) fn draft_box(frame: &mut Frame<'_>, draft: &Draft) {
         Run::new(what, ORANGE),
         Run::new(
             format!(
-                " on line {}{}  draft, sent with the review",
-                draft.line.number(),
+                " on {}{}  draft, sent with the review",
+                lines_word(draft.lines()).as_str(),
                 side_word(draft.side).as_str()
             ),
             WEAK,
@@ -304,8 +342,8 @@ pub(super) fn editing_box(
     frame.label_runs(vec![
         Run::new(
             format!(
-                "{what} on line {}{}",
-                on.line.number(),
+                "{what} on {}{}",
+                lines_word(on.lines()).as_str(),
                 side_word(on.side).as_str()
             ),
             TEXT,
@@ -362,7 +400,7 @@ fn heading(frame: &mut Frame<'_>, text: &Label) {
     frame.label(text.as_str(), ACCENT);
 }
 
-fn conversation(frame: &mut Frame<'_>, open: &OpenReview) {
+fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     let talk = match &open.talk {
         Talk::Asking => {
             frame.note("reading the discussion...", WEAK, Padding::Step);
@@ -417,7 +455,7 @@ fn conversation(frame: &mut Frame<'_>, open: &OpenReview) {
             }
             frame.attach_tip(target);
         }
-        thread_box(frame, thread);
+        thread_box(model, frame, thread);
     }
 }
 
@@ -435,9 +473,9 @@ fn your_review(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
         let runs = vec![
             Run::new(
                 format!(
-                    "{lead}{}:{}{}  ",
+                    "{lead}{} {}{}  ",
                     draft.file,
-                    draft.line.number(),
+                    lines_word(draft.lines()).as_str(),
                     side_word(draft.side).as_str()
                 ),
                 ACCENT,
@@ -519,7 +557,7 @@ pub(super) fn review_tab(model: &Model, frame: &mut Frame<'_>) {
             if progress.done() { GREEN } else { ORANGE },
         ),
     ]);
-    conversation(frame, open);
+    conversation(model, frame, open);
     your_review(model, frame, open);
     frame.finish();
 }

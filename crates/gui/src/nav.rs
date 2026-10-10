@@ -19,9 +19,16 @@ impl Ticket {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Aim {
+    Line,
+    Editor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LineRequest {
     pub(crate) line: Line,
     pub(crate) ticket: Ticket,
+    pub(crate) aim: Aim,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,7 +155,11 @@ impl Nav {
 
     fn scroll_to_line(&mut self, line: Line) {
         let ticket = self.ticket();
-        self.scroll_to = Some(LineRequest { line, ticket });
+        self.scroll_to = Some(LineRequest {
+            line,
+            ticket,
+            aim: Aim::Line,
+        });
     }
 }
 
@@ -281,6 +292,19 @@ impl Model {
         self.nav.show(Tab::Source);
     }
 
+    pub(crate) fn show_editor(&mut self, file: FileId, line: Line) {
+        if self.nav.file != Some(file) {
+            self.open_line(file, line);
+        }
+        let ticket = self.nav.ticket();
+        self.nav.scroll_to = Some(LineRequest {
+            line,
+            ticket,
+            aim: Aim::Editor,
+        });
+        self.nav.show(Tab::Source);
+    }
+
     pub(crate) fn open_gone(&mut self, path: RelativePath) {
         self.nav.moving = Move::Jump;
         self.nav.file = None;
@@ -291,15 +315,15 @@ impl Model {
         self.nav.show(Tab::Source);
     }
 
-    pub(crate) fn go_to_line(&mut self, line: Line) {
-        self.nav.moving = Move::Jump;
-        self.nav.lines = Some(LineSelection::one(line));
-        self.nav.scroll_to_line(line);
+    pub(crate) fn clear_lines(&mut self) {
+        self.nav.lines = None;
+        self.line_grab = None;
     }
 
     pub(crate) fn select_line(&mut self, line: Line, gesture: LineGesture) {
         match (gesture, self.line_grab) {
             (LineGesture::Press, _) => {
+                self.review.picked = None;
                 self.line_grab = Some(line);
                 self.nav.lines = Some(LineSelection::one(line));
             }

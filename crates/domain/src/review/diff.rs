@@ -172,14 +172,17 @@ impl FileChange {
         TextHash::of_bytes(path.chain(body))
     }
 
-    pub fn commentable(&self, side: Side, line: Line) -> bool {
-        self.hunks
-            .iter()
-            .flat_map(Hunk::numbered)
-            .any(|numbered| match side {
-                Side::New => numbered.new == Some(line),
-                Side::Old => numbered.old == Some(line),
-            })
+    pub fn commentable(&self, side: Side, lines: Span) -> bool {
+        self.hunks.iter().any(|hunk| {
+            let on: Vec<Line> = hunk
+                .numbered()
+                .filter_map(|numbered| match side {
+                    Side::New => numbered.new,
+                    Side::Old => numbered.old,
+                })
+                .collect();
+            on.contains(&lines.start()) && on.contains(&lines.end())
+        })
     }
 
     pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow> {

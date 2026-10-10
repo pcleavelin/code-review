@@ -102,10 +102,6 @@ pub(crate) const FILTER_FIELD: Control = Control::new(
     Element::new("field@symbols"),
     Words::new("filter the symbols by name or file"),
 );
-pub(crate) const LINE_FIELD: Control = Control::new(
-    Element::new("field@goto-line"),
-    Words::new("jump the Source view to a line number"),
-);
 pub(crate) const COMMAND_FIELD: Control = Control::new(
     Element::new("cmd"),
     Words::new("run a CLI command; it acts on the same reviews"),
@@ -248,7 +244,15 @@ pub(crate) const WHOLE_FILE: Control = Control::new(
 );
 pub(crate) const FOLD: Control = Control::new(
     Element::new("fold"),
-    Words::new("show these unchanged lines"),
+    Words::new("show all of these unchanged lines"),
+);
+pub(crate) const FOLD_UP: Control = Control::new(
+    Element::new("fold-up"),
+    Words::new("show 20 more unchanged lines above the change below"),
+);
+pub(crate) const FOLD_DOWN: Control = Control::new(
+    Element::new("fold-down"),
+    Words::new("show 20 more unchanged lines below the change above"),
 );
 pub(crate) const DRAFT_HERE: Control = Control::new(
     Element::new("draft-here"),
@@ -342,7 +346,6 @@ pub(crate) const ELEMENT_TIP: Control = Control::new(
 pub(crate) const CONTROLS: &[Control] = &[
     SEARCH_FIELD,
     FILTER_FIELD,
-    LINE_FIELD,
     COMMAND_FIELD,
     BACK,
     FORWARD,
@@ -382,6 +385,8 @@ pub(crate) const CONTROLS: &[Control] = &[
     PREVIOUS_HUNK,
     WHOLE_FILE,
     FOLD,
+    FOLD_UP,
+    FOLD_DOWN,
     DRAFT_HERE,
     DRAFT_REMOVED,
     DRAFT_FIELD,

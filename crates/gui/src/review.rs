@@ -10,7 +10,7 @@ use domain::{
 use index::Indexed;
 use io_review::ReviewStamp;
 use session::{Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName};
-use ui::{Count, Label};
+use ui::{Count, Label, Typed};
 
 use crate::app::App;
 use crate::field::Which;
@@ -116,6 +116,27 @@ pub(crate) enum Pinning {
     Busy,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RemovedPick {
+    pub(crate) file: RelativePath,
+    pub(crate) from: Line,
+    pub(crate) to: Line,
+}
+
+impl RemovedPick {
+    pub(crate) fn lines(&self) -> Span {
+        Span::new(self.from.min(self.to), self.from.max(self.to))
+            .unwrap_or_else(|| Span::line(self.from))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Picking {
+    Press,
+    Extend,
+    Drag,
+}
+
 pub(crate) struct Reviewing {
     pub(crate) desk: Desk,
     pub(crate) inbox: Inbox,
@@ -124,6 +145,7 @@ pub(crate) struct Reviewing {
     pub(crate) opening: Option<PrNumber>,
     pub(crate) pinning: Pinning,
     pub(crate) draft: Option<DraftOn>,
+    pub(crate) picked: Option<RemovedPick>,
     pub(crate) submitting: Submitting,
     pub(crate) whole: BTreeSet<RelativePath>,
     pub(crate) unfolded: BTreeMap<RelativePath, Vec<Span>>,
@@ -145,6 +167,7 @@ impl Reviewing {
             opening: None,
             pinning: Pinning::Idle,
             draft: None,
+            picked: None,
             submitting: Submitting::Idle,
             whole: BTreeSet::new(),
             unfolded: BTreeMap::new(),
@@ -216,7 +239,10 @@ impl Reviewing {
         spans.extend(
             self.drafts_in(path)
                 .filter(|draft| draft.side == Side::New)
-                .map(|draft| Span::line(draft.line.min(last))),
+                .filter_map(|draft| {
+                    let lines = draft.lines();
+                    Span::new(lines.start().min(last), lines.end().min(last))
+                }),
         );
         merged(spans)
     }
@@ -316,6 +342,7 @@ pub(crate) enum ReviewAct {
     PreviousHunk,
     ToggleWhole(RelativePath),
     Unfold(RelativePath, Span),
+    PickRemoved(RelativePath, Line, Picking),
     Reveal(RelativePath, Line),
     StartDraft(DraftOn),
     StartDraftHere,
@@ -596,15 +623,68 @@ impl Model {
         }
     }
 
+    fn show_editing(&mut self, on: &DraftOn) {
+        let place = CodePlace {
+            file: on.file.clone(),
+            side: on.side,
+            line: on.line,
+        };
+        let line = self.review.place_line(&place, self.head_text(&place.file));
+        match self.index.find_file(&place.file) {
+            Some(file) => self.show_editor(file, line),
+            None => self.open_gone(place.file),
+        }
+    }
+
     fn draft_here(&self) -> Option<DraftOn> {
         let file = self.shown_path()?;
-        let line = self.nav.lines()?.high();
+        if let Some(picked) = self
+            .review
+            .picked
+            .as_ref()
+            .filter(|picked| picked.file == file)
+        {
+            let lines = picked.lines();
+            return Some(DraftOn {
+                file,
+                side: Side::Old,
+                start: Some(lines.start()).filter(|start| *start < lines.end()),
+                line: lines.end(),
+                reply: None,
+            });
+        }
+        let lines = self.nav.lines()?;
         Some(DraftOn {
             file,
             side: Side::New,
-            line,
+            start: Some(lines.low()).filter(|low| *low < lines.high()),
+            line: lines.high(),
             reply: None,
         })
+    }
+
+    pub(crate) fn starts_comment(&self, typed: &Typed) -> bool {
+        !typed.as_str().trim().is_empty()
+            && self.nav.tab() == Tab::Source
+            && self.review.draft.is_none()
+            && (self.nav.lines().is_some() || self.review.picked.is_some())
+    }
+
+    fn pick_removed(&mut self, file: RelativePath, line: Line, picking: Picking) {
+        let kept = self
+            .review
+            .picked
+            .take()
+            .filter(|picked| picked.file == file);
+        self.review.picked = Some(match (picking, kept) {
+            (Picking::Extend | Picking::Drag, Some(picked)) => RemovedPick { to: line, ..picked },
+            _ => RemovedPick {
+                file,
+                from: line,
+                to: line,
+            },
+        });
+        self.clear_lines();
     }
 }
 
@@ -641,6 +721,9 @@ impl App {
                     .push(span);
             }
             ReviewAct::Reveal(path, line) => self.model.review.reveal(&path, line),
+            ReviewAct::PickRemoved(path, line, picking) => {
+                self.model.pick_removed(path, line, picking);
+            }
             ReviewAct::StartDraft(on) => self.start_draft(on),
             ReviewAct::StartDraftHere => match self.model.draft_here() {
                 Some(on) => self.start_draft(on),
@@ -782,11 +865,12 @@ impl App {
             .model
             .review
             .change(&on.file)
-            .map(|change| on.reply.is_some() || change.commentable(on.side, on.line));
+            .map(|change| on.reply.is_some() || change.commentable(on.side, on.lines()));
         match inside {
             None => self.model.say(ReviewStatus::NotAChange),
             Some(false) => self.model.say(ReviewStatus::NotInDiff),
             Some(true) => {
+                self.model.show_editing(&on);
                 self.model.review.draft = Some(on);
                 self.model.fields.start_empty(Which::Draft);
             }

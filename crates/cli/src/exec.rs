@@ -94,7 +94,7 @@ impl Run<'_> {
                 let repo = self.repo(&address)?;
                 let mut opened = repo.state(address.number)?;
                 let change = change_of(&opened.changes, address.number, &on.file)?;
-                if !change.commentable(on.side, on.line) {
+                if !change.commentable(on.side, on.lines()) {
                     return Err(Failure::NotInDiff {
                         file: on.file,
                         side: on.side,

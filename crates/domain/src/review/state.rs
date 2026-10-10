@@ -5,7 +5,7 @@ use strum::VariantArray;
 
 use crate::review::diff::FileChange;
 use crate::review::{CommitId, Spelling, ThreadId};
-use crate::text::{Line, RelativePath, TextHash};
+use crate::text::{Line, RelativePath, Span, TextHash};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, VariantArray)]
 pub enum Side {
@@ -66,17 +66,37 @@ pub struct Draft {
     pub id: DraftId,
     pub file: RelativePath,
     pub side: Side,
+    pub start: Option<Line>,
     pub line: Line,
     pub text: DraftText,
     pub reply: Option<ThreadId>,
+}
+
+impl Draft {
+    pub fn lines(&self) -> Span {
+        lines_of(self.start, self.line)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DraftOn {
     pub file: RelativePath,
     pub side: Side,
+    pub start: Option<Line>,
     pub line: Line,
     pub reply: Option<ThreadId>,
+}
+
+impl DraftOn {
+    pub fn lines(&self) -> Span {
+        lines_of(self.start, self.line)
+    }
+}
+
+fn lines_of(start: Option<Line>, line: Line) -> Span {
+    start
+        .and_then(|first| Span::new(first, line))
+        .unwrap_or_else(|| Span::line(line))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -274,6 +294,7 @@ impl Review {
             id,
             file: on.file,
             side: on.side,
+            start: on.start.filter(|first| *first < on.line),
             line: on.line,
             text,
             reply: on.reply,

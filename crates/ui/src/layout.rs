@@ -35,6 +35,13 @@ pub(crate) enum Stacking {
     Overlay,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Hold {
+    #[default]
+    Free,
+    Steady,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Layout {
     pub direction: Direction,
@@ -47,6 +54,7 @@ pub struct Layout {
     pub cross: Align,
     pub scroll: Option<Point>,
     pub scroll_axes: ScrollAxes,
+    pub hold: Hold,
 }
 
 impl Layout {
@@ -62,6 +70,7 @@ impl Layout {
             cross: Align::Start,
             scroll: None,
             scroll_axes: ScrollAxes::VERTICAL,
+            hold: Hold::Free,
         }
     }
 
@@ -147,6 +156,12 @@ impl Layout {
     #[must_use]
     pub const fn scroll(mut self, offset: Point) -> Self {
         self.scroll = Some(offset);
+        self
+    }
+
+    #[must_use]
+    pub const fn steady(mut self) -> Self {
+        self.hold = Hold::Steady;
         self
     }
 

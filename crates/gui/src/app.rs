@@ -22,7 +22,7 @@ use crate::keys::{self, Going};
 use crate::model::{Metrics, Model, Tab, TabName};
 use crate::palette::PaletteAction;
 use crate::panels::{self, View};
-use crate::review::{ReviewJobs, Reviewing};
+use crate::review::{ReviewAct, ReviewJobs, Reviewing};
 use crate::settings::{KeptSettings, SettingsAct};
 use crate::status::Status;
 use crate::theme::{self, BACKGROUND, CONSOLE_ROWS, PANEL_PADDING, TEXT};
@@ -47,6 +47,7 @@ pub(crate) struct App {
     pub(crate) clipboard: ClipboardRequest,
     pub(crate) settings: KeptSettings,
     cursor: Cursor,
+    hidden_focus: Count,
 }
 
 #[derive(Debug, Default)]
@@ -58,6 +59,7 @@ struct KeptLayout {
 const SHOT_TAB_FRAME: Count = Count::new(3);
 const SHOT_SCROLL_FRAME: Count = Count::new(6);
 const SHOT_FRAME: Count = Count::new(20);
+const FOCUS_GRACE: Count = Count::new(4);
 const ANIMATING: Duration = Duration::from_millis(8);
 const BUSY: Duration = Duration::from_millis(50);
 const IDLE: Duration = Duration::from_millis(1000);
@@ -99,6 +101,7 @@ impl App {
             clipboard: ClipboardRequest::Keep,
             cursor: Cursor::Default,
             settings,
+            hidden_focus: Count::ZERO,
         };
         app.model.set_tab(Tab::Inbox);
         app.list_pulls();
@@ -119,6 +122,7 @@ impl App {
             clipboard: ClipboardRequest::Keep,
             settings: KeptSettings::default(),
             cursor: Cursor::Default,
+            hidden_focus: Count::ZERO,
         }
     }
 
@@ -199,12 +203,14 @@ impl App {
             actions.push(Action::Forward);
         }
         actions.extend(keys::review_keys(input).into_iter().map(Action::Review));
+        if typing.is_none() && self.model.starts_comment(typed) {
+            actions.push(Action::Review(ReviewAct::StartDraftHere));
+        }
         for which in [
             Which::Command,
             Which::Search,
             Which::SymbolFilter,
             Which::ViewSearch,
-            Which::GoToLine,
             Which::Draft,
             Which::Summary,
             Which::Inbox,
@@ -297,6 +303,7 @@ impl platform::App for App {
         let cursor = frame.cursor;
         self.cursor = cursor;
         self.ui.end(renderer);
+        self.check_focus_shown();
         if laid_out {
             self.fit_console();
         }
@@ -311,7 +318,7 @@ impl platform::App for App {
         let busy =
             self.working() || self.shot.is_some() || self.model.resting.pending(self.model.now);
         PlatformFrame {
-            redraw_after: if self.model.line_grab.is_some() {
+            redraw_after: if self.model.line_grab.is_some() || self.ui.settling() {
                 ANIMATING
             } else if busy {
                 BUSY
@@ -425,6 +432,27 @@ impl AppCommand {
 }
 
 impl App {
+    fn check_focus_shown(&mut self) {
+        let hidden = self.model.fields.focused().filter(|_| {
+            self.model
+                .fields
+                .focused_at()
+                .and_then(|id| self.ui.placement(id))
+                .and_then(ui::Placement::visible_center)
+                .is_none()
+        });
+        let Some(which) = hidden else {
+            self.hidden_focus = Count::ZERO;
+            return;
+        };
+        self.hidden_focus += Count::new(1);
+        if self.hidden_focus == FOCUS_GRACE && scripted() {
+            dump::report(format_args!(
+                "script: the {which:?} field has the keyboard but is not on screen: the action that focused it must also show it"
+            ));
+        }
+    }
+
     fn fit_console(&mut self) {
         let body = self.ui.interaction(ids::body()).rect();
         let log = self.ui.interaction(ids::console()).rect();

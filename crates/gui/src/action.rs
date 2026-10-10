@@ -1,4 +1,4 @@
-use domain::{Column, FileId, Language, Line, LineCount, SymbolId};
+use domain::{Column, FileId, Language, Line, SymbolId};
 use platform::ClipboardRequest;
 use ui::{Count, Id, Label, Point, Px, Typed};
 
@@ -214,7 +214,6 @@ impl App {
         let after = match which {
             Which::Search
             | Which::SymbolFilter
-            | Which::GoToLine
             | Which::Palette
             | Which::Draft
             | Which::Summary
@@ -244,7 +243,6 @@ impl App {
         match which {
             Which::Command => self.run_command(&line),
             Which::Search => self.search(),
-            Which::GoToLine => self.go_to_line(&line),
             Which::ViewSearch => self.pick_first(&line),
             Which::Draft => self.review(ReviewAct::SaveDraft),
             Which::Pin => self.review(ReviewAct::Pin),
@@ -295,30 +293,6 @@ impl App {
             shown: model.hits_shown,
         };
         model.set_tab(Tab::Search);
-    }
-
-    fn go_to_line(&mut self, line: &FieldText) {
-        let text = line.as_str().trim();
-        let model = &mut self.model;
-        match (text.parse::<usize>(), model.nav.file()) {
-            (Ok(wanted), Some(file)) => {
-                let count = model
-                    .index
-                    .file(file)
-                    .map_or(0, |source| source.text().count().value());
-                let last = usize::try_from(count).unwrap_or(0).max(1);
-                if wanted < 1 || wanted > last {
-                    model.status = Status::LineOutside {
-                        line: Label::new(wanted.to_string()),
-                        last: LineCount::new(u32::try_from(last).unwrap_or(0)),
-                    };
-                }
-                let at = wanted.clamp(1, last) - 1;
-                model.go_to_line(Line::new(u32::try_from(at).unwrap_or(0)));
-            }
-            (Err(_), _) => model.status = Status::NoLineNumber(Label::new(text)),
-            (_, None) => model.status = Status::NoFileOpen,
-        }
     }
 
     fn pick_first(&mut self, line: &FieldText) {

@@ -197,7 +197,6 @@ pub(crate) const FOLD_FILL: Color = WEAK.with_alpha(22);
 pub(crate) const TREE_PLACE: Cells = Cells::new(40);
 pub(crate) const FILTER_FIELD: Cells = Cells::new(16);
 pub(crate) const TREE_LEVEL_WIDTH: Cells = Cells::new(2);
-pub(crate) const LINE_FIELD: Cells = Cells::new(8);
 pub(crate) const COMMENT_FIELD_GUESS: Count = Count::new(60);
 pub(crate) const COMMENT_BUTTONS_ROOM: Count = Count::new(22);
 pub(crate) const COMMENT_LEAST_FIELD: Count = Count::new(16);

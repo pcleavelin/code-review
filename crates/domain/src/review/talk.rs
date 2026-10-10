@@ -148,11 +148,10 @@ impl Conversation {
         file: &'talk RelativePath,
     ) -> impl Iterator<Item = &'talk Thread> {
         self.threads.iter().filter(move |thread| {
-            thread.state != ThreadState::Outdated
-                && thread
-                    .place
-                    .as_ref()
-                    .is_some_and(|place| &place.file == file)
+            thread
+                .place
+                .as_ref()
+                .is_some_and(|place| &place.file == file)
         })
     }
 

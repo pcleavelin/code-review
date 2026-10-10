@@ -75,6 +75,9 @@ fn comment(arguments: CommentArguments) -> Result<Request, Failure> {
         on: DraftOn {
             file: RelativePath::new(&arguments.file),
             side: if arguments.old { Side::Old } else { Side::New },
+            start: arguments
+                .from
+                .map(|first| Line::new(first.saturating_sub(1))),
             line: Line::new(arguments.line.saturating_sub(1)),
             reply,
         },

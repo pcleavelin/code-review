@@ -90,7 +90,7 @@ rule applies.
 | **Tree** | The head of a pull request checked out in a git worktree of its own, `<git common dir>/code-review/trees/<n>`. The Source view, the index and the language servers read it. |
 | **Change** | One file the pull request changes: path (and old path when renamed), kind, hunks of added, removed and context lines. |
 | **Seen** | A change the reviewer marked as read. The mark keeps a hash of the change's diff; when the pull request changes that file again the hash differs and it is **changed since seen**, which counts as unseen. |
-| **Draft** | A comment on one line of a change, on the new side or (for a removed line) the old side, kept locally until it is submitted. Only lines inside a hunk take one, because forges refuse others. |
+| **Draft** | A comment on one line or a run of lines of a change, on the new side or (for removed lines) the old side, kept locally until it is submitted. Only lines inside one hunk take one, because forges refuse others. In the Source view a selection (click, shift-click or drag, on head lines or on removed lines) takes one by typing, the comment button or alt+c; a reply is drawn inside its thread. |
 | **Review** | Per pull request, the seen marks and the drafts: `<git common dir>/code-review/reviews/<n>.review`, written at once on every change, read again by an open window when it changes. Submitting sends every draft and the summary as one review (comment, approve, request changes) and clears the drafts. |
 | **Symbol** | A top-level declaration, plus one level of members of impl / mod / trait / class bodies, in the tree. Name, kind, inclusive line range, depth 0 or 1. |
 | **Pin** | A repository the Inbox lists: a local clone named by path, or a URL cloned (blobless) into the clones folder. Kept in the pins file: `REVIEW_PINS`, else `<config>/code-review/pins`; clones in `REVIEW_CLONES`, else `<data>/code-review/clones`. Named `owner/name` from its remote; the short `name` works when it is unique. |
@@ -115,8 +115,9 @@ rule applies.
   it seen; one that changes it brings it back. The mark also keeps the head commit it was made
   at, for a later "what changed since I looked".
 - **The diff is drawn on the head file, folded to the change.** The Source view shows the head
-  file with added lines tinted and removed lines, threads and drafts inserted where they
-  belong; lines more than three away from a change fold into a row that unfolds on click, and
+  file with added lines tinted and removed lines, threads (outdated ones at their original
+  line) and drafts inserted where they belong; lines more than three away from a change fold
+  into a row that opens twenty lines at a time toward either change, or all at once, and
   "whole file" drops the folds. Every identifier on a changed line navigates like any other
   code, and a jump into a fold reveals it. A deleted file is shown from its diff alone.
 - **One backend per language.** The language's server when on PATH, else a tree-sitter
@@ -126,6 +127,13 @@ rule applies.
 - **The GUI is one selection** (a file and lines, a symbol when one is focused); every view
   shows it. Opening a pull request fetches, checks out, diffs and indexes in the background,
   then swaps the index and the servers in one step.
+- **Nothing moves out from under the pointer.** A button the pointer rests on keeps its place
+  and size until the pointer leaves it; whatever its click changes moves around it, and what
+  slides under a vanished button takes no click until the pointer leaves. Rapid clicks on one
+  spot always hit the same button. `crates/ui` holds every `.steady()` element this way.
+- **An action shows its result.** A control whose result is drawn in another view switches to
+  it and scrolls the result into sight; a field that holds the keyboard off screen fails a
+  script run.
 - **The UI is its own library** (`crates/ui`, in the shape of odin_editor's): elements opened
   and closed each frame, layout once at frame end, input answered from the previous frame's
   rectangles, one monospace font at whole-pixel sizes in one atlas, icons as Codicons glyphs.

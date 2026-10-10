@@ -60,6 +60,7 @@ pub(crate) fn review_from_wire(wire: WireReview) -> Result<Review, ParseReason> 
                 id: DraftId::new(draft.id),
                 file: RelativePath::new(&draft.path),
                 side: side(draft.side),
+                start: draft.start.map(Line::new),
                 line: Line::new(draft.line),
                 text: DraftText::new(&draft.text)
                     .ok_or_else(|| ParseReason(format!("draft {} has no text", draft.id)))?,
@@ -98,6 +99,7 @@ pub(crate) fn review_to_wire(review: &Review) -> WireReview {
                 path: draft.file.as_str().to_owned(),
                 text: draft.text.as_str().to_owned(),
                 reply: draft.reply.as_ref().map(|reply| reply.as_str().to_owned()),
+                start: draft.start.map(Line::value),
             })
             .collect(),
         looked: review.looked().map(|commit| commit.as_str().to_owned()),

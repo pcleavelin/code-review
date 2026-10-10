@@ -2,7 +2,7 @@ use crate::review::{
     ChangeKind, CommitId, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk,
     LineKind, Moment, PrNumber, RepoSlug, Review, Seen, Side, Standing,
 };
-use crate::text::{FileText, Line, RelativePath, SourceLine};
+use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
 fn line(kind: LineKind, text: &str) -> DiffLine {
     DiffLine {
@@ -119,10 +119,14 @@ fn numbering_skips_the_side_a_line_is_not_on() {
 #[test]
 fn only_lines_inside_a_hunk_take_comments_and_each_side_counts_its_own_lines() {
     let file = replace_b_with_x();
-    assert!(file.commentable(Side::New, Line::new(1)));
-    assert!(file.commentable(Side::Old, Line::new(1)));
-    assert!(!file.commentable(Side::New, Line::new(3)));
-    assert!(!file.commentable(Side::Old, Line::new(9)));
+    let one = |line: u32| Span::line(Line::new(line));
+    let lines = |start: u32, end: u32| Span::new(Line::new(start), Line::new(end)).unwrap();
+    assert!(file.commentable(Side::New, one(1)));
+    assert!(file.commentable(Side::Old, one(1)));
+    assert!(!file.commentable(Side::New, one(3)));
+    assert!(!file.commentable(Side::Old, one(9)));
+    assert!(file.commentable(Side::New, lines(0, 2)));
+    assert!(!file.commentable(Side::New, lines(1, 3)));
 }
 
 #[test]
@@ -177,6 +181,7 @@ fn draft_ids_never_repeat_after_a_removal() {
         side,
         line: Line::new(line),
         reply: None,
+        start: None,
     };
     let first = review.add_draft(on(Side::New, 3), text());
     let second = review.add_draft(on(Side::Old, 4), text());
@@ -224,6 +229,7 @@ fn a_pending_draft_keeps_a_fully_seen_review_open() {
             side: Side::New,
             line: Line::new(1),
             reply: None,
+            start: None,
         },
         DraftText::new("one more thing").unwrap(),
     );

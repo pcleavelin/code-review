@@ -1,23 +1,24 @@
 use std::mem;
 
 use domain::{
-    CodePlace, Draft, DraftOn, FileId, FileRow, FileText, Line, LineKind, RelativePath, Side,
-    SourceLine, Span, Thread,
+    CodePlace, Draft, DraftOn, FileId, FileRow, FileText, Line, LineCount, LineKind, RelativePath,
+    Side, SourceLine, Span, Thread,
 };
-use ui::{Axis, Count, Id, Label, Px, Rect, Run, Scrollbar};
+use ui::{Axis, Button, Count, Icon, Id, Label, Px, Rect, Run, Scrollbar};
 
 use crate::action::Action;
 use crate::field::Which;
 use crate::grid::GUTTER;
-use crate::ids;
+use crate::ids::{self, Target};
 use crate::keys::{self, LineGesture};
 use crate::model::{HIT_LIMIT, HitsShown, Model};
-use crate::review::{ReviewAct, merged};
+use crate::nav::Aim;
+use crate::review::{Picking, ReviewAct, merged};
 use crate::text::{Counted, Noun};
 use crate::theme::{
-    ADDED_FILL, COMMENT_FRAME, DRAFT_FRAME, DRAFT_ROWS, DRAFTED_BAR, EDGE_SCROLL_BAND,
-    EDGE_SCROLL_MOST, FIELD, LINE_FIELD, LINES_SELECTED, ORANGE, PIXEL, RED, ROW_EXTRA,
-    SEARCH_FIELD, SOURCE_GUESS, TEXT, THREAD_BAR, WEAK,
+    ACCENT, ADDED_FILL, COMMENT_FRAME, DRAFT_FRAME, DRAFT_ROWS, DRAFTED_BAR, EDGE_SCROLL_BAND,
+    EDGE_SCROLL_MOST, FIELD, LINES_SELECTED, ORANGE, PIXEL, RED, ROW_EXTRA, SEARCH_FIELD,
+    SOURCE_GUESS, TEXT, THREAD_BAR, WEAK,
 };
 use crate::widgets::{
     AcrossBar, AcrossScroll, Chosen, CodeBlock, Coded, Container, Frame, Marks, Padding, Scroller,
@@ -30,14 +31,6 @@ fn source_toolbar(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
     frame.start(Container::Toolbar);
     frame.label(path.as_str(), TEXT);
     review::change_controls(model, frame, path);
-    frame.grow();
-    frame.label("line", WEAK);
-    frame.field(
-        &model.fields,
-        Which::GoToLine,
-        &Label::default(),
-        LINE_FIELD,
-    );
     frame.finish();
 }
 
@@ -198,6 +191,7 @@ fn insets<'inset>(
         .open
         .as_ref()
         .and_then(|open| open.conversation());
+    let mut threaded = Vec::new();
     for thread in conversation
         .into_iter()
         .flat_map(|known| known.in_file(path))
@@ -205,18 +199,29 @@ fn insets<'inset>(
         let Some(CodePlace { side, line, .. }) = thread.place.clone() else {
             continue;
         };
+        threaded.push(&thread.id);
+        let replies: usize = review::replies_to(model, thread)
+            .iter()
+            .map(|draft| 1 + draft.text.as_str().lines().count())
+            .sum();
         let tall: usize = thread
             .notes
             .iter()
             .map(|note| 1 + note.body.as_str().lines().count())
-            .sum();
+            .sum::<usize>()
+            + replies;
         all.push(Inset {
             at: within(place_at(&blocks, side, line)),
             height: row * Count::new(tall + 1) + COMMENT_FRAME,
             kind: InsetKind::Thread(thread),
         });
     }
-    for draft in model.review.drafts_in(path) {
+    for draft in model.review.drafts_in(path).filter(|draft| {
+        draft
+            .reply
+            .as_ref()
+            .is_none_or(|id| !threaded.contains(&id))
+    }) {
         let tall = 1 + draft.text.as_str().lines().count().max(1);
         all.push(Inset {
             at: within(place_at(&blocks, draft.side, draft.line)),
@@ -446,20 +451,42 @@ fn inset(
     match &inset.kind {
         InsetKind::Removed { lines, .. } => {
             frame.start(Container::Removed(inset.row_id()));
+            let picked = model
+                .review
+                .picked
+                .as_ref()
+                .filter(|picked| &picked.file == path);
+            let origin = picked.map(|picked| removed_target(picked.from).id());
+            let held = origin.is_some() && frame.ui.active() == origin;
             for gone in lines {
                 let old = gone.old;
-                let target = ids::DRAFT_REMOVED.with(&Label::new(format!("{}", old.number())));
                 let runs = vec![
                     Run::new(format!("{:5}-", old.number()), RED),
                     Run::new(gone.text.as_str(), TEXT),
                 ];
-                if frame.code_line(runs, target).clicked() {
-                    frame.push(Action::Review(ReviewAct::StartDraft(DraftOn {
-                        file: path.clone(),
-                        side: Side::Old,
-                        line: old,
-                        reply: None,
-                    })));
+                let marked = picked
+                    .filter(|picked| picked.lines().contains(old))
+                    .map(|_| LINES_SELECTED);
+                let line = frame.marked_code_line(runs, removed_target(old), marked);
+                let pointer = frame.ui.pointer();
+                let picking = if line.double_clicked() {
+                    frame.push(Action::Review(ReviewAct::StartDraftHere));
+                    None
+                } else if line.clicked() && pointer.mods.shift() {
+                    Some(Picking::Extend)
+                } else if line.clicked() {
+                    Some(Picking::Press)
+                } else if held && line.hovered() && pointer.down.contains(Button::Left) {
+                    Some(Picking::Drag)
+                } else {
+                    None
+                };
+                if let Some(picking) = picking {
+                    frame.push(Action::Review(ReviewAct::PickRemoved(
+                        path.clone(),
+                        old,
+                        picking,
+                    )));
                 }
             }
             frame.finish();
@@ -467,7 +494,7 @@ fn inset(
         InsetKind::Thread(thread) => {
             frame.start(Container::CommentRow(inset.row_id()));
             frame.indent(gutter);
-            review::thread_box(frame, thread);
+            review::thread_box(model, frame, thread);
             frame.finish();
         }
         InsetKind::Draft(draft) => {
@@ -485,25 +512,78 @@ fn inset(
     }
 }
 
-fn fold(frame: &mut Frame<'_>, path: &RelativePath, start: Line, end: Line) {
+fn removed_target(old: Line) -> Target {
+    ids::DRAFT_REMOVED.with(&Label::new(format!("{}", old.number())))
+}
+
+const FOLD_STEP: LineCount = LineCount::new(20);
+
+#[derive(Debug, PartialEq, Eq)]
+struct FoldButton {
+    target: Target,
+    run: Run,
+    span: Span,
+}
+
+fn fold_buttons(start: Line, end: Line, last: Line) -> Vec<FoldButton> {
     let count = end.value() - start.value() + 1;
-    let target = ids::FOLD.nth(Count::new(usize::try_from(start.value()).unwrap_or(0)));
-    let runs = vec![Run::new(
+    let all = Span::new(start, end).unwrap_or_else(|| Span::line(start));
+    let at = |line: Line| Count::new(usize::try_from(line.value()).unwrap_or(0));
+    let step = count.min(FOLD_STEP.value());
+    let mut buttons = Vec::new();
+    if end < last
+        && let Some(span) = Span::new(Line::new(end.value() + 1 - step), end)
+    {
+        buttons.push(FoldButton {
+            target: ids::FOLD_UP.nth(at(start)),
+            run: Run::new(
+                format!(" {} {step} ", Icon::MoreAbove.glyph().get()),
+                ACCENT,
+            ),
+            span,
+        });
+    }
+    if start > Line::new(0)
+        && let Some(span) = Span::new(start, Line::new(start.value() + step - 1))
+    {
+        buttons.push(FoldButton {
+            target: ids::FOLD_DOWN.nth(at(end)),
+            run: Run::new(
+                format!(" {} {step} ", Icon::MoreBelow.glyph().get()),
+                ACCENT,
+            ),
+            span,
+        });
+    }
+    if count > FOLD_STEP.value() || buttons.is_empty() {
+        buttons.push(FoldButton {
+            target: ids::FOLD.nth(at(start)),
+            run: Run::new(" all ", ACCENT),
+            span: all,
+        });
+    }
+    buttons
+}
+
+fn fold(frame: &mut Frame<'_>, path: &RelativePath, start: Line, end: Line, last: Line) {
+    let count = end.value() - start.value() + 1;
+    frame.start(Container::Folded);
+    frame.label_runs(vec![Run::new(format!("{:>5} ", "\u{2026}"), WEAK)]);
+    for FoldButton { target, run, span } in fold_buttons(start, end, last) {
+        if frame.inline_button(vec![run], target).clicked() {
+            frame.push(Action::Review(ReviewAct::Unfold(path.clone(), span)));
+        }
+        frame.attach_tip(target);
+    }
+    frame.label_runs(vec![Run::new(
         format!(
-            "{:>5} \u{2026} {count} unchanged line{} ({}-{}), click to show",
-            "",
+            " {count} unchanged line{} ({}-{})",
             if count == 1 { "" } else { "s" },
             start.number(),
             end.number()
         ),
         WEAK,
-    )];
-    frame.start(Container::Folded);
-    if frame.code_line(runs, target).clicked()
-        && let Some(span) = Span::new(start, end)
-    {
-        frame.push(Action::Review(ReviewAct::Unfold(path.clone(), span)));
-    }
+    )]);
     frame.finish();
 }
 
@@ -518,6 +598,7 @@ struct Shown<'shown> {
     file: FileId,
     path: &'shown RelativePath,
     width: Option<Px>,
+    last: Line,
 }
 
 struct Cut {
@@ -649,7 +730,7 @@ fn draw(
                 segments.push(segment);
             }
             Piece::Fold { start, end } => {
-                fold(frame, shown.path, start, end);
+                fold(frame, shown.path, start, end, shown.last);
                 drawn += placed.height;
             }
             Piece::Inset(number) => {
@@ -693,7 +774,7 @@ fn lit(model: &Model, rows: &[FileRow], all: &[Inset<'_>], path: &RelativePath) 
             .review
             .drafts_in(path)
             .filter(|draft| draft.side == Side::New)
-            .map(|draft| draft.line)
+            .flat_map(|draft| draft.lines().lines())
             .collect(),
         threaded: all
             .iter()
@@ -709,7 +790,30 @@ fn lit(model: &Model, rows: &[FileRow], all: &[Inset<'_>], path: &RelativePath) 
     }
 }
 
-fn scroll_offset(model: &Model, frame: &mut Frame<'_>, sheet: &Sheet, path: &RelativePath) -> Px {
+fn editor_offset(sheet: &Sheet, insets: &[Inset<'_>], offset: Px, height: Px) -> Option<Px> {
+    let editor = sheet.pieces.iter().find(|placed| match placed.piece {
+        Piece::Inset(number) => insets
+            .get(number.get())
+            .is_some_and(|inset| matches!(inset.kind, InsetKind::Editing(_))),
+        Piece::Code { .. } | Piece::Fold { .. } => false,
+    })?;
+    let bottom = editor.top + editor.height + sheet.row;
+    Some(if editor.top < offset {
+        (editor.top - sheet.row * Count::new(2)).max(Px::ZERO)
+    } else if bottom > offset + height {
+        (bottom - height).min(editor.top)
+    } else {
+        offset
+    })
+}
+
+fn scroll_offset(
+    model: &Model,
+    frame: &mut Frame<'_>,
+    sheet: &Sheet,
+    insets: &[Inset<'_>],
+    path: &RelativePath,
+) -> Px {
     let column_id = ids::source();
     let column = frame.ui.placement(column_id);
     let mut offset = model.scrolls.get(column_id);
@@ -729,7 +833,13 @@ fn scroll_offset(model: &Model, frame: &mut Frame<'_>, sheet: &Sheet, path: &Rel
                 .line_top(above)
                 .or_else(|| sheet.line_top(request.line))
                 .unwrap_or(Px::ZERO);
-            offset = target.min((sheet.total - height).max(Px::ZERO));
+            let editor = match request.aim {
+                Aim::Editor => editor_offset(sheet, insets, offset, height),
+                Aim::Line => None,
+            };
+            offset = editor
+                .unwrap_or(target)
+                .min((sheet.total - height).max(Px::ZERO));
             frame.push(Action::ScrolledToLine(request.ticket));
         } else {
             frame.push(Action::Review(ReviewAct::Reveal(
@@ -769,7 +879,7 @@ pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
             .map(Span::line),
     );
     let sheet = Sheet::build(&merged(spans), last, &all, row_height);
-    let offset = scroll_offset(model, frame, &sheet, path);
+    let offset = scroll_offset(model, frame, &sheet, &all, path);
     source_toolbar(model, frame, path);
     let scrolled = frame.scroll_column(ids::source(), offset, Scroller::Plain, Some(FIELD));
     let selection = model.nav.lines();
@@ -804,6 +914,7 @@ pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
         file,
         path,
         width: scrolled.interaction.rect().map(|rect| rect.width),
+        last,
     };
     let marks = Marks {
         background: &background,
@@ -818,9 +929,16 @@ pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
         &sheet,
         &all,
         &marks,
-        Band {
-            offset: scrolled.offset,
-            bottom: scrolled.offset + view,
+        if frame.ui.holding() {
+            Band {
+                offset: (scrolled.offset - view).max(Px::ZERO),
+                bottom: scrolled.offset + view * 2,
+            }
+        } else {
+            Band {
+                offset: scrolled.offset,
+                bottom: scrolled.offset + view,
+            }
         },
     );
     if !segments.is_empty() {
@@ -977,4 +1095,52 @@ pub(super) fn search_view(model: &Model, frame: &mut Frame<'_>) {
     }
     frame.rows_after(count, &window, row_height, Px::ZERO);
     frame.finish();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shown(start: u32, end: u32, last: u32) -> Vec<(Target, Span)> {
+        fold_buttons(Line::new(start), Line::new(end), Line::new(last))
+            .into_iter()
+            .map(|button| (button.target, button.span))
+            .collect()
+    }
+
+    fn span(start: u32, end: u32) -> Span {
+        Span::new(Line::new(start), Line::new(end)).unwrap()
+    }
+
+    #[test]
+    fn a_long_gap_between_changes_opens_twenty_lines_from_either_side_or_all() {
+        assert_eq!(
+            shown(100, 199, 500),
+            vec![
+                (ids::FOLD_UP.nth(Count::new(100)), span(180, 199)),
+                (ids::FOLD_DOWN.nth(Count::new(199)), span(100, 119)),
+                (ids::FOLD.nth(Count::new(100)), span(100, 199)),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_top_and_the_end_of_a_file_open_only_toward_their_change() {
+        assert_eq!(
+            shown(0, 99, 500).first(),
+            Some(&(ids::FOLD_UP.nth(Count::new(0)), span(80, 99)))
+        );
+        assert_eq!(
+            shown(400, 500, 500).first(),
+            Some(&(ids::FOLD_DOWN.nth(Count::new(500)), span(400, 419)))
+        );
+    }
+
+    #[test]
+    fn a_short_gap_keeps_its_arrow_where_it_was_and_opens_whole() {
+        assert_eq!(
+            shown(486, 500, 500),
+            vec![(ids::FOLD_DOWN.nth(Count::new(500)), span(486, 500))]
+        );
+    }
 }

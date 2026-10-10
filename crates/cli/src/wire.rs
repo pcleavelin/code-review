@@ -5,7 +5,7 @@ use std::mem;
 use clap::{Args, CommandFactory, Parser};
 use domain::{
     ChangeKind, Conversation, Decision, Draft, FileChange, LineKind, NoteKind, PrNumber, Progress,
-    Review, Seen, Side, Standing, Thread, ThreadState,
+    Review, Seen, Side, Span, Standing, Thread, ThreadState,
 };
 use session::{Entry, Opened, Pinned, PullAddress, RepoName};
 
@@ -124,6 +124,8 @@ pub(crate) struct CommentArguments {
     pub(crate) old: bool,
     #[arg(long, value_name = "THREAD")]
     pub(crate) reply: Option<String>,
+    #[arg(long, value_name = "LINE", value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) from: Option<u32>,
 }
 
 #[derive(Args, Debug)]
@@ -465,10 +467,18 @@ pub(crate) fn draft(output: &mut Output, draft: &Draft) {
         "draft {}  {}:{} ({}){reply}  {}",
         draft.id,
         draft.file,
-        draft.line.number(),
+        lines_word(draft.lines()),
         side_word(draft.side),
         draft.text
     );
+}
+
+fn lines_word(lines: Span) -> String {
+    if lines.start() == lines.end() {
+        lines.end().number().to_string()
+    } else {
+        format!("{}-{}", lines.start().number(), lines.end().number())
+    }
 }
 
 pub(crate) fn drafts(output: &mut Output, review: &Review) {
