@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted }
+        $m! { gui: open, deleted, split }
     };
 }
 
@@ -164,6 +164,59 @@ quit
             "DUMP rect draft-box/1 = Some(",
             "DUMP rect draft-box/2 = None",
             "DUMP rect draft-box/2 = Some(",
+        ],
+    }
+}
+
+pub(crate) fn split() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/2
+idle
+wait 2
+click-id layout
+idle
+wait 3
+rect table/6
+mouse <<DUMP rect table/6|569,56>>
+wait 60
+idle
+wait 3
+dump
+shot {shots}/hover.png
+hover-id table/6
+swipe -400 0
+wait 3
+dump
+shot {shots}/sideways.png
+swipe 4000 0
+wait 3
+rect table/6
+click <<DUMP rect table/6|569,56>> ctrl
+wait 3
+idle
+dump
+click-id tab@Commits
+wait 2
+click-id commit/0
+idle
+wait 3
+click-id change/1
+idle
+wait 3
+rect table/6
+click <<DUMP rect table/6|569,56>> alt
+wait 3
+idle
+dump
+shot {shots}/commit.png
+quit
+",
+        shows: &[
+            "DUMP tip=Some(\"area\")",
+            "DUMP across table off=",
+            "DUMP tab=Source focus=Some(\"area\") file=Some(\"src/shapes.rs\")",
+            "peek=Some(Sym(SymRef",
         ],
     }
 }

@@ -3,7 +3,7 @@ use std::io::{self, Write as _};
 use std::iter;
 
 use platform::ScriptLine;
-use ui::{Axis, Id, Ui};
+use ui::{Axis, Id, Px, Ui};
 
 use crate::field::{Fields, Which};
 use crate::ids;
@@ -220,6 +220,10 @@ impl Dump for Scrolls {
                     placement.content
                 ));
             }
+        }
+        let table = context.model.across.get(ids::TABLE.id());
+        if table > Px::ZERO {
+            lines.line(format_args!("across table off={table}"));
         }
     }
 }

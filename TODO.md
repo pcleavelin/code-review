@@ -31,9 +31,10 @@
     behind its web session, not the API token. Animated pictures show their first frame.
 11. Markdown: a table wider than its box is clipped rather than wrapped; HTML other than
     `<img>` is dropped to its text; footnotes and math are plain text.
-12. The split view and a commit's view draw lines without go to definition or hover, and
-    clip long lines instead of scrolling sideways. Comments are not taken in a commit's view
-    (forges anchor them to the pull request's head here).
+12. The old side of the split view, and a commit's view of a file a later commit changes again,
+    draw lines without go to definition or hover: neither text is the tree the index and the
+    servers read. Trigger: a review that needs to follow a removed call. Comments are not taken
+    in a commit's view (forges anchor them to the pull request's head here).
 
 ## Inherited from codemap
 
