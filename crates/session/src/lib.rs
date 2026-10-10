@@ -27,6 +27,7 @@ pub enum SessionError {
         now: CommitId,
     },
     NothingToSubmit(PrNumber),
+    NothingToDrop(PrNumber),
     NoPins,
     NoPinStore,
     Pins(io::Error),
@@ -70,6 +71,10 @@ impl fmt::Display for SessionError {
             Self::NothingToSubmit(number) => write!(
                 formatter,
                 "pull request {number} has no draft comments and no summary to submit"
+            ),
+            Self::NothingToDrop(number) => write!(
+                formatter,
+                "pull request {number} has no tree and no base or head ref here"
             ),
             Self::NoPins => formatter.write_str(
                 "no repository: run this inside a clone, or pin one with 'review pin <path or URL>'",

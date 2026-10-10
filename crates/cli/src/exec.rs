@@ -1,5 +1,5 @@
 use domain::{CommitId, DraftId, FileChange, PrNumber, RelativePath};
-use session::{Desk, Pinned, PullAddress, Repo, SessionError};
+use session::{Desk, Pinned, PullAddress, Repo, RepoName, SessionError};
 
 use crate::convert::{Files, Filter, Marking, Request};
 use crate::failure::Failure;
@@ -16,6 +16,7 @@ pub enum Touched {
     Nothing,
     Pins,
     Review(PrNumber),
+    Dropped(RepoName, PrNumber),
 }
 
 fn change_of<'changes>(
@@ -114,6 +115,12 @@ impl Run<'_> {
                 Ok(Touched::Nothing)
             }
             Request::Uncomment(address, id) => self.uncomment(&address, id),
+            Request::Drop(address) => {
+                let repo = self.repo(&address)?;
+                let tree = repo.drop_fetched(address.number)?;
+                wire::dropped(self.output, address.number, &tree);
+                Ok(Touched::Dropped(repo.name().clone(), address.number))
+            }
             Request::Submit {
                 address,
                 decision,

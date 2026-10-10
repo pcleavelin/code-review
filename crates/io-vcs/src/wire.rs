@@ -171,6 +171,18 @@ pub(crate) fn add_worktree(tree: &str, commit: &str) -> CommandLine {
     git(&["worktree", "add", "--detach", "--force", tree, commit])
 }
 
+pub(crate) fn remove_worktree(tree: &str) -> CommandLine {
+    git(&["worktree", "remove", "--force", "--force", tree])
+}
+
+pub(crate) fn prune_worktrees() -> CommandLine {
+    git(&["worktree", "prune"])
+}
+
+pub(crate) fn delete_ref(reference: &str) -> CommandLine {
+    git(&["update-ref", "-d", reference])
+}
+
 pub(crate) fn check_out(commit: &str) -> CommandLine {
     git(&["checkout", "--detach", "--force", "--quiet", commit])
 }

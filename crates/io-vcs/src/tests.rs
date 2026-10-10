@@ -172,6 +172,64 @@ fn a_pull_request_is_fetched_diffed_against_its_merge_base_and_checked_out() {
     assert!(tree.join("later.txt").exists());
 }
 
+fn registered_worktrees(scratch: &Scratch) -> Vec<String> {
+    fs::read_dir(scratch.0.join(".git/worktrees"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
+#[test]
+fn a_dropped_pull_request_loses_its_tree_its_worktree_entry_and_its_refs() {
+    if !available("git") {
+        return;
+    }
+    let forge = Scratch::new("drop-forge");
+    forge.run("git", &["init", "-q", "-b", "main"]);
+    forge.put("a.txt", "one\n");
+    commit_all(&forge, "base");
+    forge.run("git", &["checkout", "-q", "-b", "feature"]);
+    forge.put("a.txt", "two\n");
+    commit_all(&forge, "change");
+    let local = Scratch::new("drop-local");
+    local.run("git", &["init", "-q"]);
+    local.run(
+        "git",
+        &["remote", "add", "origin", forge.0.to_str().unwrap()],
+    );
+    let vcs = Vcs::detect(&local.root()).unwrap();
+    let fetch = |number: u64| {
+        vcs.fetch(
+            &Remote::new("origin"),
+            PrNumber::new(number).unwrap(),
+            &RefName::new("refs/heads/feature"),
+            &BranchName::new("main"),
+        )
+        .unwrap()
+    };
+    let (seven, eight) = (PrNumber::new(7).unwrap(), PrNumber::new(8).unwrap());
+    let kept = local.0.join("trees/8");
+    vcs.check_out(&kept, &fetch(8).head).unwrap();
+    let tree = local.0.join("trees/7");
+    vcs.check_out(&tree, &fetch(7).head).unwrap();
+    local.put("trees/7/target/debug/built", "untracked output");
+    local.put("trees/7/a.txt", "edited in the tree\n");
+
+    vcs.drop_fetched(seven, &tree).unwrap();
+    assert!(!tree.exists());
+    assert!(vcs.fetched(seven).is_err());
+    assert!(vcs.fetched(eight).is_ok());
+    assert!(kept.join("a.txt").exists());
+    assert_eq!(registered_worktrees(&local), ["8"]);
+
+    vcs.check_out(&tree, &fetch(7).head).unwrap();
+    assert_eq!(fs::read_to_string(tree.join("a.txt")).unwrap(), "two\n");
+    fs::remove_dir_all(&kept).unwrap();
+    vcs.drop_fetched(eight, &kept).unwrap();
+    assert!(vcs.fetched(eight).is_err());
+    assert_eq!(registered_worktrees(&local), ["7"]);
+}
+
 #[test]
 fn a_pull_requests_commits_are_listed_oldest_first_and_each_diffs_against_its_parent() {
     if !available("git") {

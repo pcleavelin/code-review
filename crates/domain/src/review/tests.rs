@@ -198,23 +198,30 @@ fn a_pull_request_is_new_until_looked_at_and_updated_once_its_head_moves() {
     let files = vec![replace_b_with_x()];
     let mut review = Review::default();
     assert_eq!(
-        review.standing(&first, review.progress(&files)),
+        review.standing(&first, Some(review.progress(&files))),
         Standing::New
     );
     review.look(first.clone());
     assert_eq!(
-        review.standing(&first, review.progress(&files)),
+        review.standing(&first, Some(review.progress(&files))),
         Standing::Reviewing
     );
     review.mark(&files[0], first.clone());
     assert_eq!(
-        review.standing(&first, review.progress(&files)),
+        review.standing(&first, Some(review.progress(&files))),
         Standing::Reviewed
     );
     assert_eq!(
-        review.standing(&moved, review.progress(&files)),
+        review.standing(&moved, Some(review.progress(&files))),
         Standing::Updated
     );
+}
+
+#[test]
+fn a_looked_at_review_whose_changes_are_not_fetched_here_is_never_reviewed() {
+    let mut review = Review::default();
+    review.look(commit());
+    assert_eq!(review.standing(&commit(), None), Standing::Reviewing);
 }
 
 #[test]
@@ -234,7 +241,7 @@ fn a_pending_draft_keeps_a_fully_seen_review_open() {
         DraftText::new("one more thing").unwrap(),
     );
     assert_eq!(
-        review.standing(&commit(), review.progress(&files)),
+        review.standing(&commit(), Some(review.progress(&files))),
         Standing::Reviewing
     );
 }

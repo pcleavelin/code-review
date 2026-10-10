@@ -277,6 +277,21 @@ impl Vcs {
         Ok(())
     }
 
+    pub fn drop_fetched(&self, number: PrNumber, tree: &Path) -> Result<(), VcsError> {
+        if tree.exists() {
+            let place = tree.to_string_lossy();
+            Self::run(&wire::remove_worktree(&place), self.root.as_path())?;
+        }
+        Self::run(&wire::prune_worktrees(), self.root.as_path())?;
+        for end in [wire::HEAD_END, wire::BASE_END] {
+            Self::run(
+                &wire::delete_ref(&wire::local_ref(number.get(), end)),
+                self.root.as_path(),
+            )?;
+        }
+        Ok(())
+    }
+
     fn run(line: &CommandLine, directory: &Path) -> Result<Captured, VcsError> {
         let invocation = Invocation::from(line);
         let output = Process::run(&invocation.program, &invocation.arguments, directory)

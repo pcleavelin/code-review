@@ -163,7 +163,7 @@ impl Repo {
                     .map(|opened| opened.review.progress(&opened.changes));
                 Entry {
                     repo: self.name.clone(),
-                    standing: review.standing(&pull.head_commit, progress.unwrap_or_default()),
+                    standing: review.standing(&pull.head_commit, progress),
                     drafts: review.drafts().to_vec(),
                     progress,
                     pull,
@@ -214,6 +214,15 @@ impl Repo {
         let opened = self.state(number)?;
         self.vcs.check_out(&opened.tree, &opened.head)?;
         Ok(opened)
+    }
+
+    pub fn drop_fetched(&self, number: PrNumber) -> Result<PathBuf, SessionError> {
+        let tree = self.store.tree(number);
+        if self.vcs.fetched(number).is_err() && !tree.exists() {
+            return Err(SessionError::NothingToDrop(number));
+        }
+        self.vcs.drop_fetched(number, &tree)?;
+        Ok(tree)
     }
 
     pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, SessionError> {

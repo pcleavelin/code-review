@@ -24,8 +24,6 @@
    to scan.
 7. Opening a pull request runs `index::build` on its tree in the background but the window
    starts with a blocking `index::build` of the working copy (codemap's TODO 5 still holds).
-8. The trees under `.git/code-review/trees` are never removed; `git worktree prune` after
-   deleting one. Add a command to drop a finished review's tree and refs.
 9. A deleted file's view is not virtualised: every removed line is laid out each frame.
 
 10. Pictures are fetched without the forge's token, so a private repository's attachments

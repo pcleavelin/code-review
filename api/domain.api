@@ -261,7 +261,7 @@ review::state::pub struct Review { marks: BTreeMap<RelativePath, Mark>, drafts: 
 review::state::pub fn new( marks: BTreeMap<RelativePath, Mark>, drafts: Vec<Draft>, looked: Option<CommitId>, ) -> Self
 review::state::pub const fn looked(&self) -> Option<&CommitId>
 review::state::pub fn look(&mut self, head: CommitId)
-review::state::pub fn standing(&self, head: &CommitId, progress: Progress) -> Standing
+review::state::pub fn standing(&self, head: &CommitId, progress: Option<Progress>) -> Standing
 review::state::pub const fn marks(&self) -> &BTreeMap<RelativePath, Mark>
 review::state::pub fn drafts(&self) -> &[Draft]
 review::state::pub fn seen(&self, change: &FileChange) -> Seen

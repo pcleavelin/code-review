@@ -50,6 +50,7 @@ pub(crate) enum Request {
         decision: Decision,
         summary: Option<DraftText>,
     },
+    Drop(PullAddress),
 }
 
 fn files(arguments: &FilesArguments) -> Files {
@@ -119,6 +120,7 @@ pub(crate) fn request(command: Command) -> Result<Request, Failure> {
         Command::Uncomment(arguments) => {
             Request::Uncomment(arguments.pr, DraftId::new(arguments.id))
         }
+        Command::Drop(arguments) => Request::Drop(arguments.pr),
         Command::Submit(arguments) => Request::Submit {
             address: arguments.pr,
             decision: if arguments.approve {

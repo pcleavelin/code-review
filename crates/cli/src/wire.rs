@@ -1,6 +1,7 @@
 use std::fmt;
 use std::iter;
 use std::mem;
+use std::path::Path;
 
 use clap::{Args, CommandFactory, Parser};
 use domain::{
@@ -67,6 +68,10 @@ pub(crate) enum Command {
         about = "<pr> [summary] [--approve|--request-changes]  send the drafts to the forge as one review"
     )]
     Submit(SubmitArguments),
+    #[command(
+        about = "<pr>                             remove the pull request's tree and its base and head refs; its review stays"
+    )]
+    Drop(PrArguments),
 }
 
 fn parse_pr(text: &str) -> Result<PullAddress, String> {
@@ -492,6 +497,14 @@ pub(crate) fn drafts(output: &mut Output, review: &Review) {
 
 pub(crate) fn removed(output: &mut Output, removed: &Draft) {
     write_line!(output, "removed draft {}", removed.id);
+}
+
+pub(crate) fn dropped(output: &mut Output, number: PrNumber, tree: &Path) {
+    write_line!(
+        output,
+        "dropped #{number}: removed {} and its refs; its review stays, and 'open' fetches it again",
+        tree.display()
+    );
 }
 
 pub(crate) fn submitted(

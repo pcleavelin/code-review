@@ -120,7 +120,9 @@ impl Drop for Fixture {
 }
 
 mod scenario {
-    use super::Fixture;
+    use std::fs;
+
+    use super::{Fixture, git};
 
     pub(super) fn offline_review(fixture: &Fixture) {
         let changes = fixture.run(&["changes", "1"]);
@@ -174,6 +176,54 @@ mod scenario {
 
         let unseen = fixture.run(&["unseen", "1", "new.txt"]);
         assert_eq!(unseen.stdout, "[ ] new.txt\n");
+
+        let tree = fixture.local.join(".git/code-review/trees/1");
+        git(
+            &fixture.local,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                tree.to_str().unwrap(),
+                "refs/code-review/1/head",
+            ],
+        );
+        fs::write(tree.join("built.o"), "untracked").unwrap();
+        let dropped = fixture.run(&["drop", "1"]);
+        assert_eq!(dropped.code, Some(0), "{}", dropped.stderr);
+        assert!(
+            dropped.stdout.starts_with("dropped #1: removed "),
+            "{}",
+            dropped.stdout
+        );
+        assert!(!tree.exists());
+        assert!(!fixture.local.join(".git/worktrees/1").exists());
+        let gone = fixture.run(&["changes", "1"]);
+        assert!(gone.stderr.contains("has not been fetched yet"));
+        let kept = fixture.run(&["drafts", "1"]);
+        assert_eq!(kept.stdout, "draft 2  a.txt:2 (old)  was fine\n");
+        let again = fixture.run(&["drop", "1"]);
+        assert_eq!(again.code, Some(2));
+        assert!(
+            again
+                .stderr
+                .contains("pull request 1 has no tree and no base or head ref here"),
+            "{}",
+            again.stderr
+        );
+        git(
+            &fixture.local,
+            &[
+                "fetch",
+                "-q",
+                "origin",
+                "+refs/heads/feature:refs/code-review/1/head",
+                "+refs/heads/main:refs/code-review/1/base",
+            ],
+        );
+        let back = fixture.run(&["changes", "1"]);
+        assert!(back.stdout.contains("2/3 seen"), "{}", back.stdout);
     }
 
     pub(super) fn refusals(fixture: &Fixture) {

@@ -334,6 +334,7 @@ impl App {
                 model.console.failed(&text);
             }
             Ok(cli::Touched::Pins) => self.list_pulls(),
+            Ok(cli::Touched::Dropped(name, number)) => self.dropped(&name, number),
             Ok(cli::Touched::Nothing | cli::Touched::Review(_)) => {}
         }
     }

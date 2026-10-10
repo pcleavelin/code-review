@@ -20,3 +20,4 @@ pub fn commits(&self, base: &CommitId, head: &CommitId) -> Result<Vec<Commit>, V
 pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, VcsError>
 pub fn read_at(&self, commit: &CommitId, path: &RelativePath) -> Result<FileText, VcsError>
 pub fn check_out(&self, tree: &Path, commit: &CommitId) -> Result<(), VcsError>
+pub fn drop_fetched(&self, number: PrNumber, tree: &Path) -> Result<(), VcsError>

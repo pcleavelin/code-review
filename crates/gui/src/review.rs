@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use domain::{
     CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn, DraftText,
-    FileChange, FileRow, FileText, Forge, Hunk, Line, LineKind, Linked, PrNumber, PullRequest,
-    RelativePath, Root, Seen, Side, Span, Standing, WebLink,
+    FileChange, FileRow, FileText, Forge, Hunk, Index, Line, LineKind, Linked, PrNumber,
+    PullRequest, RelativePath, Root, Seen, Side, Span, Standing, WebLink,
 };
 use index::Indexed;
 use io_process::{Argument, Opener};
@@ -1146,6 +1146,32 @@ impl App {
         self.model.set_tab(Tab::Review);
         self.ask_talk();
         self.start_backend();
+        self.list_pulls();
+    }
+
+    pub(crate) fn dropped(&mut self, name: &RepoName, number: PrNumber) {
+        let shown = self
+            .model
+            .review
+            .open
+            .as_ref()
+            .is_some_and(|open| open.repo.name() == name && open.opened.number == number);
+        if shown {
+            self.services = Services::new(&self.start);
+            self.model.work = WorkState::default();
+            self.model.peek = None;
+            self.model.hits.clear();
+            self.model.forget_place();
+            self.with_index_change(|app| app.model.index = Index::default());
+            let review = &mut self.model.review;
+            review.stamp = None;
+            review.draft = None;
+            review.whole.clear();
+            review.unfolded.clear();
+            review.diffs.forget();
+            review.open = None;
+            self.model.set_tab(Tab::Inbox);
+        }
         self.list_pulls();
     }
 
