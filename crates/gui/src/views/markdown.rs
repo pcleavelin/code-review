@@ -11,7 +11,7 @@ use crate::action::Action;
 use crate::diffs::Loading;
 use crate::grid::{self, Gutter};
 use crate::ids;
-use crate::markdown::{self, Block, Goal, Lead, Piece, Tone};
+use crate::markdown::{self, Align, Block, Cell, Goal, Lead, Piece, Row, Tone};
 use crate::model::Model;
 use crate::review::ReviewAct;
 use crate::theme::{
@@ -214,6 +214,53 @@ fn resolve(model: &Model, goal: &Goal) -> Option<WebLink> {
     }
 }
 
+fn cell_columns(cell: &Cell) -> Count {
+    Count::new(
+        cell.pieces()
+            .iter()
+            .map(|piece| piece.text.as_str().chars().count())
+            .sum(),
+    )
+}
+
+fn row_pieces(row: &Row, widths: &[Count], aligns: &[Align], tone: Tone) -> Vec<Piece> {
+    let space = |columns: usize| Piece {
+        text: Label::new(" ".repeat(columns)),
+        tone: Tone::Plain,
+        goal: None,
+    };
+    let empty = Cell::default();
+    let mut pieces = Vec::new();
+    for (column, width) in widths.iter().enumerate() {
+        if column > 0 {
+            pieces.push(Piece {
+                text: Label::new(" \u{2502} "),
+                tone: Tone::Struck,
+                goal: None,
+            });
+        }
+        let cell = row.cells().get(column).unwrap_or(&empty);
+        let slack = width.get().saturating_sub(cell_columns(cell).get());
+        let before = match aligns.get(column).copied().unwrap_or(Align::Left) {
+            Align::Left => 0,
+            Align::Right => slack,
+            Align::Center => slack / 2,
+        };
+        pieces.push(space(before));
+        pieces.extend(cell.pieces().iter().map(|piece| Piece {
+            text: Label::new(piece.text.as_str().replace('\n', " ")),
+            tone: if piece.tone == Tone::Plain {
+                tone
+            } else {
+                piece.tone
+            },
+            goal: piece.goal.clone(),
+        }));
+        pieces.push(space(slack - before));
+    }
+    pieces
+}
+
 struct Writer<'model> {
     model: &'model Model,
     key: Label,
@@ -300,6 +347,58 @@ impl Writer<'_> {
                 vec![Run::new(lead_text, WEAK)]
             };
             self.line(frame, runs, line, &found.goals, base, *number);
+            *number += Count::new(1);
+        }
+    }
+
+    fn table(
+        &self,
+        frame: &mut Frame<'_>,
+        aligns: &[Align],
+        header: &Row,
+        rows: &[Row],
+        number: &mut Count,
+    ) {
+        let columns = rows
+            .iter()
+            .chain([header])
+            .map(|row| row.cells().len())
+            .max()
+            .unwrap_or(0);
+        let widths: Vec<Count> = (0..columns)
+            .map(|column| {
+                rows.iter()
+                    .chain([header])
+                    .map(|row| row.cells().get(column).map_or(Count::ZERO, cell_columns))
+                    .max()
+                    .unwrap_or(Count::ZERO)
+            })
+            .collect();
+        let rule: Vec<Piece> = vec![Piece {
+            text: Label::new(
+                widths
+                    .iter()
+                    .map(|width| "\u{2500}".repeat(width.get()))
+                    .collect::<Vec<_>>()
+                    .join("\u{2500}\u{253c}\u{2500}"),
+            ),
+            tone: Tone::Struck,
+            goal: None,
+        }];
+        let lines = [row_pieces(header, &widths, aligns, Tone::Strong), rule]
+            .into_iter()
+            .chain(
+                rows.iter()
+                    .map(|row| row_pieces(row, &widths, aligns, Tone::Plain)),
+            );
+        for pieces in lines {
+            let found = tokens(&pieces);
+            let line: Vec<Token> = found
+                .all
+                .into_iter()
+                .filter(|token| token.kind != Kind::Break)
+                .collect();
+            self.line(frame, Vec::new(), &line, &found.goals, TEXT, *number);
             *number += Count::new(1);
         }
     }
@@ -425,6 +524,11 @@ pub(super) fn markdown(model: &Model, frame: &mut Frame<'_>, written: &Prose, ke
         }
         match &block {
             Block::Text { lead, pieces } => writer.text(frame, lead, pieces, &mut number),
+            Block::Table {
+                aligns,
+                header,
+                rows,
+            } => writer.table(frame, aligns, header, rows, &mut number),
             Block::Code { language, text } => writer.code(frame, language, text, number),
             Block::Picture { link, alt } => writer.picture(frame, link, alt, number),
             Block::Rule => {

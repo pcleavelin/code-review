@@ -136,3 +136,36 @@ fn a_fenced_block_keeps_its_language_and_text() {
         }]
     );
 }
+
+#[test]
+fn a_table_keeps_its_header_rows_and_column_alignment() {
+    let parsed = blocks("| a | b | c |\n|:--|--:|:-:|\n| 1 | `x` | **y** |\n| 2 | | z |\n");
+    let [
+        Block::Table {
+            aligns,
+            header,
+            rows,
+        },
+    ] = parsed.as_slice()
+    else {
+        panic!("{parsed:?}");
+    };
+    assert_eq!(aligns, &[Align::Left, Align::Right, Align::Center]);
+    let cell = |row: &Row, column: usize| -> String {
+        row.cells()
+            .get(column)
+            .map(|cell| {
+                cell.pieces()
+                    .iter()
+                    .map(|piece| piece.text.as_str())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(cell(header, 1), "b");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].cells()[1].pieces()[0].tone, Tone::Code);
+    assert_eq!(rows[0].cells()[2].pieces()[0].tone, Tone::Strong);
+    assert_eq!(cell(&rows[1], 1), "");
+    assert_eq!(cell(&rows[1], 2), "z");
+}

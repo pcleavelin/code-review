@@ -2,7 +2,7 @@ use std::mem;
 use std::sync::LazyLock;
 
 use domain::{CommitId, Linked, Login, PrNumber, Prose, WebLink};
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use regex::{Captures, Regex};
 use ui::{Count, Label};
 
@@ -36,11 +36,50 @@ pub(crate) enum Lead {
     Quote(Count),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Align {
+    Left,
+    Right,
+    Center,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Cell(Vec<Piece>);
+
+impl Cell {
+    pub(crate) fn pieces(&self) -> &[Piece] {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Row(Vec<Cell>);
+
+impl Row {
+    pub(crate) fn cells(&self) -> &[Cell] {
+        &self.0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Block {
-    Text { lead: Lead, pieces: Vec<Piece> },
-    Code { language: Label, text: Label },
-    Picture { link: WebLink, alt: Label },
+    Text {
+        lead: Lead,
+        pieces: Vec<Piece>,
+    },
+    Table {
+        aligns: Vec<Align>,
+        header: Row,
+        rows: Vec<Row>,
+    },
+    Code {
+        language: Label,
+        text: Label,
+    },
+    Picture {
+        link: WebLink,
+        alt: Label,
+    },
     Rule,
 }
 
@@ -168,7 +207,11 @@ struct PictureDraft {
     alt: Gathered,
 }
 
-struct Cell(Vec<Piece>);
+struct TableDraft {
+    aligns: Vec<Align>,
+    header: Row,
+    rows: Vec<Row>,
+}
 
 #[derive(Default)]
 struct State {
@@ -183,6 +226,7 @@ struct State {
     code: Option<CodeDraft>,
     picture: Option<PictureDraft>,
     cells: Vec<Cell>,
+    table: Option<TableDraft>,
 }
 
 #[derive(Default)]
@@ -339,29 +383,25 @@ impl Reader {
                     alt: Gathered::default(),
                 });
             }
-            Tag::TableRow | Tag::TableHead => {
+            Tag::Table(aligns) => {
                 self.flush();
-                self.0.cells.clear();
+                self.0.table = Some(TableDraft {
+                    aligns: aligns
+                        .iter()
+                        .map(|align| match align {
+                            Alignment::Right => Align::Right,
+                            Alignment::Center => Align::Center,
+                            Alignment::Left | Alignment::None => Align::Left,
+                        })
+                        .collect(),
+                    header: Row::default(),
+                    rows: Vec::new(),
+                });
             }
+            Tag::TableRow | Tag::TableHead => self.0.cells.clear(),
             Tag::TableCell => self.0.pieces.clear(),
             _ => {}
         }
-    }
-
-    fn end_row(&mut self) {
-        let cells = mem::take(&mut self.0.cells);
-        for (position, cell) in cells.into_iter().enumerate() {
-            if position > 0 {
-                self.0.pieces.push(Piece {
-                    text: Label::new(" \u{2502} "),
-                    tone: Tone::Struck,
-                    goal: None,
-                });
-            }
-            self.0.pieces.extend(cell.0);
-        }
-        self.0.lead = Some(Lead::Paragraph);
-        self.flush();
     }
 
     fn end(&mut self, tag: TagEnd) {
@@ -402,7 +442,27 @@ impl Reader {
                 let cell = Cell(mem::take(&mut self.0.pieces));
                 self.0.cells.push(cell);
             }
-            TagEnd::TableRow | TagEnd::TableHead => self.end_row(),
+            TagEnd::TableHead => {
+                let header = Row(mem::take(&mut self.0.cells));
+                if let Some(table) = self.0.table.as_mut() {
+                    table.header = header;
+                }
+            }
+            TagEnd::TableRow => {
+                let row = Row(mem::take(&mut self.0.cells));
+                if let Some(table) = self.0.table.as_mut() {
+                    table.rows.push(row);
+                }
+            }
+            TagEnd::Table => {
+                if let Some(table) = self.0.table.take() {
+                    self.0.blocks.push(Block::Table {
+                        aligns: table.aligns,
+                        header: table.header,
+                        rows: table.rows,
+                    });
+                }
+            }
             _ => {}
         }
     }
