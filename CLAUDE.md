@@ -115,7 +115,7 @@ rule applies.
   lost to a crash and the CLI and an open window see each other's changes.
 - **Seen follows the diff, not the commit.** A force-push that leaves a file's diff alone keeps
   it seen; one that changes it brings it back. The mark also keeps the head commit it was made
-  at, for a later "what changed since I looked".
+  at, so a file changed since seen shows what changed since that commit.
 - **The diff is drawn on the head file, folded to the change.** The Source view shows the head
   file with added lines tinted and removed lines, threads (outdated ones at their original
   line) and drafts inserted where they belong; lines more than three away from a change fold

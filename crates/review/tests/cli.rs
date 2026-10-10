@@ -18,7 +18,7 @@ macro_rules! scenarios {
     )*};
 }
 
-scenarios!(offline_review, refusals, pinning, navigation);
+scenarios!(offline_review, refusals, pinning, navigation, since_seen);
 
 struct Fixture {
     forge: PathBuf,
@@ -246,6 +246,78 @@ mod scenario {
         );
         let back = fixture.run(&["changes", "1"]);
         assert!(back.stdout.contains("2/3 seen"), "{}", back.stdout);
+    }
+
+    pub(super) fn since_seen(fixture: &Fixture) {
+        fixture.run(&["seen", "1", "a.txt", "new.txt"]);
+        let forge = &fixture.forge;
+        git(forge, &["checkout", "-q", "feature"]);
+        fs::write(forge.join("a.txt"), "one\nTWO\nTHREE\n").unwrap();
+        git(
+            forge,
+            &["commit", "-q", "--amend", "-am", "change, amended"],
+        );
+        git(forge, &["checkout", "-q", "main"]);
+        let refetch = [
+            "fetch",
+            "-q",
+            "origin",
+            "+refs/heads/feature:refs/code-review/1/head",
+        ];
+        git(&fixture.local, &refetch);
+        let changes = fixture.run(&["changes", "1"]);
+        assert!(
+            changes.stdout.contains("[~]    +2    -2  a.txt"),
+            "{}",
+            changes.stdout
+        );
+
+        let since = fixture.run(&["diff", "1", "a.txt", "--since-seen"]);
+        assert_eq!(since.code, Some(0), "{}", since.stderr);
+        assert!(
+            since.stdout.starts_with("[~] a.txt since it was seen at "),
+            "{}",
+            since.stdout
+        );
+        assert!(
+            since.stdout.contains("    3       -three\n"),
+            "{}",
+            since.stdout
+        );
+        assert!(
+            since.stdout.contains("          3 +THREE\n"),
+            "{}",
+            since.stdout
+        );
+        assert!(!since.stdout.contains("two"), "{}", since.stdout);
+        let whole = fixture.run(&["diff", "1", "a.txt"]);
+        assert!(
+            whole.stdout.contains("    2       -two\n"),
+            "{}",
+            whole.stdout
+        );
+        let kept = fixture.run(&["diff", "1", "new.txt", "--since-seen"]);
+        assert_eq!(kept.stdout, "[x] new.txt\n");
+        let never = fixture.run(&["diff", "1", "gone.txt", "--since-seen"]);
+        assert!(
+            never.stdout.starts_with("[ ] gone.txt (deleted"),
+            "{}",
+            never.stdout
+        );
+
+        git(
+            &fixture.local,
+            &["reflog", "expire", "--expire=now", "--all"],
+        );
+        git(&fixture.local, &["gc", "-q", "--prune=now"]);
+        let gone = fixture.run(&["diff", "1", "a.txt", "--since-seen"]);
+        assert_eq!(gone.code, Some(2));
+        assert!(
+            gone.stderr.contains("a.txt was seen at ")
+                && gone.stderr.contains("which is no longer in the clone"),
+            "{}",
+            gone.stderr
+        );
     }
 
     pub(super) fn navigation(fixture: &Fixture) {

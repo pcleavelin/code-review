@@ -5,7 +5,7 @@ use regex::Regex;
 use session::{PinTarget, PullAddress, RepoName};
 
 use crate::failure::{Failure, Given};
-use crate::wire::{Command, CommentArguments, FilesArguments};
+use crate::wire::{Command, CommentArguments, FilesArguments, OldSide};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Marking {
@@ -68,7 +68,7 @@ pub(crate) enum Request {
     Open(PullAddress),
     Discussion(PullAddress),
     Changes(PullAddress),
-    Diff(PullAddress, Option<RelativePath>),
+    Diff(PullAddress, Option<RelativePath>, OldSide),
     Next(PullAddress),
     Mark(PullAddress, Files, Marking),
     Comment {
@@ -133,6 +133,11 @@ pub(crate) fn request(command: Command) -> Result<Request, Failure> {
         Command::Diff(arguments) => Request::Diff(
             arguments.pr,
             arguments.file.as_deref().map(RelativePath::new),
+            if arguments.since_seen {
+                OldSide::SeenHead
+            } else {
+                OldSide::Base
+            },
         ),
         Command::Next(arguments) => Request::Next(arguments.pr),
         Command::Seen(arguments) => {

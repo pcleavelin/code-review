@@ -221,6 +221,10 @@ impl Vcs {
         })
     }
 
+    pub fn has_commit(&self, commit: &CommitId) -> bool {
+        self.resolve(&RefName::new(commit.as_str())).is_ok()
+    }
+
     fn resolve(&self, reference: &RefName) -> Result<CommitId, VcsError> {
         let stdout = Self::run(&wire::resolve(reference.as_str()), self.root.as_path())?;
         commit(&stdout).ok_or_else(|| VcsError::NoCommit(reference.clone()))
@@ -235,6 +239,22 @@ impl Vcs {
             .into_iter()
             .map(file_change)
             .collect())
+    }
+
+    pub fn file_change(
+        &self,
+        from: &CommitId,
+        to: &CommitId,
+        path: &RelativePath,
+    ) -> Result<Option<FileChange>, VcsError> {
+        let stdout = Self::run(
+            &wire::file_diff(from.as_str(), to.as_str(), path.as_str()),
+            self.root.as_path(),
+        )?;
+        Ok(wire::parse_diff(&stdout.text())
+            .into_iter()
+            .map(file_change)
+            .next())
     }
 
     pub fn commits(&self, base: &CommitId, head: &CommitId) -> Result<Vec<Commit>, VcsError> {

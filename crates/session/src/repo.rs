@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use domain::{
-    Commit, CommitId, Conversation, Decision, Draft, DraftText, FileChange, FileText, Forge,
+    Commit, CommitId, Conversation, Decision, Draft, DraftText, FileChange, FileText, Forge, Mark,
     PrNumber, Progress, PullRequest, RelativePath, Review, Root, Seen, Standing,
 };
 use io_forge::{ForgeClient, Submitted};
@@ -223,6 +223,23 @@ impl Repo {
         }
         self.vcs.drop_fetched(number, &tree)?;
         Ok(tree)
+    }
+
+    pub fn since_seen(
+        &self,
+        opened: &Opened,
+        change: &FileChange,
+        mark: &Mark,
+    ) -> Result<Option<FileChange>, SessionError> {
+        if !self.vcs.has_commit(&mark.commit) {
+            return Err(SessionError::SeenHeadGone {
+                file: change.path().clone(),
+                head: mark.commit.clone(),
+            });
+        }
+        Ok(self
+            .vcs
+            .file_change(&mark.commit, &opened.head, change.path())?)
     }
 
     pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, SessionError> {

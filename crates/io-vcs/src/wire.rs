@@ -113,6 +113,23 @@ pub(crate) fn diff(base: &str, head: &str) -> CommandLine {
     ])
 }
 
+pub(crate) fn file_diff(from: &str, to: &str, path: &str) -> CommandLine {
+    git(&[
+        "-c",
+        "core.quotepath=off",
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--unified=3",
+        from,
+        to,
+        "--",
+        path,
+    ])
+}
+
 pub(crate) const FIELD: char = '\u{1f}';
 
 pub(crate) fn log(base: &str, head: &str) -> CommandLine {

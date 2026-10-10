@@ -16,9 +16,6 @@
    marked outdated, Forgejo's are grouped by line rather than by reply chain, and a Forgejo
    reply is a new comment on the same line. An outdated thread is listed in the Review tab but
    its line may have moved, so it is not drawn in the code.
-5. "What changed since I looked": the seen mark keeps the head commit it was made at, so a
-   file that turned "changed since seen" could show the interdiff against that commit instead
-   of the whole diff again. Trigger: re-reviewing a large pull request after a force-push.
 6. The Inbox shows open pull requests only and filters by words and standing; there is no
    "review requested from me" or "mine", which need the forge user. Trigger: an inbox too long
    to scan.
@@ -36,6 +33,12 @@
 12. The split view and a commit's view draw lines without go to definition or hover, and
     clip long lines instead of scrolling sideways. Comments are not taken in a commit's view
     (forges anchor them to the pull request's head here).
+13. What changed since a file was seen is shown from the CLI only (`diff <pr> <file>
+    --since-seen`); the window still shows the whole diff of a file changed since seen. The
+    head it was seen at lives only as long as git keeps the object: after a force-push no ref
+    holds it, so a `git gc` drops it and `--since-seen` says so. Keeping it (a ref per seen
+    head) is new stored data, the owner's decision. After a rebase, the base's own changes
+    to the file show as changed since too.
 
 ## Inherited from codemap
 

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use domain::{
     CommitId, Depth, DraftId, FileChange, FileId, Index, Language, Line, PrNumber, RelativePath,
-    Root, SourceFile, Span, Symbol, SymbolId, SymbolName, SymbolQuery,
+    Root, Seen, SourceFile, Span, Symbol, SymbolId, SymbolName, SymbolQuery,
 };
 use index::Servers;
 use session::{Desk, Pinned, PullAddress, Repo, RepoName, SessionError};
@@ -10,7 +10,7 @@ use session::{Desk, Pinned, PullAddress, Repo, RepoName, SessionError};
 use crate::convert::{Files, Filter, Marking, Navigation, Request};
 use crate::failure::Failure;
 use crate::output::Output;
-use crate::wire;
+use crate::wire::{self, OldSide};
 
 pub(crate) struct Run<'run> {
     pub(crate) desk: &'run mut Desk,
@@ -80,8 +80,8 @@ impl Run<'_> {
                 wire::changes(self.output, &repo.state(address.number)?);
                 Ok(Touched::Nothing)
             }
-            Request::Diff(address, file) => {
-                self.diff(&address, file.as_ref())?;
+            Request::Diff(address, file, old) => {
+                self.diff(&address, file.as_ref(), old)?;
                 Ok(Touched::Nothing)
             }
             Request::Next(address) => {
@@ -174,7 +174,12 @@ impl Run<'_> {
         Ok(())
     }
 
-    fn diff(&mut self, address: &PullAddress, file: Option<&RelativePath>) -> Result<(), Failure> {
+    fn diff(
+        &mut self,
+        address: &PullAddress,
+        file: Option<&RelativePath>,
+        old: OldSide,
+    ) -> Result<(), Failure> {
         let repo = self.repo(address)?;
         let opened = repo.state(address.number)?;
         let shown: Vec<&FileChange> = match file {
@@ -182,7 +187,16 @@ impl Run<'_> {
             None => opened.changes.iter().collect(),
         };
         for change in shown {
-            wire::diff(self.output, change, opened.seen(change), &opened.review);
+            let seen = opened.seen(change);
+            let mark = opened.review.marks().get(change.path());
+            match (old, seen, mark) {
+                (OldSide::SeenHead, Seen::Changed, Some(mark)) => {
+                    let since = repo.since_seen(&opened, change, mark)?;
+                    wire::since_seen(self.output, change, mark, since.as_ref(), &opened.review);
+                }
+                (OldSide::SeenHead, Seen::Seen, _) => wire::marked(self.output, change, seen),
+                _ => wire::diff(self.output, change, seen, &opened.review),
+            }
         }
         Ok(())
     }

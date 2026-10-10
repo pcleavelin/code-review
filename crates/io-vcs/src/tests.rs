@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use domain::{BranchName, ChangeKind, Line, PrNumber, RefName, RelativePath, Root};
+use domain::{BranchName, ChangeKind, CommitId, Line, PrNumber, RefName, RelativePath, Root};
 use io_process::{Argument, Process, Program};
 
 use crate::{Remote, RemoteUrl, Vcs, VcsError, VcsKind};
@@ -338,4 +338,36 @@ fn every_git_worktree_shares_the_common_git_directory() {
             .to_string_lossy()
             .starts_with(r"\\?\")
     );
+}
+
+#[test]
+fn a_file_change_between_two_commits_is_that_file_only_and_none_when_it_is_the_same() {
+    if !available("git") {
+        return;
+    }
+    let repo = Scratch::new("file-change");
+    repo.run("git", &["init", "-q", "-b", "main"]);
+    repo.put("a.txt", "one\ntwo\n");
+    repo.put("b.txt", "same\n");
+    commit_all(&repo, "first");
+    repo.put("a.txt", "one\nTWO\n");
+    repo.put("c.txt", "new\n");
+    commit_all(&repo, "second");
+    let vcs = Vcs::detect(&repo.root()).unwrap();
+    let resolve = |name: &str| vcs.resolve(&RefName::new(name)).unwrap();
+    let (first, second) = (resolve("HEAD~1"), resolve("HEAD"));
+
+    let changed = vcs
+        .file_change(&first, &second, &RelativePath::new("a.txt"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(changed.path().as_str(), "a.txt");
+    assert_eq!((changed.added().value(), changed.removed().value()), (1, 1));
+    assert_eq!(
+        vcs.file_change(&first, &second, &RelativePath::new("b.txt"))
+            .unwrap(),
+        None
+    );
+    assert!(vcs.has_commit(&first));
+    assert!(!vcs.has_commit(&CommitId::new("0123456789abcdef0123456789abcdef01234567").unwrap()));
 }

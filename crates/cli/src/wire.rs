@@ -6,7 +6,7 @@ use std::path::Path;
 use clap::{Args, CommandFactory, Parser};
 use domain::{
     ChangeKind, Conversation, Decision, Depth, Draft, FileChange, Index, Line, LineKind, Location,
-    NoteKind, PrNumber, Program, Progress, Review, Seen, Side, SourceFile, SourceLine, Span,
+    Mark, NoteKind, PrNumber, Program, Progress, Review, Seen, Side, SourceFile, SourceLine, Span,
     Standing, Symbol, SymbolId, Thread, ThreadState,
 };
 use session::{Entry, Opened, Pinned, PullAddress, RepoName};
@@ -46,7 +46,7 @@ pub(crate) enum Command {
     )]
     Changes(PrArguments),
     #[command(
-        about = "<pr> [file]                      the diff of one changed file, or of all of them, with line numbers"
+        about = "<pr> [file] [--since-seen]       the diff of one changed file, or of all of them, with line numbers; --since-seen shows a file changed since it was seen from the head it was seen at"
     )]
     Diff(DiffArguments),
     #[command(about = "<pr>                             the diff of the first file not seen yet")]
@@ -189,6 +189,8 @@ pub(crate) struct DiffArguments {
     #[arg(value_parser = parse_pr)]
     pub(crate) pr: PullAddress,
     pub(crate) file: Option<String>,
+    #[arg(long)]
+    pub(crate) since_seen: bool,
 }
 
 #[derive(Args, Debug)]
@@ -480,7 +482,7 @@ pub(crate) fn changes(output: &mut Output, opened: &Opened) {
     }
     write_line!(
         output,
-        "{} seen; [x] seen, [~] changed since seen, [ ] unseen",
+        "{} seen; [x] seen, [~] changed since seen ('diff <pr> <file> --since-seen' shows what changed), [ ] unseen",
         opened.review.progress(&opened.changes)
     );
 }
@@ -497,19 +499,13 @@ const fn marker(kind: LineKind) -> char {
     }
 }
 
-pub(crate) fn diff(output: &mut Output, change: &FileChange, seen: Seen, review: &Review) {
-    write_line!(
-        output,
-        "{} {} ({}, +{} -{})",
-        seen_mark(seen),
-        change.path(),
-        kind_word(change.kind()),
-        change.added(),
-        change.removed()
-    );
-    if change.hunks().is_empty() {
-        write_line!(output, "      no text changes");
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OldSide {
+    Base,
+    SeenHead,
+}
+
+fn hunk_lines(output: &mut Output, change: &FileChange, review: &Review, old: OldSide) {
     for hunk in change.hunks() {
         write_line!(output, "  @@");
         for line in hunk.numbered() {
@@ -525,13 +521,62 @@ pub(crate) fn diff(output: &mut Output, change: &FileChange, seen: Seen, review:
                 .drafts_at(change.path())
                 .filter(|draft| match draft.side {
                     Side::New => line.new == Some(draft.line),
-                    Side::Old => line.kind == LineKind::Removed && line.old == Some(draft.line),
+                    Side::Old => {
+                        old == OldSide::Base
+                            && line.kind == LineKind::Removed
+                            && line.old == Some(draft.line)
+                    }
                 });
             for draft in drafted {
                 write_line!(output, "            >> draft {}: {}", draft.id, draft.text);
             }
         }
     }
+}
+
+pub(crate) fn diff(output: &mut Output, change: &FileChange, seen: Seen, review: &Review) {
+    write_line!(
+        output,
+        "{} {} ({}, +{} -{})",
+        seen_mark(seen),
+        change.path(),
+        kind_word(change.kind()),
+        change.added(),
+        change.removed()
+    );
+    if change.hunks().is_empty() {
+        write_line!(output, "      no text changes");
+    }
+    hunk_lines(output, change, review, OldSide::Base);
+}
+
+pub(crate) fn since_seen(
+    output: &mut Output,
+    change: &FileChange,
+    mark: &Mark,
+    since: Option<&FileChange>,
+    review: &Review,
+) {
+    let Some(since) = since else {
+        write_line!(
+            output,
+            "{} {} is as it was when seen at {}; its diff changed because the base moved",
+            seen_mark(Seen::Changed),
+            change.path(),
+            mark.commit.short()
+        );
+        return;
+    };
+    write_line!(
+        output,
+        "{} {} since it was seen at {} (+{} -{}); the old side is the head it was seen at",
+        seen_mark(Seen::Changed),
+        change.path(),
+        mark.commit.short(),
+        since.added(),
+        since.removed()
+    );
+    hunk_lines(output, since, review, OldSide::SeenHead);
 }
 
 pub(crate) fn all_seen(output: &mut Output, opened: &Opened) {

@@ -15,7 +15,7 @@ desk::pub fn names(&self) -> Vec<RepoName>
 desk::pub fn pin(&mut self, target: &PinTarget) -> Result<RepoName, SessionError>
 desk::pub fn unpin(&mut self, asked: &RepoName) -> Result<RepoName, SessionError>
 desk::pub fn find(&self, address: &PullAddress) -> Result<&Repo, SessionError>
-pub enum SessionError { Vcs(VcsError), NoRemote, Forge(ForgeError), Review(ReviewError), NotOpened(PrNumber, VcsError), Moved { number: PrNumber, reviewed: CommitId, now: CommitId, }, NothingToSubmit(PrNumber), NothingToDrop(PrNumber), NoPins, NoPinStore, Pins(io::Error), AlreadyPinned(RepoName), NoSuchRepo(RepoName, Vec<RepoName>), Ambiguous(PrNumber, Vec<RepoName>), }
+pub enum SessionError { Vcs(VcsError), NoRemote, Forge(ForgeError), Review(ReviewError), NotOpened(PrNumber, VcsError), Moved { number: PrNumber, reviewed: CommitId, now: CommitId, }, NothingToSubmit(PrNumber), NothingToDrop(PrNumber), SeenHeadGone { file: RelativePath, head: CommitId, }, NoPins, NoPinStore, Pins(io::Error), AlreadyPinned(RepoName), NoSuchRepo(RepoName, Vec<RepoName>), Ambiguous(PrNumber, Vec<RepoName>), }
 repo::pub struct RepoName(String);
 repo::pub fn new(text: &str) -> Self
 repo::pub fn as_str(&self) -> &str
@@ -39,6 +39,7 @@ repo::pub fn fetch(&self, pull: &PullRequest) -> Result<Opened, SessionError>
 repo::pub fn state(&self, number: PrNumber) -> Result<Opened, SessionError>
 repo::pub fn reopen(&self, number: PrNumber) -> Result<Opened, SessionError>
 repo::pub fn drop_fetched(&self, number: PrNumber) -> Result<PathBuf, SessionError>
+repo::pub fn since_seen( &self, opened: &Opened, change: &FileChange, mark: &Mark, ) -> Result<Option<FileChange>, SessionError>
 repo::pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, SessionError>
 repo::pub fn read_at( &self, commit: &CommitId, path: &RelativePath, ) -> Result<FileText, SessionError>
 repo::pub fn review(&self, number: PrNumber) -> Result<Review, SessionError>
