@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::convert;
 use crate::wire::{
     self, Api, Method, Request, WireDiffRefs, WireRemote, WireResponse, WireThread, detect,
-    forge_named, items, parse_remote, parse_response,
+    forge_named, parse_items, parse_remote, parse_response,
 };
 use crate::{ForgeClient, ForgeError, Token, every_page};
 
@@ -385,7 +385,7 @@ fn expected_pull() -> PullRequest {
 
 fn listed(kind: ForgeKind, text: &str) -> Vec<PullRequest> {
     Api::new(kind, "example.org", "owner/repo")
-        .parse_pulls(&items(text).unwrap())
+        .parse_pulls(&parse_items(text).unwrap())
         .unwrap()
         .into_iter()
         .map(|pull| convert::pull(&pull).unwrap())
@@ -427,11 +427,11 @@ fn a_single_pull_parses_like_a_listed_one() {
 #[test]
 fn a_list_in_the_other_forges_shape_or_with_a_bad_sha_is_malformed() {
     let api = Api::new(ForgeKind::GitLab, "gitlab.com", "owner/repo");
-    assert_eq!(api.parse_pulls(&items(GITHUB_PULLS).unwrap()), None);
-    assert_eq!(items("{\"message\": \"404\"}"), None);
+    assert_eq!(api.parse_pulls(&parse_items(GITHUB_PULLS).unwrap()), None);
+    assert_eq!(parse_items("{\"message\": \"404\"}"), None);
     let bad_sha = GITHUB_PULLS.replace(SHA, "not-hex");
     let pulls = Api::new(ForgeKind::GitHub, "github.com", "owner/repo")
-        .parse_pulls(&items(&bad_sha).unwrap())
+        .parse_pulls(&parse_items(&bad_sha).unwrap())
         .unwrap();
     assert_eq!(pulls.iter().map(convert::pull).next(), Some(None));
 }
@@ -673,7 +673,7 @@ fn a_pull_without_a_body_has_an_empty_description() {
 }
 
 #[test]
-fn each_conversation_endpoint_is_read_from_its_forges_path_one_page_at_a_time() {
+fn each_conversation_endpoint_is_read_from_its_forges_path_with_its_forges_page_size() {
     let github = Api::new(ForgeKind::GitHub, "github.com", "owner/repo");
     let forgejo = Api::new(ForgeKind::Forgejo, "codeberg.org", "owner/repo");
     let gitlab = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
@@ -749,9 +749,16 @@ fn conversation(threads: &[WireThread]) -> Conversation {
 }
 
 fn github_conversation() -> Conversation {
-    let mut threads = wire::parse_issue_comments(GITHUB_ISSUE_COMMENTS).unwrap();
-    threads.extend(wire::parse_reviews(GITHUB_REVIEWS).unwrap().threads);
-    threads.extend(wire::parse_github_code_threads(GITHUB_REVIEW_COMMENTS).unwrap());
+    let mut threads =
+        wire::parse_issue_comments(&parse_items(GITHUB_ISSUE_COMMENTS).unwrap()).unwrap();
+    threads.extend(
+        wire::parse_reviews(&parse_items(GITHUB_REVIEWS).unwrap())
+            .unwrap()
+            .threads,
+    );
+    threads.extend(
+        wire::parse_github_code_threads(&parse_items(GITHUB_REVIEW_COMMENTS).unwrap()).unwrap(),
+    );
     conversation(&threads)
 }
 
@@ -874,7 +881,9 @@ const GITLAB_DISCUSSIONS: &str = r#"[
 
 #[test]
 fn gitlab_discussions_drop_system_notes_and_place_positioned_ones_on_their_side() {
-    let conversation = conversation(&wire::parse_discussions(GITLAB_DISCUSSIONS).unwrap());
+    let conversation = conversation(
+        &wire::parse_discussions(&parse_items(GITLAB_DISCUSSIONS).unwrap(), SHA).unwrap(),
+    );
     assert_eq!(
         ids(&conversation),
         vec![
@@ -897,6 +906,51 @@ fn gitlab_discussions_drop_system_notes_and_place_positioned_ones_on_their_side(
             ("dave".to_owned(), "Off by one?".to_owned()),
             ("octo".to_owned(), "Fixed.".to_owned()),
         ]
+    );
+}
+
+fn gitlab_diff_note(id: &str, head_sha: &str, resolved: bool) -> Value {
+    json!({"id": id, "individual_note": false, "notes": [
+        {"id": 7, "type": "DiffNote", "body": "Typo", "author": {"username": "erin"},
+         "created_at": "2026-05-01T07:00:00.000Z", "system": false, "resolvable": true,
+         "resolved": resolved,
+         "position": {"base_sha": "1".repeat(40), "start_sha": "2".repeat(40),
+                      "head_sha": head_sha, "position_type": "text",
+                      "old_path": "src/lib.rs", "new_path": "src/lib.rs",
+                      "old_line": null, "new_line": 4}}
+    ]})
+}
+
+#[test]
+fn a_gitlab_thread_written_on_an_earlier_head_is_outdated_at_its_line_unless_resolved() {
+    let earlier = "f".repeat(40);
+    let threads = wire::parse_discussions(
+        &[
+            gitlab_diff_note("current", SHA, false),
+            gitlab_diff_note("earlier", &earlier, false),
+            gitlab_diff_note("settled", &earlier, true),
+        ],
+        SHA,
+    )
+    .unwrap();
+    let states: Vec<(&str, ThreadState)> = threads
+        .iter()
+        .map(|thread| (thread.id.as_str(), thread.state))
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            ("current", ThreadState::Open),
+            ("earlier", ThreadState::Outdated),
+            ("settled", ThreadState::Resolved),
+        ]
+    );
+    let placed = conversation(&threads);
+    assert_eq!(
+        placed
+            .thread(&ThreadId::new("earlier").unwrap())
+            .and_then(|thread| thread.place.clone()),
+        Some(code_place("src/lib.rs", Side::New, 3))
     );
 }
 
@@ -933,7 +987,7 @@ const FORGEJO_REVIEW_21: &str = r#"[
 
 #[test]
 fn forgejo_reads_comments_only_of_sent_reviews_that_have_some() {
-    let reviews = wire::parse_reviews(FORGEJO_REVIEWS).unwrap();
+    let reviews = wire::parse_reviews(&parse_items(FORGEJO_REVIEWS).unwrap()).unwrap();
     assert_eq!(reviews.with_comments, vec![20, 21]);
     let conversation = conversation(&reviews.threads);
     assert_eq!(ids(&conversation), vec!["review-23", "review-22"]);
@@ -946,8 +1000,10 @@ fn forgejo_reads_comments_only_of_sent_reviews_that_have_some() {
 
 #[test]
 fn forgejo_comments_on_one_line_from_every_review_make_one_thread() {
-    let mut comments = wire::parse_forgejo_comments(FORGEJO_REVIEW_21).unwrap();
-    comments.extend(wire::parse_forgejo_comments(FORGEJO_REVIEW_20).unwrap());
+    let mut comments =
+        wire::parse_forgejo_comments(&parse_items(FORGEJO_REVIEW_21).unwrap()).unwrap();
+    comments
+        .extend(wire::parse_forgejo_comments(&parse_items(FORGEJO_REVIEW_20).unwrap()).unwrap());
     let conversation = conversation(&wire::forgejo_threads(comments));
     assert_eq!(ids(&conversation), vec!["300", "301"]);
     let [line, removed] = conversation.threads.as_slice() else {
@@ -1118,9 +1174,11 @@ fn each_forge_spells_its_own_web_links() {
 fn a_gitlab_note_links_to_its_anchor_on_the_merge_request() {
     let threads = wire::anchored(
         wire::parse_discussions(
-            &json!([{"id": "d1", "notes": [{"id": 42, "body": "hi", "author": {"username": "ann"},
-                "created_at": "2026-01-01T00:00:00Z", "system": false}]}])
-            .to_string(),
+            &[
+                json!({"id": "d1", "notes": [{"id": 42, "body": "hi", "author": {"username": "ann"},
+                "created_at": "2026-01-01T00:00:00Z", "system": false}]}),
+            ],
+            SHA,
         )
         .unwrap(),
         "https://g.org/o/r/-/merge_requests/3",

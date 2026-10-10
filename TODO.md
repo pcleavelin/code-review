@@ -9,10 +9,12 @@
    (context) line, so a draft on a context line comes back as HTTP 400. A renamed file's
    old-side draft names the new path. The review is several requests (one per draft, then the
    note, then approve); a failure part-way leaves the earlier ones posted.
-4. Threads are read from one page per kind (100 comments on GitHub). GitLab threads are never
-   marked outdated, Forgejo's are grouped by line rather than by reply chain, and a Forgejo
-   reply is a new comment on the same line. An outdated thread is listed in the Review tab but
-   its line may have moved, so it is not drawn in the code.
+4. An outdated thread is drawn at its original line number in the head file, as CLAUDE.md
+   says, but the line it was written on has usually changed since, so it sits on unrelated
+   code (BurntSushi/ripgrep#3529: a comment on `dir.remove("sherlock");` is drawn under the
+   `});` now at tests/misc.rs:343). The owner decides where it goes instead: at the line it
+   maps to through `git diff <its commit> <head>` (GitHub gives `original_commit_id`, GitLab
+   the position's `head_sha`) and where when that line is gone, or in the Review tab only.
 5. "What changed since I looked": the seen mark keeps the head commit it was made at, so a
    file that turned "changed since seen" could show the interdiff against that commit instead
    of the whole diff again. Trigger: re-reviewing a large pull request after a force-push.

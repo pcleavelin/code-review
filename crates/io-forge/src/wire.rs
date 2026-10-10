@@ -565,12 +565,12 @@ fn on_pull(id: String, note: WireNote) -> WireThread {
     }
 }
 
-pub(crate) fn items(text: &str) -> Option<Vec<Value>> {
+pub(crate) fn parse_items(text: &str) -> Option<Vec<Value>> {
     serde_json::from_str(text).ok()
 }
 
-pub(crate) fn parse_issue_comments(text: &str) -> Option<Vec<WireThread>> {
-    items(text)?
+pub(crate) fn parse_issue_comments(items: &[Value]) -> Option<Vec<WireThread>> {
+    items
         .iter()
         .map(|comment| {
             Some(on_pull(
@@ -581,11 +581,11 @@ pub(crate) fn parse_issue_comments(text: &str) -> Option<Vec<WireThread>> {
         .collect()
 }
 
-pub(crate) fn parse_reviews(text: &str) -> Option<WireReviews> {
+pub(crate) fn parse_reviews(items: &[Value]) -> Option<WireReviews> {
     let mut reviews = WireReviews::default();
-    for review in items(text)? {
+    for review in items {
         let id = review.pointer(ID)?.as_u64()?;
-        let state = text_at(&review, "/state").and_then(|state| ReviewState::read(&state));
+        let state = text_at(review, "/state").and_then(|state| ReviewState::read(&state));
         if state == Some(ReviewState::Pending) {
             continue;
         }
@@ -593,7 +593,7 @@ pub(crate) fn parse_reviews(text: &str) -> Option<WireReviews> {
             reviews.with_comments.push(id);
         }
         let kind = ReviewState::kind(state);
-        let note = note(&review, USER, SUBMITTED, kind);
+        let note = note(review, USER, SUBMITTED, kind);
         if kind != NoteKind::Comment || !note.body.trim().is_empty() {
             reviews
                 .threads
@@ -603,10 +603,10 @@ pub(crate) fn parse_reviews(text: &str) -> Option<WireReviews> {
     Some(reviews)
 }
 
-pub(crate) fn parse_github_code_threads(text: &str) -> Option<Vec<WireThread>> {
+pub(crate) fn parse_github_code_threads(items: &[Value]) -> Option<Vec<WireThread>> {
     let mut threads: Vec<WireThread> = Vec::new();
     let mut thread_of: HashMap<u64, usize> = HashMap::new();
-    for comment in items(text)? {
+    for comment in items {
         let id = comment.pointer(ID)?.as_u64()?;
         let parent = comment
             .pointer("/in_reply_to_id")
@@ -615,16 +615,16 @@ pub(crate) fn parse_github_code_threads(text: &str) -> Option<Vec<WireThread>> {
         let index = if let Some(index) = parent {
             index
         } else {
-            let line = line_at(&comment, "/line");
+            let line = line_at(comment, "/line");
             threads.push(WireThread {
                 id: id.to_string(),
                 place: Some(WirePlace {
-                    path: text_at(&comment, "/path")?,
-                    side: text_at(&comment, "/side")
+                    path: text_at(comment, "/path")?,
+                    side: text_at(comment, "/side")
                         .and_then(|side| WireSide::read(&side))
                         .unwrap_or(Side::New),
                     line: line
-                        .or_else(|| line_at(&comment, "/original_line"))
+                        .or_else(|| line_at(comment, "/original_line"))
                         .unwrap_or(1),
                 }),
                 state: if line.is_some() {
@@ -639,7 +639,7 @@ pub(crate) fn parse_github_code_threads(text: &str) -> Option<Vec<WireThread>> {
         threads
             .get_mut(index)?
             .notes
-            .push(note(&comment, USER, CREATED, NoteKind::Comment));
+            .push(note(comment, USER, CREATED, NoteKind::Comment));
         thread_of.insert(id, index);
     }
     Some(threads)
@@ -660,9 +660,9 @@ fn gitlab_place(position: &Value) -> WirePlace {
     }
 }
 
-pub(crate) fn parse_discussions(text: &str) -> Option<Vec<WireThread>> {
+pub(crate) fn parse_discussions(items: &[Value], head_commit: &str) -> Option<Vec<WireThread>> {
     let mut threads = Vec::new();
-    for discussion in items(text)? {
+    for discussion in items {
         let notes: Vec<&Value> = discussion
             .pointer("/notes")?
             .as_array()?
@@ -673,14 +673,19 @@ pub(crate) fn parse_discussions(text: &str) -> Option<Vec<WireThread>> {
             continue;
         };
         let resolved = first.pointer("/resolved").and_then(Value::as_bool) == Some(true);
+        let position = first
+            .pointer("/position")
+            .filter(|position| !position.is_null());
+        let outdated = position
+            .and_then(|position| text_at(position, "/head_sha"))
+            .is_some_and(|head_sha| head_sha != head_commit);
         threads.push(WireThread {
-            id: text_at(&discussion, ID)?,
-            place: first
-                .pointer("/position")
-                .filter(|position| !position.is_null())
-                .map(gitlab_place),
+            id: text_at(discussion, ID)?,
+            place: position.map(gitlab_place),
             state: if resolved {
                 ThreadState::Resolved
+            } else if outdated {
+                ThreadState::Outdated
             } else {
                 ThreadState::Open
             },
@@ -693,8 +698,8 @@ pub(crate) fn parse_discussions(text: &str) -> Option<Vec<WireThread>> {
     Some(threads)
 }
 
-pub(crate) fn parse_forgejo_comments(text: &str) -> Option<Vec<WireCodeComment>> {
-    items(text)?
+pub(crate) fn parse_forgejo_comments(items: &[Value]) -> Option<Vec<WireCodeComment>> {
+    items
         .iter()
         .map(|comment| {
             let new = line_at(comment, "/position").unwrap_or(0);

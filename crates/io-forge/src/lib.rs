@@ -216,7 +216,7 @@ fn every_page(
         }
         let response = request(&page)?;
         items.extend(
-            wire::items(&response.body)
+            wire::parse_items(&response.body)
                 .ok_or_else(|| ForgeError::Malformed(ResponseBody::new(&response.body)))?,
         );
         upcoming = response
@@ -353,38 +353,40 @@ impl ForgeClient {
         let api = self.api();
         let number = pull.number.get();
         let threads = match self.forge.kind() {
-            ForgeKind::GitLab => self.read(&api, &api.discussions(number), |body| {
-                wire::parse_discussions(body.as_str())
+            ForgeKind::GitLab => self.read_pages(&api, &api.discussions(number), |items| {
+                wire::parse_discussions(items, pull.head_commit.as_str())
             })?,
             ForgeKind::GitHub => {
-                let mut threads = self.read(&api, &api.issue_comments(number), |body| {
-                    wire::parse_issue_comments(body.as_str())
-                })?;
+                let mut threads = self.read_pages(
+                    &api,
+                    &api.issue_comments(number),
+                    wire::parse_issue_comments,
+                )?;
                 threads.extend(
-                    self.read(&api, &api.reviews(number), |body| {
-                        wire::parse_reviews(body.as_str())
-                    })?
-                    .threads,
+                    self.read_pages(&api, &api.reviews(number), wire::parse_reviews)?
+                        .threads,
                 );
-                threads.extend(self.read(&api, &api.review_comments(number), |body| {
-                    wire::parse_github_code_threads(body.as_str())
-                })?);
+                threads.extend(self.read_pages(
+                    &api,
+                    &api.review_comments(number),
+                    wire::parse_github_code_threads,
+                )?);
                 threads
             }
             ForgeKind::Forgejo => {
-                let mut threads = self.read(&api, &api.issue_comments(number), |body| {
-                    wire::parse_issue_comments(body.as_str())
-                })?;
-                let reviews = self.read(&api, &api.reviews(number), |body| {
-                    wire::parse_reviews(body.as_str())
-                })?;
+                let mut threads = self.read_pages(
+                    &api,
+                    &api.issue_comments(number),
+                    wire::parse_issue_comments,
+                )?;
+                let reviews = self.read_pages(&api, &api.reviews(number), wire::parse_reviews)?;
                 threads.extend(reviews.threads);
                 let mut comments = Vec::new();
                 for review in reviews.with_comments {
-                    comments.extend(self.read(
+                    comments.extend(self.read_pages(
                         &api,
                         &api.forgejo_review_comments(number, review),
-                        |body| wire::parse_forgejo_comments(body.as_str()),
+                        wire::parse_forgejo_comments,
                     )?);
                 }
                 threads.extend(wire::forgejo_threads(comments));
