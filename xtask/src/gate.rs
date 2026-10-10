@@ -25,6 +25,7 @@ pub(crate) enum Step {
     Test,
     Features,
     Scenarios,
+    GuiScenarios,
     Record,
 }
 
@@ -39,6 +40,7 @@ impl fmt::Display for Step {
             Self::Test => "unit tests",
             Self::Features => "command coverage (crates/review/tests/commands.rs)",
             Self::Scenarios => "CLI scenarios (crates/review/tests/cli.rs)",
+            Self::GuiScenarios => "GUI scenarios (crates/review/tests/gui.rs)",
             Self::Record => "recording the gate state (target/xtask/gate)",
         })
     }
@@ -171,6 +173,12 @@ fn steps(root: &Root, depth: Depth) -> Result<(), Failure> {
             Step::Scenarios,
             Program::CARGO,
             &Argument::list(&["test", "--quiet", "--package", "review", "--test", "cli"]),
+        )?;
+        command(
+            root,
+            Step::GuiScenarios,
+            Program::CARGO,
+            &Argument::list(&["test", "--quiet", "--package", "review", "--test", "gui"]),
         )?;
     }
     Ok(())

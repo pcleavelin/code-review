@@ -45,9 +45,6 @@
    the CLI needs them.
 2. The call graph view was not carried over. Trigger: a pull request whose change is only
    understood by following calls across files.
-3. No GUI scenario harness (`tests/gui.rs`) and no `cargo xtask parity` comparison: both
-   depended on codemap's scenario tables, which were removed with the tours. Port
-   `tests/common/gui.rs` and `parity.rs` before the GUI changes again.
 4. No copy out of the Source view; ctrl+c/x/v work in text fields only.
 5. Hover requests have no cancellation; one for a word the pointer has left is still
    answered first.

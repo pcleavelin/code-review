@@ -24,7 +24,7 @@ use crate::text::{Argument, Literal, Message, RepoPath, Root};
 
 const USAGE: Literal = Literal::new(
     "cargo xtask <task>
-  gate [--full]             format, archlint, crate graph, API lock, clippy, unit tests; --full adds the CLI scenarios
+  gate [--full]             format, archlint, crate graph, API lock, clippy, unit tests; --full adds the CLI and GUI scenarios
   parity [scenario]         run every scenario against the parent revision's build and list the ones whose output differs
   lint [file...]            archlint over the workspace or the given files
   api                       record every library crate's public API in api/<crate>.api
