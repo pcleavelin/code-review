@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown }
+        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped }
     };
 }
 
@@ -284,5 +284,33 @@ shot {shots}/description.png
 quit
 ",
         shows: &["DUMP rect md-link@description/0/5 = Some("],
+    }
+}
+
+pub(crate) fn working_copy() -> Scenario {
+    Scenario {
+        script: "idle
+wait 2
+dump
+OPEN
+dump
+quit
+",
+        shows: &["/local files=4", "/code-review/trees/1 files=3"],
+    }
+}
+
+pub(crate) fn dropped() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id cmd
+text drop 1
+key enter
+wait 3
+idle
+dump
+quit
+",
+        shows: &["open=None", "/local files=4"],
     }
 }

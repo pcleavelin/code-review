@@ -339,6 +339,12 @@ impl Dump for WorkState {
             context.services.reindexing(),
             context.services.linking()
         ));
+        let index = &context.model.index;
+        lines.line(format_args!(
+            "index root={} files={}",
+            index.root().as_path().display(),
+            index.files().count()
+        ));
         let servers: Vec<String> = self
             .server_states(&context.model.index)
             .into_iter()

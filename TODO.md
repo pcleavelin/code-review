@@ -8,10 +8,6 @@
 6. The Inbox shows open pull requests only and filters by words and standing; there is no
    "review requested from me" or "mine", which need the forge user. Trigger: an inbox too long
    to scan.
-7. The window starts with an empty index and builds one only for an opened pull request's
-   tree; it never indexes the working copy, though CLAUDE.md (Indexing) says it does until a
-   pull request is opened. The owner chose the working copy: index it in the background at
-   start, swapped out when a pull request opens.
 11. Markdown: HTML other than `<img>` is drawn as its text with the tags dropped, footnotes and
     math as plain text. Trigger: a description or comment whose meaning is lost that way (a
     `<details>` block read as running text, a footnote, an equation).

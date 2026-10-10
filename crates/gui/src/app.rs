@@ -49,7 +49,6 @@ pub(crate) struct App {
     pub(crate) settings: KeptSettings,
     cursor: Cursor,
     hidden_focus: Count,
-    pub(crate) start: Root,
 }
 
 #[derive(Debug, Default)]
@@ -113,9 +112,9 @@ impl App {
             cursor: Cursor::Default,
             settings,
             hidden_focus: Count::ZERO,
-            start: root.clone(),
         };
         app.model.set_tab(Tab::Inbox);
+        app.index_working_copy();
         app.list_pulls();
         app
     }
@@ -135,7 +134,6 @@ impl App {
             settings: KeptSettings::default(),
             cursor: Cursor::Default,
             hidden_focus: Count::ZERO,
-            start: root.clone(),
         }
     }
 

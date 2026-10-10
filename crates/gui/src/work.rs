@@ -203,11 +203,18 @@ impl WorkState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IndexCause {
+    WorkingCopy,
+    Edited,
+}
+
 pub(crate) struct Services {
     root: Root,
     servers: BTreeMap<Language, ServerLink>,
     link: Option<Job<Index>>,
     reindex: Option<Job<Indexed>>,
+    cause: IndexCause,
     watch: Sender<Stamps>,
     changed: Receiver<SourceChanged>,
     stamps: Stamps,
@@ -224,6 +231,7 @@ impl Services {
             servers: BTreeMap::new(),
             link: None,
             reindex: None,
+            cause: IndexCause::Edited,
             watch,
             changed,
             stamps: Stamps::default(),
@@ -559,10 +567,21 @@ impl App {
         }
     }
 
+    pub(crate) fn index_working_copy(&mut self) {
+        let Some(root) = self.model.review.desk.working_copy().cloned() else {
+            return;
+        };
+        self.services = Services::new(&root);
+        self.model.work = WorkState::default();
+        self.services.reindex = Some(Job::start(move || index::build(&root)));
+        self.services.cause = IndexCause::WorkingCopy;
+    }
+
     pub(crate) fn poll_sources(&mut self) {
         if self.services.changed.try_recv().is_ok() {
             let root = self.services.root.clone();
             self.services.reindex = Some(Job::start(move || index::build(&root)));
+            self.services.cause = IndexCause::Edited;
             self.model.status = Status::Reindexing;
         }
     }
@@ -613,7 +632,9 @@ impl App {
                 let Indexed { index, stamps } = indexed;
                 self.with_index_change(|app| app.model.index = index);
                 self.model.hits.clear();
-                self.model.status = Status::Reindexed(self.index_counts());
+                if self.services.cause == IndexCause::Edited {
+                    self.model.status = Status::Reindexed(self.index_counts());
+                }
                 self.services.watch(stamps);
             }
             Landing::Failed => {

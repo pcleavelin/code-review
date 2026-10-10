@@ -1238,12 +1238,12 @@ impl App {
             .as_ref()
             .is_some_and(|open| open.repo.name() == name && open.opened.number == number);
         if shown {
-            self.services = Services::new(&self.start);
-            self.model.work = WorkState::default();
             self.model.peek = None;
             self.model.hits.clear();
             self.model.forget_place();
             self.with_index_change(|app| app.model.index = Index::default());
+            self.services = Services::new(self.model.index.root());
+            self.model.work = WorkState::default();
             let review = &mut self.model.review;
             review.stamp = None;
             review.draft = None;
@@ -1252,6 +1252,7 @@ impl App {
             review.diffs.forget();
             review.open = None;
             self.model.set_tab(Tab::Inbox);
+            self.index_working_copy();
         }
         self.list_pulls();
     }

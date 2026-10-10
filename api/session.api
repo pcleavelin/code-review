@@ -5,9 +5,10 @@ desk::pub struct PullAddress { pub repo: Option<RepoName>, pub number: PrNumber,
 desk::pub enum Pinned { Ready(Repo), Broken { root: Root, why: Why }, }
 desk::pub struct Why(String);
 desk::pub fn as_str(&self) -> &str
-desk::pub struct Desk { store: Option<PinsStore>, here: Option<Repo>, pinned: Vec<Pinned>, }
+desk::pub struct Desk { store: Option<PinsStore>, here: Option<Repo>, pinned: Vec<Pinned>, working_copy: Option<Root>, }
 desk::pub fn load(here: Option<&Root>, reach: Reach) -> Self
 desk::pub fn of(store: Option<PinsStore>, here: Option<Repo>, roots: &[Root]) -> Self
+desk::pub const fn working_copy(&self) -> Option<&Root>
 desk::pub fn pinned(&self) -> &[Pinned]
 desk::pub const fn here(&self) -> Option<&Repo>
 desk::pub fn repos(&self) -> impl Iterator<Item = &Repo>

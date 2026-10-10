@@ -71,6 +71,7 @@ pub struct Desk {
     store: Option<PinsStore>,
     here: Option<Repo>,
     pinned: Vec<Pinned>,
+    working_copy: Option<Root>,
 }
 
 fn pinned(root: &Root) -> Pinned {
@@ -113,6 +114,7 @@ impl Desk {
             .iter()
             .map(pinned)
             .collect();
+        let working_copy = here.filter(|root| Vcs::detect(root).is_ok()).cloned();
         let here = here.and_then(|root| Repo::find(root).ok()).filter(|repo| {
             !pinned.iter().any(|pin| match pin {
                 Pinned::Ready(ready) => ready.name() == repo.name(),
@@ -123,15 +125,21 @@ impl Desk {
             store,
             here,
             pinned,
+            working_copy,
         }
     }
 
     pub fn of(store: Option<PinsStore>, here: Option<Repo>, roots: &[Root]) -> Self {
         Self {
+            working_copy: here.as_ref().map(|repo| repo.root().clone()),
             store,
             here,
             pinned: roots.iter().map(pinned).collect(),
         }
+    }
+
+    pub const fn working_copy(&self) -> Option<&Root> {
+        self.working_copy.as_ref()
     }
 
     pub fn pinned(&self) -> &[Pinned] {
