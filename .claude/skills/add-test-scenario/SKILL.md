@@ -16,9 +16,15 @@ The behaviour a change adds is stated by a test written before the code.
    offline command works on pull request 1; extend it when a scenario needs more. Every
    outcome of a command is asserted (success and each error, with its exit code), followed by
    a command that shows the effect. Nothing in a scenario talks to a real forge.
-3. GUI: there is no GUI scenario table yet (TODO.md). Write a script (CLAUDE.md, "Testing the
-   GUI"), run it with `REVIEW_SCRIPT=<file> target/release/review`, and read its `DUMP`
-   lines and screenshots. A gesture at an element out of view is refused; to check that
-   something is not shown, use `absent <id>`.
-4. Run it: `cargo test -p review --test cli <name>`, and `cargo test -p review --test commands`.
+3. GUI: a function `pub(crate) fn <name>() -> Scenario` in `crates/review/tests/common/gui.rs`,
+   added to the `gui_scenarios!` table there. Its `script` (CLAUDE.md, "Testing the GUI")
+   starts with `OPEN` to open the fixture's pull request, writes screenshots to `{shots}/`,
+   and aims inside an element with `<<DUMP rect <id>|dx,dy>>`; its `shows` are the `DUMP`
+   lines (or parts of them) the run must print, so the scenario fails when the behaviour does.
+   The fixture (`common/mod.rs`: `BASE`, `FIRST`, `SECOND`, the forge's JSON) is shared by
+   every scenario; extend it when a scenario needs more. A gesture at an element out of view
+   is refused; to check that something is not shown, use `absent <id>`. Read the screenshots
+   (the failure message names the folder).
+4. Run it: `cargo test -p review --test cli <name>` or `cargo test -p review --test gui
+   <name>`, and `cargo test -p review --test commands`.
 5. `finish`.

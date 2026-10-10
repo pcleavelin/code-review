@@ -115,7 +115,8 @@ rule applies.
   lost to a crash and the CLI and an open window see each other's changes.
 - **Seen follows the diff, not the commit.** A force-push that leaves a file's diff alone keeps
   it seen; one that changes it brings it back. The mark also keeps the head commit it was made
-  at, for a later "what changed since I looked".
+  at, so a file changed since seen shows what changed since that commit. No ref holds that
+  commit: it lasts as long as git keeps the object, and `--since-seen` says so once it is gone.
 - **The diff is drawn on the head file, folded to the change.** The Source view shows the head
   file with added lines tinted and removed lines, threads that are not outdated and drafts
   inserted where they belong; lines more than three away from a change fold
@@ -168,14 +169,23 @@ request's tree.
 
 ## Build and test
 
-`cargo build`, `cargo test`, `cargo xtask gate` (`--full` adds the CLI scenarios). The GUI is
+`cargo build`, `cargo test`, `cargo xtask gate` (`--full` adds the CLI and GUI scenarios),
+`cargo xtask parity` (the GUI scenarios and a CLI transcript played by the parent revision's
+build and this one; every dump line and screenshot that differs is listed). The GUI is
 winit + wgpu + fontdue under the tool's own element tree (`crates/ui`); there is no UI
 framework underneath.
 
 `crates/review/tests` holds `cli.rs` (scenarios against a generated forge and clone, offline:
 the pull request's refs are fetched by hand, so no forge API is needed; `run_in` gives each
-run its own `REVIEW_PINS` and `REVIEW_CLONES`) and `commands.rs` (every command `review help`
-lists runs in a scenario). A scenario is registered in the `scenarios!` table; a
+run its own `REVIEW_PINS` and `REVIEW_CLONES`), `commands.rs` (every command `review help`
+lists runs in a scenario), `gui.rs` (window scenarios, one window at a time) and `parity.rs`.
+A GUI scenario, in the `gui_scenarios!` table of `common/gui.rs`, is a script (below,
+"Testing the GUI"; `OPEN` opens the pull request, `{shots}` is its screenshot folder,
+`<<DUMP rect <id>|dx,dy>>` a point inside an element) and the lines its output must contain.
+It runs against `common/mod.rs`'s forge, offline: a clone whose remote is
+`ssh://git@forgejo.test/owner/repo.git`, served by a fake `ssh`, and the forge's API answered
+from files by a fake `curl`, both on a `PATH` of their own (no language server on it, so the
+tree-sitter resolvers answer). A scenario is registered in its table; a
 hand-written `#[test]` in a scenario file is refused by the linter. Behaviour a change adds is
 pinned by a test that states it, written before the code.
 

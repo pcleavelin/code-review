@@ -72,6 +72,7 @@ pub(crate) enum Noun {
     Draft,
     Comment,
     Thread,
+    Line,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +103,8 @@ impl fmt::Display for Counted {
             Noun::Comment => "comments",
             Noun::Thread if one => "thread",
             Noun::Thread => "threads",
+            Noun::Line if one => "line",
+            Noun::Line => "lines",
         };
         write!(formatter, "{} {word}", self.count)
     }

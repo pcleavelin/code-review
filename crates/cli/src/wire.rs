@@ -1,11 +1,13 @@
 use std::fmt;
 use std::iter;
 use std::mem;
+use std::path::Path;
 
 use clap::{Args, CommandFactory, Parser};
 use domain::{
-    ChangeKind, Conversation, Decision, Draft, FileChange, LineKind, NoteKind, PrNumber, Progress,
-    Review, Seen, Side, Span, Standing, Thread, ThreadState,
+    ChangeKind, Conversation, Decision, Depth, Draft, FileChange, Index, Line, LineKind, Location,
+    Mark, NoteKind, PrNumber, Program, Progress, Review, Seen, Side, SourceFile, SourceLine, Span,
+    Standing, Symbol, SymbolId, Thread, ThreadState,
 };
 use session::{Entry, Opened, Pinned, PullAddress, RepoName};
 
@@ -44,7 +46,7 @@ pub(crate) enum Command {
     )]
     Changes(PrArguments),
     #[command(
-        about = "<pr> [file]                      the diff of one changed file, or of all of them, with line numbers"
+        about = "<pr> [file] [--since-seen]       the diff of one changed file, or of all of them, with line numbers; --since-seen shows a file changed since it was seen from the head it was seen at"
     )]
     Diff(DiffArguments),
     #[command(about = "<pr>                             the diff of the first file not seen yet")]
@@ -67,6 +69,93 @@ pub(crate) enum Command {
         about = "<pr> [summary] [--approve|--request-changes]  send the drafts to the forge as one review"
     )]
     Submit(SubmitArguments),
+    #[command(
+        about = "<pr>                             remove the pull request's tree and its base and head refs; its review stays"
+    )]
+    Drop(PrArguments),
+    #[command(
+        about = "<pr> [filter]                    the files of the pull request's tree whose path contains filter"
+    )]
+    Files(PrFilterArguments),
+    #[command(
+        about = "<pr> [filter]                    symbols of the tree: file:start-end kind name (calls, callers)"
+    )]
+    Symbols(PrFilterArguments),
+    #[command(
+        about = "<pr> <file> [start] [end]        numbered lines of a file of the tree (1-based, inclusive)"
+    )]
+    Show(ShowArguments),
+    #[command(
+        about = "<pr> <regex>                     every line of the tree that matches: file:line: text"
+    )]
+    Search(SearchArguments),
+    #[command(
+        about = "<pr> <symbol>                    who calls it (xrefs to it, from the language's server)"
+    )]
+    Callers(SymbolArguments),
+    #[command(about = "<pr> <symbol>                    what it calls (xrefs from it)")]
+    Callees(SymbolArguments),
+    #[command(
+        about = "<pr> <symbol>                    every reference to it, file:line: text (asks the language's server)"
+    )]
+    Refs(SymbolArguments),
+    #[command(
+        about = "<pr> <symbol> [depth]            what it calls, and what that calls, to depth (default 4)"
+    )]
+    Calltree(CalltreeArguments),
+    #[command(
+        about = "<pr> [limit]                     entry points: symbols nothing in the tree calls (at most limit, default 30)"
+    )]
+    Roots(RootsArguments),
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct PrFilterArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) filter: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ShowArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) file: String,
+    #[arg(value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) start: Option<u32>,
+    #[arg(value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) end: Option<u32>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct SearchArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) regex: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct SymbolArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) symbol: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CalltreeArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) symbol: String,
+    #[arg(default_value_t = 4, value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) depth: u32,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct RootsArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    #[arg(default_value_t = 30)]
+    pub(crate) limit: usize,
 }
 
 fn parse_pr(text: &str) -> Result<PullAddress, String> {
@@ -100,6 +189,8 @@ pub(crate) struct DiffArguments {
     #[arg(value_parser = parse_pr)]
     pub(crate) pr: PullAddress,
     pub(crate) file: Option<String>,
+    #[arg(long)]
+    pub(crate) since_seen: bool,
 }
 
 #[derive(Args, Debug)]
@@ -391,7 +482,7 @@ pub(crate) fn changes(output: &mut Output, opened: &Opened) {
     }
     write_line!(
         output,
-        "{} seen; [x] seen, [~] changed since seen, [ ] unseen",
+        "{} seen; [x] seen, [~] changed since seen ('diff <pr> <file> --since-seen' shows what changed), [ ] unseen",
         opened.review.progress(&opened.changes)
     );
 }
@@ -408,19 +499,13 @@ const fn marker(kind: LineKind) -> char {
     }
 }
 
-pub(crate) fn diff(output: &mut Output, change: &FileChange, seen: Seen, review: &Review) {
-    write_line!(
-        output,
-        "{} {} ({}, +{} -{})",
-        seen_mark(seen),
-        change.path(),
-        kind_word(change.kind()),
-        change.added(),
-        change.removed()
-    );
-    if change.hunks().is_empty() {
-        write_line!(output, "      no text changes");
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OldSide {
+    Base,
+    SeenHead,
+}
+
+fn hunk_lines(output: &mut Output, change: &FileChange, review: &Review, old: OldSide) {
     for hunk in change.hunks() {
         write_line!(output, "  @@");
         for line in hunk.numbered() {
@@ -436,13 +521,62 @@ pub(crate) fn diff(output: &mut Output, change: &FileChange, seen: Seen, review:
                 .drafts_at(change.path())
                 .filter(|draft| match draft.side {
                     Side::New => line.new == Some(draft.line),
-                    Side::Old => line.kind == LineKind::Removed && line.old == Some(draft.line),
+                    Side::Old => {
+                        old == OldSide::Base
+                            && line.kind == LineKind::Removed
+                            && line.old == Some(draft.line)
+                    }
                 });
             for draft in drafted {
                 write_line!(output, "            >> draft {}: {}", draft.id, draft.text);
             }
         }
     }
+}
+
+pub(crate) fn diff(output: &mut Output, change: &FileChange, seen: Seen, review: &Review) {
+    write_line!(
+        output,
+        "{} {} ({}, +{} -{})",
+        seen_mark(seen),
+        change.path(),
+        kind_word(change.kind()),
+        change.added(),
+        change.removed()
+    );
+    if change.hunks().is_empty() {
+        write_line!(output, "      no text changes");
+    }
+    hunk_lines(output, change, review, OldSide::Base);
+}
+
+pub(crate) fn since_seen(
+    output: &mut Output,
+    change: &FileChange,
+    mark: &Mark,
+    since: Option<&FileChange>,
+    review: &Review,
+) {
+    let Some(since) = since else {
+        write_line!(
+            output,
+            "{} {} is as it was when seen at {}; its diff changed because the base moved",
+            seen_mark(Seen::Changed),
+            change.path(),
+            mark.commit.short()
+        );
+        return;
+    };
+    write_line!(
+        output,
+        "{} {} since it was seen at {} (+{} -{}); the old side is the head it was seen at",
+        seen_mark(Seen::Changed),
+        change.path(),
+        mark.commit.short(),
+        since.added(),
+        since.removed()
+    );
+    hunk_lines(output, since, review, OldSide::SeenHead);
 }
 
 pub(crate) fn all_seen(output: &mut Output, opened: &Opened) {
@@ -494,6 +628,14 @@ pub(crate) fn removed(output: &mut Output, removed: &Draft) {
     write_line!(output, "removed draft {}", removed.id);
 }
 
+pub(crate) fn dropped(output: &mut Output, number: PrNumber, tree: &Path) {
+    write_line!(
+        output,
+        "dropped #{number}: removed {} and its refs; its review stays, and 'open' fetches it again",
+        tree.display()
+    );
+}
+
 pub(crate) fn submitted(
     output: &mut Output,
     number: PrNumber,
@@ -532,6 +674,106 @@ impl fmt::Display for Failure {
                 "'{thread}' is not a thread id; 'discussion <pr>' lists them"
             ),
             Self::Draft(error) => write!(formatter, "{error}"),
+            Self::NoSuchFile(file) => write!(
+                formatter,
+                "{file} is not a file of the tree; 'files <pr> [filter]' lists them"
+            ),
+            Self::NoSuchSymbol(symbol) => write!(
+                formatter,
+                "no symbol {symbol} in the tree; 'symbols <pr> [filter]' lists them"
+            ),
+            Self::BadPattern(error) => write!(formatter, "{error}"),
         }
     }
+}
+
+fn span_text(span: Span) -> String {
+    format!("{}-{}", span.start().number(), span.end().number())
+}
+
+fn symbol_label(index: &Index, id: SymbolId) -> String {
+    let (Some(file), Some(symbol)) = (index.file(id.file()), index.symbol(id)) else {
+        return String::new();
+    };
+    format!(
+        "{} {}:{}",
+        symbol.name(),
+        file.path(),
+        span_text(symbol.span())
+    )
+}
+
+pub(crate) fn file_row(output: &mut Output, file: &SourceFile) {
+    write_line!(
+        output,
+        "{} ({} lines, {} symbols)",
+        file.path(),
+        file.text().count(),
+        file.symbols().count()
+    );
+}
+
+pub(crate) fn symbol_row(output: &mut Output, file: &SourceFile, symbol: &Symbol) {
+    write_line!(
+        output,
+        "{}:{} {} {}{} ({} calls, {} callers)",
+        file.path(),
+        span_text(symbol.span()),
+        symbol.kind(),
+        if symbol.depth().value() > 0 { "  " } else { "" },
+        symbol.name(),
+        symbol.callees().len(),
+        symbol.callers().len()
+    );
+}
+
+pub(crate) fn numbered_lines(output: &mut Output, file: &SourceFile, span: Span) {
+    for line in span.lines() {
+        if let Some(text) = file.text().line(line) {
+            write_line!(output, "{:5} {}", line.number(), text);
+        }
+    }
+}
+
+pub(crate) fn search_hit(output: &mut Output, file: &SourceFile, line: Line, text: &SourceLine) {
+    write_line!(output, "{}:{}: {}", file.path(), line.number(), text);
+}
+
+pub(crate) fn symbol_line(output: &mut Output, index: &Index, id: SymbolId, depth: Depth) {
+    write_line!(
+        output,
+        "{}{}",
+        "  ".repeat(usize::try_from(depth.value()).unwrap_or(0)),
+        symbol_label(index, id)
+    );
+}
+
+pub(crate) fn root_row(output: &mut Output, index: &Index, id: SymbolId) {
+    write_line!(
+        output,
+        "{} ({} calls)",
+        symbol_label(index, id),
+        index.symbol(id).map_or(0, |symbol| symbol.callees().len())
+    );
+}
+
+pub(crate) fn reference_row(output: &mut Output, location: &Location, text: Option<&SourceLine>) {
+    write_line!(
+        output,
+        "  {}:{}: {}",
+        location.file,
+        location.line.number(),
+        text.map_or("", SourceLine::trimmed)
+    );
+}
+
+pub(crate) fn server_missing(output: &mut Output, program: Option<Program>) {
+    write_line!(
+        output,
+        "  (references need {})",
+        program.map_or_else(
+            || "a language server, and this language has none".to_owned(),
+            |program| program.to_string()
+        )
+    );
 }

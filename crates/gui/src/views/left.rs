@@ -1,4 +1,6 @@
-use domain::{FileId, Seen, SymbolId};
+use std::cmp::Ordering;
+
+use domain::{FileId, RelativePath, Seen, SymbolId};
 use ui::{Count, Icon, Label, Px, Run};
 
 use crate::action::Action;
@@ -246,9 +248,39 @@ pub(super) fn files_window(model: &Model, frame: &mut Frame<'_>) {
     frame.finish();
     let id = ids::files();
     frame.scroll_column(id, model.scrolls.get(id), Scroller::Plain, None);
-    let all: Vec<FileId> = model.index.file_entries().map(|entry| entry.id).collect();
+    let mut all: Vec<FileId> = model.index.file_entries().map(|entry| entry.id).collect();
+    all.sort_by(
+        |left, right| match (model.index.file(*left), model.index.file(*right)) {
+            (Some(left), Some(right)) => browse_order(left.path(), right.path()),
+            _ => Ordering::Equal,
+        },
+    );
     files_tree(model, frame, &all, Count::ZERO);
     frame.finish();
+}
+
+fn browse_order(left: &RelativePath, right: &RelativePath) -> Ordering {
+    let left_parts: Vec<&str> = left.as_str().split('/').collect();
+    let right_parts: Vec<&str> = right.as_str().split('/').collect();
+    let Some((depth, (left_name, right_name))) = left_parts
+        .iter()
+        .zip(&right_parts)
+        .enumerate()
+        .find(|(_, (left_name, right_name))| left_name != right_name)
+    else {
+        return left_parts.len().cmp(&right_parts.len());
+    };
+    let left_file = depth + 1 == left_parts.len();
+    let right_file = depth + 1 == right_parts.len();
+    match (left_file, right_file) {
+        (false, true) => Ordering::Less,
+        (true, false) => Ordering::Greater,
+        (false, false) => left_name.cmp(right_name),
+        (true, true) => left
+            .extension()
+            .cmp(&right.extension())
+            .then_with(|| left_name.cmp(right_name)),
+    }
 }
 
 fn component(model: &Model, file: FileId, depth: Count) -> Label {
@@ -359,5 +391,48 @@ fn files_tree(model: &Model, frame: &mut Frame<'_>, files: &[FileId], depth: Cou
             files_tree(model, frame, group, Count::new(depth.get() + 1));
         }
         rest = after;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directories_come_first_then_files_grouped_by_extension() {
+        let mut paths: Vec<RelativePath> = [
+            "notes.md",
+            "src/lib.rs",
+            "build.rs",
+            "Cargo.toml",
+            "docs/guide.md",
+            "README.md",
+            ".gitignore",
+            "src/a/deep.rs",
+            "src/main.rs",
+            "LICENSE",
+            "src/Cargo.toml",
+        ]
+        .into_iter()
+        .map(RelativePath::new)
+        .collect();
+        paths.sort_by(browse_order);
+        let sorted: Vec<&str> = paths.iter().map(RelativePath::as_str).collect();
+        assert_eq!(
+            sorted,
+            [
+                "docs/guide.md",
+                "src/a/deep.rs",
+                "src/lib.rs",
+                "src/main.rs",
+                "src/Cargo.toml",
+                "LICENSE",
+                ".gitignore",
+                "README.md",
+                "notes.md",
+                "build.rs",
+                "Cargo.toml",
+            ]
+        );
     }
 }

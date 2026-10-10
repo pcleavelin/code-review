@@ -244,7 +244,7 @@ impl Frame<'_> {
         }
     }
 
-    fn wheel_across(&self, id: Id, kept: Px, content: Px) -> Px {
+    pub(crate) fn wheel_across(&self, id: Id, kept: Px, content: Px) -> Px {
         let interaction = self.ui.interaction(id);
         let Some(rect) = interaction.rect() else {
             return kept;

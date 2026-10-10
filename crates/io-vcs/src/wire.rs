@@ -113,6 +113,23 @@ pub(crate) fn diff(base: &str, head: &str) -> CommandLine {
     ])
 }
 
+pub(crate) fn file_diff(from: &str, to: &str, path: &str) -> CommandLine {
+    git(&[
+        "-c",
+        "core.quotepath=off",
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--unified=3",
+        from,
+        to,
+        "--",
+        path,
+    ])
+}
+
 pub(crate) const FIELD: char = '\u{1f}';
 
 pub(crate) fn log(base: &str, head: &str) -> CommandLine {
@@ -169,6 +186,18 @@ pub(crate) fn show(commit: &str, path: &str) -> CommandLine {
 
 pub(crate) fn add_worktree(tree: &str, commit: &str) -> CommandLine {
     git(&["worktree", "add", "--detach", "--force", tree, commit])
+}
+
+pub(crate) fn remove_worktree(tree: &str) -> CommandLine {
+    git(&["worktree", "remove", "--force", "--force", tree])
+}
+
+pub(crate) fn prune_worktrees() -> CommandLine {
+    git(&["worktree", "prune"])
+}
+
+pub(crate) fn delete_ref(reference: &str) -> CommandLine {
+    git(&["update-ref", "-d", reference])
 }
 
 pub(crate) fn check_out(commit: &str) -> CommandLine {

@@ -206,11 +206,13 @@ impl Review {
         self.looked = Some(head);
     }
 
-    pub fn standing(&self, head: &CommitId, progress: Progress) -> Standing {
+    pub fn standing(&self, head: &CommitId, progress: Option<Progress>) -> Standing {
         match &self.looked {
             None => Standing::New,
             Some(looked) if looked != head => Standing::Updated,
-            Some(_) if progress.done() && self.drafts.is_empty() => Standing::Reviewed,
+            Some(_) if progress.is_some_and(Progress::done) && self.drafts.is_empty() => {
+                Standing::Reviewed
+            }
             Some(_) => Standing::Reviewing,
         }
     }

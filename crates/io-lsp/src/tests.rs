@@ -105,6 +105,30 @@ fn answers_are_told_from_server_requests() {
     );
 }
 
+#[test]
+fn a_late_answer_is_not_taken_for_a_server_request() {
+    assert!(matches!(
+        wire::notice(&json!({"id": 9, "result": null})),
+        wire::Notice::Ignored
+    ));
+    assert!(matches!(
+        wire::notice(&json!({"id": 9, "error": {"code": -32800, "message": "canceled"}})),
+        wire::Notice::Ignored
+    ));
+    assert!(matches!(
+        wire::notice(&json!({"id": 3, "method": "window/workDoneProgress/create"})),
+        wire::Notice::Request { .. }
+    ));
+}
+
+#[test]
+fn a_cancel_names_the_request_it_cancels() {
+    assert_eq!(
+        wire::Outgoing::cancel(9).notification(),
+        json!({"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 9}})
+    );
+}
+
 fn spelled(hover: Option<HoverText>) -> Vec<String> {
     let inlines = |inlines: &[Inline]| -> String {
         inlines

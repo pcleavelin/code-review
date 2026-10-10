@@ -10,10 +10,8 @@ const DIRECTORY: Literal = Literal::new("target/parity");
 const BINARY: Literal = Literal::new("review");
 
 const BASE_BINARY: Literal = Literal::new("REVIEW_BASE_BIN");
-const BASE_REVISION: Literal = Literal::new("REVIEW_PARITY_REV");
 const ONLY: Literal = Literal::new("REVIEW_PARITY_ONLY");
 const TARGET: Literal = Literal::new("CARGO_TARGET_DIR");
-const GIT_STORE: Literal = Literal::new("REVIEW_PARITY_GIT_DIR");
 
 const DIFFERENCES: [Literal; 4] = [
     Literal::new("differences:"),
@@ -35,13 +33,7 @@ pub(crate) fn compare(root: &Root, only: Option<&Argument>) -> Result<Message, M
     let revision = parent_commit(root)?;
     let store = git_store(root);
     let base = base_binary(root, &revision, store.as_ref())?;
-    let mut environment = vec![
-        Setting::new(BASE_BINARY, base),
-        Setting::new(BASE_REVISION, revision.0.clone()),
-    ];
-    if let Some(found) = &store {
-        environment.push(Setting::new(GIT_STORE, found.0.clone()));
-    }
+    let mut environment = vec![Setting::new(BASE_BINARY, base)];
     if let Some(scenario) = only {
         environment.push(Setting::new(ONLY, scenario.as_str()));
     }

@@ -86,7 +86,7 @@ impl App {
             Action::TipShown(tip) => model.tip_shown = tip,
             Action::Rest(on, pressing) => model.resting.rest(on, pressing, model.now),
             Action::ReopenHover => model.queries.reopen_hover(),
-            Action::Hover(language, probe) => self.hover(language, probe),
+            Action::Hover(language, probe) => self.hover(language, &probe),
             Action::AskReferences(language, probe) => {
                 if self.ask(language, Request::References(probe.clone())) {
                     self.model.queries.references_sent(probe);
@@ -177,12 +177,12 @@ impl App {
         }
     }
 
-    fn hover(&mut self, language: Language, probe: Probe) {
+    fn hover(&mut self, language: Language, probe: &Probe) {
         let now = self.model.now;
-        if matches!(self.model.queries.hover_step(&probe, now), HoverStep::Ask)
-            && self.ask(language, Request::Hover(probe))
+        if matches!(self.model.queries.hover_step(probe, now), HoverStep::Ask)
+            && self.ask(language, Request::Hover(probe.clone()))
         {
-            self.model.queries.hover_sent();
+            self.model.queries.hover_sent(probe);
         }
     }
 
@@ -334,6 +334,7 @@ impl App {
                 model.console.failed(&text);
             }
             Ok(cli::Touched::Pins) => self.list_pulls(),
+            Ok(cli::Touched::Dropped(name, number)) => self.dropped(&name, number),
             Ok(cli::Touched::Nothing | cli::Touched::Review(_)) => {}
         }
     }

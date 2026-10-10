@@ -49,6 +49,7 @@ pub(crate) struct App {
     pub(crate) settings: KeptSettings,
     cursor: Cursor,
     hidden_focus: Count,
+    pub(crate) start: Root,
 }
 
 #[derive(Debug, Default)]
@@ -112,6 +113,7 @@ impl App {
             cursor: Cursor::Default,
             settings,
             hidden_focus: Count::ZERO,
+            start: root.clone(),
         };
         app.model.set_tab(Tab::Inbox);
         app.list_pulls();
@@ -133,6 +135,7 @@ impl App {
             settings: KeptSettings::default(),
             cursor: Cursor::Default,
             hidden_focus: Count::ZERO,
+            start: root.clone(),
         }
     }
 
@@ -212,7 +215,11 @@ impl App {
         if keys::going(input, Going::Forward, typing) {
             actions.push(Action::Forward);
         }
-        actions.extend(keys::review_keys(input).into_iter().map(Action::Review));
+        actions.extend(
+            keys::review_keys(input, typing)
+                .into_iter()
+                .map(Action::Review),
+        );
         if typing.is_none() && self.model.starts_comment(typed) {
             actions.push(Action::Review(ReviewAct::StartDraftHere));
         }
@@ -246,7 +253,7 @@ impl App {
             ui: &self.ui,
             services: &self.services,
         };
-        let parts: [&dyn Dump; 9] = [
+        let parts: [&dyn Dump; 10] = [
             &model.nav,
             &model.review,
             &model.scrolls,
@@ -254,6 +261,7 @@ impl App {
             &model.status,
             &model.fields,
             &model.work,
+            &model.queries,
             &model.palette,
             &model.settings_menu,
         ];

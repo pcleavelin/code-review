@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use domain::{BranchName, ChangeKind, Line, PrNumber, RefName, RelativePath, Root};
+use domain::{BranchName, ChangeKind, CommitId, Line, PrNumber, RefName, RelativePath, Root};
 use io_process::{Argument, Process, Program};
 
 use crate::{Remote, RemoteUrl, Vcs, VcsError, VcsKind};
@@ -172,6 +172,64 @@ fn a_pull_request_is_fetched_diffed_against_its_merge_base_and_checked_out() {
     assert!(tree.join("later.txt").exists());
 }
 
+fn registered_worktrees(scratch: &Scratch) -> Vec<String> {
+    fs::read_dir(scratch.0.join(".git/worktrees"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
+#[test]
+fn a_dropped_pull_request_loses_its_tree_its_worktree_entry_and_its_refs() {
+    if !available("git") {
+        return;
+    }
+    let forge = Scratch::new("drop-forge");
+    forge.run("git", &["init", "-q", "-b", "main"]);
+    forge.put("a.txt", "one\n");
+    commit_all(&forge, "base");
+    forge.run("git", &["checkout", "-q", "-b", "feature"]);
+    forge.put("a.txt", "two\n");
+    commit_all(&forge, "change");
+    let local = Scratch::new("drop-local");
+    local.run("git", &["init", "-q"]);
+    local.run(
+        "git",
+        &["remote", "add", "origin", forge.0.to_str().unwrap()],
+    );
+    let vcs = Vcs::detect(&local.root()).unwrap();
+    let fetch = |number: u64| {
+        vcs.fetch(
+            &Remote::new("origin"),
+            PrNumber::new(number).unwrap(),
+            &RefName::new("refs/heads/feature"),
+            &BranchName::new("main"),
+        )
+        .unwrap()
+    };
+    let (seven, eight) = (PrNumber::new(7).unwrap(), PrNumber::new(8).unwrap());
+    let kept = local.0.join("trees/8");
+    vcs.check_out(&kept, &fetch(8).head).unwrap();
+    let tree = local.0.join("trees/7");
+    vcs.check_out(&tree, &fetch(7).head).unwrap();
+    local.put("trees/7/target/debug/built", "untracked output");
+    local.put("trees/7/a.txt", "edited in the tree\n");
+
+    vcs.drop_fetched(seven, &tree).unwrap();
+    assert!(!tree.exists());
+    assert!(vcs.fetched(seven).is_err());
+    assert!(vcs.fetched(eight).is_ok());
+    assert!(kept.join("a.txt").exists());
+    assert_eq!(registered_worktrees(&local), ["8"]);
+
+    vcs.check_out(&tree, &fetch(7).head).unwrap();
+    assert_eq!(fs::read_to_string(tree.join("a.txt")).unwrap(), "two\n");
+    fs::remove_dir_all(&kept).unwrap();
+    vcs.drop_fetched(eight, &kept).unwrap();
+    assert!(vcs.fetched(eight).is_err());
+    assert_eq!(registered_worktrees(&local), ["7"]);
+}
+
 #[test]
 fn a_pull_requests_commits_are_listed_oldest_first_and_each_diffs_against_its_parent() {
     if !available("git") {
@@ -280,4 +338,36 @@ fn every_git_worktree_shares_the_common_git_directory() {
             .to_string_lossy()
             .starts_with(r"\\?\")
     );
+}
+
+#[test]
+fn a_file_change_between_two_commits_is_that_file_only_and_none_when_it_is_the_same() {
+    if !available("git") {
+        return;
+    }
+    let repo = Scratch::new("file-change");
+    repo.run("git", &["init", "-q", "-b", "main"]);
+    repo.put("a.txt", "one\ntwo\n");
+    repo.put("b.txt", "same\n");
+    commit_all(&repo, "first");
+    repo.put("a.txt", "one\nTWO\n");
+    repo.put("c.txt", "new\n");
+    commit_all(&repo, "second");
+    let vcs = Vcs::detect(&repo.root()).unwrap();
+    let resolve = |name: &str| vcs.resolve(&RefName::new(name)).unwrap();
+    let (first, second) = (resolve("HEAD~1"), resolve("HEAD"));
+
+    let changed = vcs
+        .file_change(&first, &second, &RelativePath::new("a.txt"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(changed.path().as_str(), "a.txt");
+    assert_eq!((changed.added().value(), changed.removed().value()), (1, 1));
+    assert_eq!(
+        vcs.file_change(&first, &second, &RelativePath::new("b.txt"))
+            .unwrap(),
+        None
+    );
+    assert!(vcs.has_commit(&first));
+    assert!(!vcs.has_commit(&CommitId::new("0123456789abcdef0123456789abcdef01234567").unwrap()));
 }

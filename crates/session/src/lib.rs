@@ -4,7 +4,7 @@ mod repo;
 use std::fmt;
 use std::io;
 
-use domain::{CommitId, PrNumber};
+use domain::{CommitId, PrNumber, RelativePath};
 use io_forge::ForgeError;
 use io_review::ReviewError;
 use io_vcs::VcsError;
@@ -27,6 +27,11 @@ pub enum SessionError {
         now: CommitId,
     },
     NothingToSubmit(PrNumber),
+    NothingToDrop(PrNumber),
+    SeenHeadGone {
+        file: RelativePath,
+        head: CommitId,
+    },
     NoPins,
     NoPinStore,
     Pins(io::Error),
@@ -70,6 +75,14 @@ impl fmt::Display for SessionError {
             Self::NothingToSubmit(number) => write!(
                 formatter,
                 "pull request {number} has no draft comments and no summary to submit"
+            ),
+            Self::SeenHeadGone { file, head } => write!(
+                formatter,
+                "{file} was seen at {head}, which is no longer in the clone; 'diff <pr> {file}' shows its whole diff"
+            ),
+            Self::NothingToDrop(number) => write!(
+                formatter,
+                "pull request {number} has no tree and no base or head ref here"
             ),
             Self::NoPins => formatter.write_str(
                 "no repository: run this inside a clone, or pin one with 'review pin <path or URL>'",

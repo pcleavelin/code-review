@@ -3,7 +3,7 @@ use std::io::{self, Write as _};
 use std::iter;
 
 use platform::ScriptLine;
-use ui::{Axis, Id, Ui};
+use ui::{Axis, Id, Px, Ui};
 
 use crate::field::{Fields, Which};
 use crate::ids;
@@ -11,7 +11,7 @@ use crate::model::{Model, Scrolls};
 use crate::nav::Nav;
 use crate::palette::Palette;
 use crate::panels::Panels;
-use crate::peek::Peek;
+use crate::peek::{Peek, Probe, Queries};
 use crate::review::{Inbox, Reviewing, Submitting, Talk};
 use crate::settings::{SettingsMenu, ShownFont, ThemeName};
 use crate::status::Status;
@@ -225,6 +225,10 @@ impl Dump for Scrolls {
                 ));
             }
         }
+        let table = context.model.across.get(ids::TABLE.id());
+        if table > Px::ZERO {
+            lines.line(format_args!("across table off={table}"));
+        }
     }
 }
 
@@ -271,6 +275,31 @@ impl Dump for Status {
             Optional(model.tip_shown.as_ref().map(|tip| Quoted(tip.as_str()))),
             Optional(model.peek.as_ref().map(PeekText)),
             Quoted(self)
+        ));
+    }
+}
+
+struct ProbeAt<'probe>(&'probe Probe);
+
+impl fmt::Display for ProbeAt<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let position = &self.0.position;
+        write!(
+            formatter,
+            "{}:{}:{}",
+            position.file,
+            position.line.number(),
+            position.character.value()
+        )
+    }
+}
+
+impl Dump for Queries {
+    fn dump(&self, _: &Context<'_>, lines: &mut DumpLines) {
+        lines.line(format_args!(
+            "hover waiting={} asked={}",
+            Optional(self.waiting().map(ProbeAt)),
+            self.asked()
         ));
     }
 }

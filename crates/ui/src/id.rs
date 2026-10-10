@@ -29,10 +29,10 @@ impl Id {
     }
 
     pub fn from_name(name: &str) -> Self {
-        if let Some((base, number)) = name.split_once('/') {
-            Self::new(base).nth(number.parse().unwrap_or(0))
-        } else if let Some((base, suffix)) = name.split_once('@') {
+        if let Some((base, suffix)) = name.split_once('@') {
             Self::new(base).with(suffix)
+        } else if let Some((base, number)) = name.split_once('/') {
+            Self::new(base).nth(number.parse().unwrap_or(0))
         } else {
             Self::new(name)
         }

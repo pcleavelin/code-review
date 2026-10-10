@@ -15,8 +15,11 @@ pub fn clone_from(url: &RemoteUrl, into: &Path) -> Result<Root, VcsError>
 pub fn remote_url(&self, remote: &Remote) -> Result<RemoteUrl, VcsError>
 pub fn fetch( &self, remote: &Remote, number: PrNumber, head: &RefName, base: &BranchName, ) -> Result<Fetched, VcsError>
 pub fn fetched(&self, number: PrNumber) -> Result<Fetched, VcsError>
+pub fn has_commit(&self, commit: &CommitId) -> bool
 pub fn diff(&self, base: &CommitId, head: &CommitId) -> Result<Vec<FileChange>, VcsError>
+pub fn file_change( &self, from: &CommitId, to: &CommitId, path: &RelativePath, ) -> Result<Option<FileChange>, VcsError>
 pub fn commits(&self, base: &CommitId, head: &CommitId) -> Result<Vec<Commit>, VcsError>
 pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, VcsError>
 pub fn read_at(&self, commit: &CommitId, path: &RelativePath) -> Result<FileText, VcsError>
 pub fn check_out(&self, tree: &Path, commit: &CommitId) -> Result<(), VcsError>
+pub fn drop_fetched(&self, number: PrNumber, tree: &Path) -> Result<(), VcsError>

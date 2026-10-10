@@ -18,7 +18,7 @@ macro_rules! scenarios {
     )*};
 }
 
-scenarios!(offline_review, refusals, pinning);
+scenarios!(offline_review, refusals, pinning, navigation, since_seen);
 
 struct Fixture {
     forge: PathBuf,
@@ -59,6 +59,11 @@ impl Fixture {
         git(&forge, &["init", "-q", "-b", "main"]);
         put(&forge, "a.txt", "one\ntwo\nthree\n");
         put(&forge, "gone.txt", "bye\n");
+        put(
+            &forge,
+            "tools.py",
+            "def helper(x):\n    return x + 1\n\n\ndef run():\n    return helper(2)\n\n\ndef main():\n    run()\n",
+        );
         git(&forge, &["add", "-A"]);
         git(&forge, &["commit", "-q", "-m", "base"]);
         git(&forge, &["checkout", "-q", "-b", "feature"]);
@@ -95,14 +100,31 @@ impl Fixture {
     }
 
     fn run_in(&self, directory: &Path, arguments: &[&str]) -> Ran {
+        self.run_with(directory, arguments, None)
+    }
+
+    fn run_without_servers(&self, arguments: &[&str]) -> Ran {
+        let paths = env::var_os("PATH").unwrap_or_default();
+        let git = env::split_paths(&paths)
+            .find(|directory| {
+                directory.join("git").is_file() || directory.join("git.exe").is_file()
+            })
+            .unwrap();
+        self.run_with(&self.local, arguments, Some(git))
+    }
+
+    fn run_with(&self, directory: &Path, arguments: &[&str], path: Option<PathBuf>) -> Ran {
         let base = self.forge.parent().unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_review"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_review"));
+        command
             .args(arguments)
             .current_dir(directory)
             .env("REVIEW_PINS", base.join("pins"))
-            .env("REVIEW_CLONES", base.join("clones"))
-            .output()
-            .unwrap();
+            .env("REVIEW_CLONES", base.join("clones"));
+        if let Some(path) = path {
+            command.env("PATH", path);
+        }
+        let output = command.output().unwrap();
         Ran {
             stdout: String::from_utf8_lossy(&output.stdout).replace('\r', ""),
             stderr: String::from_utf8_lossy(&output.stderr).replace('\r', ""),
@@ -120,7 +142,9 @@ impl Drop for Fixture {
 }
 
 mod scenario {
-    use super::Fixture;
+    use std::fs;
+
+    use super::{Fixture, git};
 
     pub(super) fn offline_review(fixture: &Fixture) {
         let changes = fixture.run(&["changes", "1"]);
@@ -174,6 +198,203 @@ mod scenario {
 
         let unseen = fixture.run(&["unseen", "1", "new.txt"]);
         assert_eq!(unseen.stdout, "[ ] new.txt\n");
+
+        let tree = fixture.local.join(".git/code-review/trees/1");
+        git(
+            &fixture.local,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                tree.to_str().unwrap(),
+                "refs/code-review/1/head",
+            ],
+        );
+        fs::write(tree.join("built.o"), "untracked").unwrap();
+        let dropped = fixture.run(&["drop", "1"]);
+        assert_eq!(dropped.code, Some(0), "{}", dropped.stderr);
+        assert!(
+            dropped.stdout.starts_with("dropped #1: removed "),
+            "{}",
+            dropped.stdout
+        );
+        assert!(!tree.exists());
+        assert!(!fixture.local.join(".git/worktrees/1").exists());
+        let gone = fixture.run(&["changes", "1"]);
+        assert!(gone.stderr.contains("has not been fetched yet"));
+        let kept = fixture.run(&["drafts", "1"]);
+        assert_eq!(kept.stdout, "draft 2  a.txt:2 (old)  was fine\n");
+        let again = fixture.run(&["drop", "1"]);
+        assert_eq!(again.code, Some(2));
+        assert!(
+            again
+                .stderr
+                .contains("pull request 1 has no tree and no base or head ref here"),
+            "{}",
+            again.stderr
+        );
+        git(
+            &fixture.local,
+            &[
+                "fetch",
+                "-q",
+                "origin",
+                "+refs/heads/feature:refs/code-review/1/head",
+                "+refs/heads/main:refs/code-review/1/base",
+            ],
+        );
+        let back = fixture.run(&["changes", "1"]);
+        assert!(back.stdout.contains("2/3 seen"), "{}", back.stdout);
+    }
+
+    pub(super) fn since_seen(fixture: &Fixture) {
+        fixture.run(&["seen", "1", "a.txt", "new.txt"]);
+        let forge = &fixture.forge;
+        git(forge, &["checkout", "-q", "feature"]);
+        fs::write(forge.join("a.txt"), "one\nTWO\nTHREE\n").unwrap();
+        git(
+            forge,
+            &["commit", "-q", "--amend", "-am", "change, amended"],
+        );
+        git(forge, &["checkout", "-q", "main"]);
+        let refetch = [
+            "fetch",
+            "-q",
+            "origin",
+            "+refs/heads/feature:refs/code-review/1/head",
+        ];
+        git(&fixture.local, &refetch);
+        let changes = fixture.run(&["changes", "1"]);
+        assert!(
+            changes.stdout.contains("[~]    +2    -2  a.txt"),
+            "{}",
+            changes.stdout
+        );
+
+        let since = fixture.run(&["diff", "1", "a.txt", "--since-seen"]);
+        assert_eq!(since.code, Some(0), "{}", since.stderr);
+        assert!(
+            since.stdout.starts_with("[~] a.txt since it was seen at "),
+            "{}",
+            since.stdout
+        );
+        assert!(
+            since.stdout.contains("    3       -three\n"),
+            "{}",
+            since.stdout
+        );
+        assert!(
+            since.stdout.contains("          3 +THREE\n"),
+            "{}",
+            since.stdout
+        );
+        assert!(!since.stdout.contains("two"), "{}", since.stdout);
+        let whole = fixture.run(&["diff", "1", "a.txt"]);
+        assert!(
+            whole.stdout.contains("    2       -two\n"),
+            "{}",
+            whole.stdout
+        );
+        let kept = fixture.run(&["diff", "1", "new.txt", "--since-seen"]);
+        assert_eq!(kept.stdout, "[x] new.txt\n");
+        let never = fixture.run(&["diff", "1", "gone.txt", "--since-seen"]);
+        assert!(
+            never.stdout.starts_with("[ ] gone.txt (deleted"),
+            "{}",
+            never.stdout
+        );
+
+        git(
+            &fixture.local,
+            &["reflog", "expire", "--expire=now", "--all"],
+        );
+        git(&fixture.local, &["gc", "-q", "--prune=now"]);
+        let gone = fixture.run(&["diff", "1", "a.txt", "--since-seen"]);
+        assert_eq!(gone.code, Some(2));
+        assert!(
+            gone.stderr.contains("a.txt was seen at ")
+                && gone.stderr.contains("which is no longer in the clone"),
+            "{}",
+            gone.stderr
+        );
+    }
+
+    pub(super) fn navigation(fixture: &Fixture) {
+        let unopened = fixture.run_without_servers(&["files", "7"]);
+        assert_eq!(unopened.code, Some(2));
+        assert!(unopened.stderr.contains("has not been fetched yet"));
+        let files = fixture.run_without_servers(&["files", "1", "TOOLS"]);
+        assert_eq!(files.code, Some(0), "{}", files.stderr);
+        assert_eq!(files.stdout, "tools.py (10 lines, 3 symbols)\n");
+        assert!(
+            fixture
+                .local
+                .join(".git/code-review/trees/1/tools.py")
+                .exists()
+        );
+
+        let symbols = fixture.run_without_servers(&["symbols", "1", "tools"]);
+        assert_eq!(
+            symbols.stdout,
+            "tools.py:1-2 function_definition helper (0 calls, 1 callers)\n\
+             tools.py:5-6 function_definition run (1 calls, 1 callers)\n\
+             tools.py:9-10 function_definition main (1 calls, 0 callers)\n"
+        );
+        let named = fixture.run_without_servers(&["symbols", "1", "help"]);
+        assert_eq!(
+            named.stdout,
+            "tools.py:1-2 function_definition helper (0 calls, 1 callers)\n"
+        );
+        let shown = fixture.run_without_servers(&["show", "1", "tools.py", "5", "6"]);
+        assert_eq!(
+            shown.stdout,
+            "    5 def run():\n    6     return helper(2)\n"
+        );
+        let hits = fixture.run_without_servers(&["search", "1", "helper\\("]);
+        assert_eq!(
+            hits.stdout,
+            "tools.py:1: def helper(x):\ntools.py:6:     return helper(2)\n"
+        );
+
+        let callers = fixture.run_without_servers(&["callers", "1", "helper"]);
+        assert_eq!(callers.stdout, "helper tools.py:1-2\n  run tools.py:5-6\n");
+        let called = fixture.run_without_servers(&["callees", "1", "run"]);
+        assert_eq!(called.stdout, "run tools.py:5-6\n  helper tools.py:1-2\n");
+        let tree = fixture.run_without_servers(&["calltree", "1", "main", "2"]);
+        assert_eq!(
+            tree.stdout,
+            "main tools.py:9-10\n  run tools.py:5-6\n    helper tools.py:1-2\n"
+        );
+        let shallow = fixture.run_without_servers(&["calltree", "1", "main", "1"]);
+        assert_eq!(shallow.stdout, "main tools.py:9-10\n  run tools.py:5-6\n");
+        let roots = fixture.run_without_servers(&["roots", "1"]);
+        assert_eq!(roots.stdout, "main tools.py:9-10 (1 calls)\n");
+        let none = fixture.run_without_servers(&["roots", "1", "0"]);
+        assert_eq!(none.stdout, "");
+        let refs = fixture.run_without_servers(&["refs", "1", "helper"]);
+        assert_eq!(
+            refs.stdout,
+            "helper tools.py:1-2\n  (references need pyright-langserver)\n"
+        );
+
+        let missing = fixture.run_without_servers(&["show", "1", "nope.py"]);
+        assert_eq!(missing.code, Some(2));
+        assert!(
+            missing.stderr.contains("nope.py is not a file of the tree"),
+            "{}",
+            missing.stderr
+        );
+        let nobody = fixture.run_without_servers(&["callers", "1", "nothing"]);
+        assert_eq!(nobody.code, Some(2));
+        assert!(nobody.stderr.contains("no symbol nothing in the tree"));
+        let broken = fixture.run_without_servers(&["search", "1", "("]);
+        assert_eq!(broken.code, Some(2));
+        assert!(
+            broken.stderr.contains("regex parse error"),
+            "{}",
+            broken.stderr
+        );
     }
 
     pub(super) fn refusals(fixture: &Fixture) {
@@ -187,6 +408,7 @@ mod scenario {
         let unchanged = fixture.run(&["seen", "1", "missing.txt"]);
         assert!(unchanged.stderr.contains("is not changed by #1"));
         let unopened = fixture.run(&["changes", "7"]);
+        assert_eq!(unopened.code, Some(2));
         assert!(unopened.stderr.contains("has not been fetched yet"));
         let blank = fixture.run(&["comment", "1", "a.txt", "2", "  "]);
         assert!(blank.stderr.contains("the comment is empty"));

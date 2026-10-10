@@ -45,6 +45,7 @@ enum Method {
     Progress,
     Status,
     Configuration,
+    Cancel,
 }
 
 impl Method {
@@ -64,6 +65,7 @@ impl Method {
             Self::Progress => "$/progress",
             Self::Status => "experimental/serverStatus",
             Self::Configuration => "workspace/configuration",
+            Self::Cancel => "$/cancelRequest",
         })
     }
 
@@ -201,6 +203,13 @@ impl Outgoing {
         }
     }
 
+    pub(crate) fn cancel(id: u64) -> Self {
+        Self {
+            method: Method::Cancel,
+            params: json!({"id": id}),
+        }
+    }
+
     pub(crate) fn request(self, id: u64) -> Value {
         json!({"jsonrpc": "2.0", "id": id, "method": self.method.name().as_str(), "params": self.params})
     }
@@ -304,7 +313,9 @@ pub(crate) fn notice(message: &Value) -> Notice {
                 .and_then(Value::as_array)
                 .map_or(0, Vec::len),
         },
-        _ if message.get("id").is_some() => Notice::Request { id: id() },
+        _ if message.get("method").is_some() && message.get("id").is_some() => {
+            Notice::Request { id: id() }
+        }
         _ => Notice::Ignored,
     }
 }

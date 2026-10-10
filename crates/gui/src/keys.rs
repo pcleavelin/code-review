@@ -63,6 +63,7 @@ pub(crate) const TOGGLE_SEEN: Chord = Chord::alt(Key::Character(Glyph::new('s'))
 pub(crate) const NEXT_UNSEEN: Chord = Chord::alt(Key::Character(Glyph::new('n')));
 pub(crate) const NEXT_HUNK: Chord = Chord::alt(Key::Down);
 pub(crate) const PREVIOUS_HUNK: Chord = Chord::alt(Key::Up);
+pub(crate) const COPY_LINES: Chord = Chord::ctrl(Key::Character(Glyph::new('c')));
 pub(crate) const COMMENT: Chord = Chord::alt(Key::Character(Glyph::new('c')));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,16 +102,19 @@ pub(crate) enum Wheeling {
     Along,
 }
 
-pub(crate) fn review_keys(input: &Input) -> Vec<ReviewAct> {
+pub(crate) fn review_keys(input: &Input, typing: Option<Which>) -> Vec<ReviewAct> {
     [
         (TOGGLE_SEEN, ReviewAct::ToggleShownSeen),
         (NEXT_UNSEEN, ReviewAct::NextUnseen),
         (NEXT_HUNK, ReviewAct::NextHunk),
         (PREVIOUS_HUNK, ReviewAct::PreviousHunk),
         (COMMENT, ReviewAct::StartDraftHere),
+        (COPY_LINES, ReviewAct::CopyLines),
     ]
     .into_iter()
-    .filter(|(chord, _)| chord.pressed(input))
+    .filter(|(chord, act)| {
+        chord.pressed(input) && (typing.is_none() || *act != ReviewAct::CopyLines)
+    })
     .map(|(_, act)| act)
     .collect()
 }
@@ -276,4 +280,29 @@ pub(crate) fn palette_edits(input: &Input) -> Vec<Edit> {
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pressed(chord: Chord) -> Input {
+        let mut input = Input::default();
+        input.keys.push(Press {
+            key: chord.key,
+            mods: chord.mods,
+        });
+        input
+    }
+
+    #[test]
+    fn ctrl_c_copies_lines_only_while_no_field_has_the_keyboard() {
+        let input = pressed(COPY_LINES);
+        assert_eq!(review_keys(&input, None), vec![ReviewAct::CopyLines]);
+        assert_eq!(review_keys(&input, Some(Which::Command)), Vec::new());
+        assert_eq!(
+            review_keys(&pressed(COMMENT), Some(Which::Command)),
+            vec![ReviewAct::StartDraftHere]
+        );
+    }
 }

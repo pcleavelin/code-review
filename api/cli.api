@@ -1,5 +1,5 @@
-exec::pub enum Touched { Nothing, Pins, Review(PrNumber), }
-failure::pub enum Failure { Session(SessionError), NotChanged { number: PrNumber, file: RelativePath, }, NotInDiff { file: RelativePath, side: Side, line: Line, }, EmptyComment, NoThread(Given), Draft(DraftError), }
+exec::pub enum Touched { Nothing, Pins, Review(PrNumber), Dropped(RepoName, PrNumber), }
+failure::pub enum Failure { Session(SessionError), NotChanged { number: PrNumber, file: RelativePath, }, NotInDiff { file: RelativePath, side: Side, line: Line, }, EmptyComment, NoThread(Given), Draft(DraftError), NoSuchFile(RelativePath), NoSuchSymbol(SymbolName), BadPattern(regex::Error), }
 failure::pub struct Given(String);
 failure::pub fn as_str(&self) -> &str
 pub struct Argument(String);

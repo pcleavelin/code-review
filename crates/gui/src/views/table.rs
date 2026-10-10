@@ -1,22 +1,26 @@
 use std::rc::Rc;
 
-use domain::{DiffLayout, FileChange, Line, Paired, Pairing, RelativePath, Side, SourceFile, Span};
-use ui::{Button, Canvas, Count, Grid, Px, Rect};
+use domain::{
+    Column, DiffLayout, FileChange, FileId, Line, Paired, Pairing, RelativePath, Side, SourceFile,
+    Span,
+};
+use ui::{Button, Canvas, Count, Grid, Point, Px, Rect};
 
 use crate::action::Action;
 use crate::diffs::{Loading, Sides, SidesKey};
-use crate::grid::{self, Gutter};
+use crate::grid::{self, GUTTER, Gutter};
 use crate::ids;
-use crate::keys::LineGesture;
+use crate::keys::{self, CodeGesture, LineGesture};
 use crate::model::Model;
 use crate::nav::Aim;
+use crate::peek::Intent;
 use crate::review::{Picking, RemovedPick, ReviewAct};
 use crate::theme::{
     ADDED_FILL, BORDER, FIELD, LINES_SELECTED, ORANGE, PIXEL, RED, REMOVED_FILL, SOURCE_GUESS, WEAK,
 };
 use crate::widgets::{Frame, Padding, Scroller};
 
-use super::center::{self, Inset, Noted};
+use super::center::{self, Inset, Noted, Viewed};
 
 const CONTEXT: Count = Count::new(3);
 
@@ -187,6 +191,9 @@ struct Table<'table> {
     sides: &'table Sides,
     layout: DiffLayout,
     path: &'table RelativePath,
+    indexed: Option<FileId>,
+    across: Px,
+    content_width: Px,
     selected_new: Option<Span>,
     selected_old: Option<Span>,
 }
@@ -232,10 +239,11 @@ impl Table<'_> {
         }
     }
 
-    fn rows(&self, frame: &mut Frame<'_>, from: RowAt, to: RowAt) {
+    fn rows(&self, model: &Model, frame: &mut Frame<'_>, from: RowAt, to: RowAt) {
         let row = frame.row_height();
         let font = frame.metrics.font;
         let layout = self.layout;
+        let across = self.across;
         let looks: Vec<RowLook> = self
             .pairs
             .get(from.0..=to.0)
@@ -244,19 +252,29 @@ impl Table<'_> {
             .map(|pair| self.look(pair))
             .collect();
         let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
-            paint(canvas, rect, &looks, layout, row, font);
+            paint(canvas, rect, &looks, layout, row, font, across);
         };
-        let interaction = frame.custom_block(
-            Box::new(draw),
-            row * from.rows_to(to),
-            ids::TABLE.id().nth(from.0),
-        );
+        let id = ids::TABLE.id().nth(from.0);
+        let interaction = frame.custom_block(Box::new(draw), row * from.rows_to(to), id);
+        if let Some(rect) = interaction.rect() {
+            let content = self.content_width + rect.width - half_width(rect, layout);
+            let moved = frame.wheel_across(id, across, content);
+            if moved != across {
+                frame.push(Action::ScrollAcross(ids::TABLE.id(), moved));
+            }
+        }
         if interaction.hovered() {
-            self.clicks(frame, interaction, from);
+            self.clicks(model, frame, interaction, from);
         }
     }
 
-    fn clicks(&self, frame: &mut Frame<'_>, interaction: ui::Interaction, from: RowAt) {
+    fn clicks(
+        &self,
+        model: &Model,
+        frame: &mut Frame<'_>,
+        interaction: ui::Interaction,
+        from: RowAt,
+    ) {
         let Some(rect) = interaction.rect() else {
             return;
         };
@@ -273,6 +291,32 @@ impl Table<'_> {
             (_, Some(_), None) => Side::Old,
             _ => Side::New,
         };
+        let start = match (self.layout, half) {
+            (DiffLayout::Split, Side::New) => rect.left + half_width(rect, self.layout),
+            _ => rect.left,
+        };
+        let column = column_at(
+            pointer.mouse.horizontal - start + self.across,
+            frame.cell_width(),
+        );
+        if let (Side::New, Some(file), Some(line), Some(column)) =
+            (half, self.indexed, pair.new, column)
+        {
+            match keys::code_gesture(interaction, pointer) {
+                Some(CodeGesture::Peek) => {
+                    frame.push(Action::Definition(file, line, column, Intent::Peek));
+                    return;
+                }
+                Some(CodeGesture::Jump) => {
+                    frame.push(Action::Definition(file, line, column, Intent::Jump));
+                    return;
+                }
+                None if !pointer.down.contains(Button::Left) => {
+                    frame.hover(model, file, line, column);
+                }
+                None => {}
+            }
+        }
         if interaction.double_clicked() {
             frame.push(Action::Review(ReviewAct::StartDraftHere));
             return;
@@ -317,11 +361,9 @@ fn paint(
     layout: DiffLayout,
     row: Px,
     font: ui::FontSize,
+    across: Px,
 ) {
-    let half = match layout {
-        DiffLayout::Split => rect.width / 2,
-        DiffLayout::Unified => rect.width,
-    };
+    let half = half_width(rect, layout);
     let right = match layout {
         DiffLayout::Split => rect.left + half,
         DiffLayout::Unified => rect.left,
@@ -337,7 +379,7 @@ fn paint(
                 canvas.rect(area, fill);
             }
             canvas.push_clip(area.intersect(canvas.clip()));
-            canvas.grid(area.origin(), font, &shown.grid);
+            canvas.grid(Point::new(left - across, top), font, &shown.grid);
             canvas.pop_clip();
         }
         top += row;
@@ -345,6 +387,31 @@ fn paint(
     if layout == DiffLayout::Split {
         canvas.rect(Rect::new(right, rect.top, PIXEL, rect.height), BORDER);
     }
+}
+
+fn half_width(rect: Rect, layout: DiffLayout) -> Px {
+    match layout {
+        DiffLayout::Split => rect.width / 2,
+        DiffLayout::Unified => rect.width,
+    }
+}
+
+fn column_at(inside: Px, cell: Px) -> Option<Column> {
+    usize::try_from(inside.ratio(cell))
+        .ok()
+        .and_then(|cells| cells.checked_sub(GUTTER.get()))
+        .and_then(|column| u32::try_from(column).ok())
+        .map(Column::new)
+}
+
+fn content_width(sides: &Sides, cell: Px) -> Px {
+    let columns = [&sides.old, &sides.new]
+        .into_iter()
+        .flat_map(|source| source.text().all().iter())
+        .map(|line| line.as_str().chars().count())
+        .max()
+        .unwrap_or(0);
+    cell * (Count::new(columns) + GUTTER)
 }
 
 fn offset_for(model: &Model, frame: &mut Frame<'_>, sheet: &Sheet, pairs: &[Paired]) -> Px {
@@ -492,11 +559,28 @@ pub(super) fn table(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
             width,
         }
     };
+    let content_width = content_width(sides, frame.cell_width());
+    let half = width.map_or(Px::ZERO, |width| match layout {
+        DiffLayout::Split => width / 2,
+        DiffLayout::Unified => width,
+    });
+    let indexed = model.index.find_file(path).filter(|file| {
+        model
+            .index
+            .file(*file)
+            .is_some_and(|source| source.text().all() == sides.new.text().all())
+    });
     let drawn = Table {
         pairs: &pairs,
         sides,
         layout,
         path,
+        indexed,
+        across: model
+            .across
+            .get(ids::TABLE.id())
+            .min((content_width - half).max(Px::ZERO)),
+        content_width,
         selected_new: model
             .nav
             .lines()
@@ -559,7 +643,7 @@ fn draw(
                     + 1;
                 let first = start.down(rows_above(placed)).min(to);
                 let end = first.down(room).min(to);
-                drawn.rows(frame, first, end);
+                drawn.rows(model, frame, first, end);
                 drawn_to += row * first.rows_to(end);
             }
             Piece::Fold { start, end } => {
@@ -568,11 +652,38 @@ fn draw(
             }
             Piece::Inset(number) => {
                 if let Some(anchor) = insets.get(number.get()) {
-                    center::inset(model, frame, &anchor.inset, drawn.path, band.width);
+                    center::inset(
+                        model,
+                        frame,
+                        &anchor.inset,
+                        drawn.path,
+                        band.width,
+                        Viewed {
+                            top: placed.top,
+                            band: center::Band {
+                                offset: band.from,
+                                bottom: band.until,
+                            },
+                        },
+                    );
                 }
                 drawn_to += placed.height;
             }
         }
     }
     frame.spacer((sheet.total - drawn_to).max(Px::ZERO) + row);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_column_is_counted_after_the_line_number_gutter() {
+        let cell = Px::new(8);
+        assert_eq!(column_at(Px::new(116), cell), Some(Column::new(8)));
+        assert_eq!(column_at(Px::new(48), cell), Some(Column::new(0)));
+        assert_eq!(column_at(Px::new(40), cell), None);
+        assert_eq!(column_at(Px::new(-64), cell), None);
+    }
 }

@@ -9,7 +9,7 @@ use domain::{
     FileId, Index, Language, Line, LineCount, Location, RelativePath, Root, SourceFile, Span,
 };
 use index::{FileVersion, Indexed, Parsers, ServerFile, Stamps, read_outside};
-use io_lsp::{HoverText, StartError};
+use io_lsp::{HoverReply, StartError};
 use ui::{Count, Grid, Label};
 
 use crate::app::App;
@@ -41,7 +41,7 @@ pub(crate) enum Answer {
     Progress(Label),
     Failed(Language, StartError),
     Done(Language),
-    Hover(Probe, Option<HoverText>),
+    Hover(Probe, HoverReply),
     Definition(Probe, Option<Found>),
     References(Probe, Vec<Location>),
 }
@@ -303,8 +303,9 @@ fn serve(root: &Root, language: Language, requests: &Receiver<Request>, answers:
     let program = language.program();
     let mut queue: VecDeque<FileVersion> = VecDeque::new();
     let (mut total, mut done) = (0_usize, 0_usize);
+    let mut held: VecDeque<Request> = VecDeque::new();
     loop {
-        let request = match requests.try_recv() {
+        let request = match held.pop_front().map_or_else(|| requests.try_recv(), Ok) {
             Ok(request) => Some(request),
             Err(TryRecvError::Empty) if queue.is_empty() => match requests.recv() {
                 Ok(request) => Some(request),
@@ -322,8 +323,11 @@ fn serve(root: &Root, language: Language, requests: &Receiver<Request>, answers:
                 queue.extend(files);
             }
             Some(Request::Hover(probe)) => {
-                let text = session.hover(&probe.position);
-                drop(answers.send(Answer::Hover(probe, text)));
+                let reply = session.hover(&probe.position, || {
+                    held.extend(requests.try_iter());
+                    held.iter().any(|next| matches!(next, Request::Hover(_)))
+                });
+                drop(answers.send(Answer::Hover(probe, reply)));
             }
             Some(Request::Definition(probe)) => {
                 let found = definition_found(&mut session, &probe);

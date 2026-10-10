@@ -501,11 +501,15 @@ pub(super) fn inset(
     inset: &Inset<'_>,
     path: &RelativePath,
     width: Option<Px>,
+    viewed: Viewed,
 ) {
     let gutter = frame.cell_width() * GUTTER;
     match &inset.kind {
         InsetKind::Removed { lines, .. } => {
             frame.start(Container::Removed(inset.row_id()));
+            let row = frame.row_height();
+            let RowsShown { first, past } = removed_rows(Count::new(lines.len()), viewed, row);
+            gap(frame, row * first);
             let picked = model
                 .review
                 .picked
@@ -513,7 +517,7 @@ pub(super) fn inset(
                 .filter(|picked| &picked.file == path);
             let origin = picked.map(|picked| removed_target(picked.from).id());
             let held = origin.is_some() && frame.ui.active() == origin;
-            for gone in lines {
+            for gone in lines.iter().take(past.get()).skip(first.get()) {
                 let old = gone.old;
                 let runs = vec![
                     Run::new(format!("{:5}-", old.number()), RED),
@@ -544,6 +548,10 @@ pub(super) fn inset(
                     )));
                 }
             }
+            gap(
+                frame,
+                row * Count::new(lines.len().saturating_sub(past.get())),
+            );
             frame.finish();
         }
         InsetKind::Thread(thread) => {
@@ -663,9 +671,37 @@ struct Cut {
 }
 
 #[derive(Clone, Copy)]
-struct Band {
-    offset: Px,
-    bottom: Px,
+pub(super) struct Band {
+    pub(super) offset: Px,
+    pub(super) bottom: Px,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Viewed {
+    pub(super) top: Px,
+    pub(super) band: Band,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RowsShown {
+    first: Count,
+    past: Count,
+}
+
+fn removed_rows(count: Count, viewed: Viewed, row: Px) -> RowsShown {
+    let Viewed { top, band } = viewed;
+    let rows = |height: Px| Count::new(usize::try_from(height.ratio(row)).unwrap_or(0));
+    let first = rows(band.offset - top).min(count);
+    let past = (rows(band.bottom - top) + Count::new(1))
+        .min(count)
+        .max(first);
+    RowsShown { first, past }
+}
+
+fn gap(frame: &mut Frame<'_>, height: Px) {
+    if height > Px::ZERO {
+        frame.spacer(height);
+    }
 }
 
 fn cut(placed: &Placed, row: Px, range: Band) -> Option<Cut> {
@@ -790,7 +826,17 @@ fn draw(
             }
             Piece::Inset(number) => {
                 if let Some(shown_inset) = insets.get(number.get()) {
-                    inset(shown.model, frame, shown_inset, shown.path, shown.width);
+                    inset(
+                        shown.model,
+                        frame,
+                        shown_inset,
+                        shown.path,
+                        shown.width,
+                        Viewed {
+                            top: placed.top,
+                            band: range,
+                        },
+                    );
                 }
                 drawn += placed.height;
             }
@@ -852,14 +898,24 @@ fn editor_offset(sheet: &Sheet, insets: &[Inset<'_>], offset: Px, height: Px) ->
             .is_some_and(|inset| matches!(inset.kind, InsetKind::Editing(_))),
         Piece::Code { .. } | Piece::Fold { .. } => false,
     })?;
-    let bottom = editor.top + editor.height + sheet.row;
-    Some(if editor.top < offset {
-        (editor.top - sheet.row * Count::new(2)).max(Px::ZERO)
-    } else if bottom > offset + height {
-        (bottom - height).min(editor.top)
+    Some(into_view(
+        editor.top,
+        editor.height,
+        sheet.row,
+        offset,
+        height,
+    ))
+}
+
+fn into_view(top: Px, height: Px, row: Px, offset: Px, view: Px) -> Px {
+    let bottom = top + height + row;
+    if top < offset {
+        (top - row * Count::new(2)).max(Px::ZERO)
+    } else if bottom > offset + view {
+        (bottom - view).min(top)
     } else {
         offset
-    })
+    }
 }
 
 fn scroll_offset(
@@ -1022,20 +1078,164 @@ pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
     frame.finish();
 }
 
+struct GonePlaced<'inset> {
+    top: Px,
+    inset: Inset<'inset>,
+}
+
+struct GoneSheet<'inset> {
+    pieces: Vec<GonePlaced<'inset>>,
+    total: Px,
+    row: Px,
+}
+
+impl<'inset> GoneSheet<'inset> {
+    fn build(
+        model: &'inset Model,
+        frame: &Frame<'_>,
+        rows: &'inset [FileRow],
+        path: &'inset RelativePath,
+    ) -> Self {
+        let mut notes = noted(model, frame, path);
+        notes.sort_by_key(|noted| (noted.line, noted.inset.kind.layer()));
+        let mut notes = notes.into_iter().peekable();
+        let mut sheet = Self {
+            pieces: Vec::new(),
+            total: Px::ZERO,
+            row: frame.row_height(),
+        };
+        let mut lines = Vec::new();
+        for shown in rows {
+            let FileRow::Removed { old, text } = shown else {
+                continue;
+            };
+            lines.push(GoneLine { old: *old, text });
+            if notes.peek().is_some_and(|noted| noted.line <= *old) {
+                sheet.removed(mem::take(&mut lines));
+                while let Some(noted) = notes.next_if(|noted| noted.line <= *old) {
+                    sheet.push(noted.inset);
+                }
+            }
+        }
+        sheet.removed(lines);
+        for noted in notes {
+            sheet.push(noted.inset);
+        }
+        sheet
+    }
+
+    fn removed(&mut self, lines: Vec<GoneLine<'inset>>) {
+        if lines.is_empty() {
+            return;
+        }
+        let block = Count::new(
+            self.pieces
+                .iter()
+                .filter(|piece| piece.inset.kind.layer() == Layer::Removed)
+                .count(),
+        );
+        self.push(Inset {
+            at: InsetAt::Top,
+            height: self.row * Count::new(lines.len()),
+            kind: InsetKind::Removed { block, lines },
+        });
+    }
+
+    fn push(&mut self, inset: Inset<'inset>) {
+        let height = inset.height;
+        self.pieces.push(GonePlaced {
+            top: self.total,
+            inset,
+        });
+        self.total += height;
+    }
+
+    fn line_top(&self, line: Line) -> Option<Px> {
+        self.pieces
+            .iter()
+            .find_map(|piece| match &piece.inset.kind {
+                InsetKind::Removed { lines, .. } => lines
+                    .iter()
+                    .position(|gone| gone.old == line)
+                    .map(|down| piece.top + self.row * Count::new(down)),
+                InsetKind::Thread(_) | InsetKind::Draft(_) | InsetKind::Editing(_) => None,
+            })
+    }
+
+    fn editor(&self) -> Option<&GonePlaced<'inset>> {
+        self.pieces
+            .iter()
+            .find(|piece| matches!(piece.inset.kind, InsetKind::Editing(_)))
+    }
+
+    fn offset(&self, model: &Model, frame: &mut Frame<'_>) -> Px {
+        let id = ids::source();
+        let offset = model.scrolls.get(id);
+        let Some(request) = model.nav.scroll_to() else {
+            return offset;
+        };
+        let column = frame.ui.placement(id);
+        let height = column.map_or(SOURCE_GUESS, |placement| placement.rect.height);
+        let reachable = column.map_or(Px::ZERO, |placement| {
+            (placement.content.height - placement.rect.height).max(Px::ZERO)
+        });
+        let wanted = match request.aim {
+            Aim::Editor => self
+                .editor()
+                .map(|piece| into_view(piece.top, piece.inset.height, self.row, offset, height)),
+            Aim::Line => self
+                .line_top(request.line)
+                .map(|top| top - self.row * Count::new(3)),
+        };
+        let target = wanted
+            .unwrap_or(offset)
+            .min((self.total - height).max(Px::ZERO))
+            .max(Px::ZERO);
+        if target <= reachable {
+            frame.push(Action::ScrolledToLine(request.ticket));
+        }
+        target
+    }
+}
+
 fn gone(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
     source_toolbar(model, frame, path);
-    let rows = model.review.rows(path, None);
-    let id = ids::source();
-    frame.scroll_column(id, model.scrolls.get(id), Scroller::Plain, Some(FIELD));
     frame.note(
         "this file is deleted by the pull request",
         ORANGE,
         Padding::Step,
     );
-    let all = insets(model, frame, &rows, path, Line::new(0));
-    for shown in &all {
-        inset(model, frame, shown, path, None);
+    let rows = model.review.rows(path, None);
+    let sheet = GoneSheet::build(model, frame, &rows, path);
+    let offset = sheet.offset(model, frame);
+    let scrolled = frame.scroll_column(ids::source(), offset, Scroller::Plain, Some(FIELD));
+    let view = scrolled
+        .interaction
+        .rect()
+        .map_or(SOURCE_GUESS, |rect| rect.height);
+    let width = scrolled.interaction.rect().map(|rect| rect.width);
+    let range = band(frame, scrolled.offset, view);
+    let mut drawn = Px::ZERO;
+    for piece in sheet
+        .pieces
+        .iter()
+        .filter(|piece| piece.top + piece.inset.height > range.offset && piece.top < range.bottom)
+    {
+        gap(frame, piece.top - drawn);
+        inset(
+            model,
+            frame,
+            &piece.inset,
+            path,
+            width,
+            Viewed {
+                top: piece.top,
+                band: range,
+            },
+        );
+        drawn = piece.top + piece.inset.height;
     }
+    gap(frame, sheet.total - drawn + sheet.row);
     frame.finish();
 }
 
@@ -1170,6 +1370,32 @@ pub(super) fn search_view(model: &Model, frame: &mut Frame<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rows_of(count: usize, top: i32, offset: i32, bottom: i32) -> (usize, usize) {
+        let shown = removed_rows(
+            Count::new(count),
+            Viewed {
+                top: Px::new(top),
+                band: Band {
+                    offset: Px::new(offset),
+                    bottom: Px::new(bottom),
+                },
+            },
+            Px::new(16),
+        );
+        (shown.first.get(), shown.past.get())
+    }
+
+    #[test]
+    fn a_removed_block_lays_out_only_the_rows_the_band_reaches() {
+        assert_eq!(rows_of(400, 0, 0, 160), (0, 11));
+        assert_eq!(rows_of(400, 0, 6240, 6400), (390, 400));
+        assert_eq!(rows_of(400, 1600, 0, 1760), (0, 11));
+        assert_eq!(rows_of(400, 0, 800, 960), (50, 61));
+        assert_eq!(rows_of(400, 0, 808, 968), (50, 61));
+        assert_eq!(rows_of(10, 0, 400, 560), (10, 10));
+        assert_eq!(rows_of(3, 0, 0, 800), (0, 3));
+    }
 
     fn shown(start: u32, end: u32, last: u32) -> Vec<(Target, Span)> {
         fold_buttons(Line::new(start), Line::new(end), Line::new(last))

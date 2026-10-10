@@ -149,7 +149,7 @@ fn tokens(pieces: &[Piece]) -> Tokens {
 }
 
 fn wrap(tokens: &[Token], width: Count) -> Vec<Vec<Token>> {
-    let width = width.get().max(8);
+    let width = width.get().max(NARROWEST.get());
     let mut lines: Vec<Vec<Token>> = vec![Vec::new()];
     let mut used = 0;
     for token in tokens {
@@ -223,31 +223,30 @@ fn cell_columns(cell: &Cell) -> Count {
     )
 }
 
-fn row_pieces(row: &Row, widths: &[Count], aligns: &[Align], tone: Tone) -> Vec<Piece> {
-    let space = |columns: usize| Piece {
-        text: Label::new(" ".repeat(columns)),
-        tone: Tone::Plain,
-        goal: None,
-    };
-    let empty = Cell::default();
-    let mut pieces = Vec::new();
-    for (column, width) in widths.iter().enumerate() {
-        if column > 0 {
-            pieces.push(Piece {
-                text: Label::new(" \u{2502} "),
-                tone: Tone::Struck,
-                goal: None,
-            });
+const NARROWEST: Count = Count::new(8);
+
+fn fit_widths(widths: &[Count], room: Count) -> Vec<Count> {
+    let mut order: Vec<usize> = (0..widths.len()).collect();
+    order.sort_by_key(|column| widths.get(*column).copied().unwrap_or(Count::ZERO));
+    let mut shrunk = widths.to_vec();
+    let mut left = room.get();
+    for (placed, column) in order.iter().enumerate() {
+        let width = widths.get(*column).copied().unwrap_or(Count::ZERO);
+        let share = left / (order.len() - placed);
+        let given = width.get().min(share.max(width.get().min(NARROWEST.get())));
+        if let Some(slot) = shrunk.get_mut(*column) {
+            *slot = Count::new(given);
         }
-        let cell = row.cells().get(column).unwrap_or(&empty);
-        let slack = width.get().saturating_sub(cell_columns(cell).get());
-        let before = match aligns.get(column).copied().unwrap_or(Align::Left) {
-            Align::Left => 0,
-            Align::Right => slack,
-            Align::Center => slack / 2,
-        };
-        pieces.push(space(before));
-        pieces.extend(cell.pieces().iter().map(|piece| Piece {
+        left = left.saturating_sub(given);
+    }
+    shrunk
+}
+
+fn cell_lines(cell: &Cell, width: Count, tone: Tone) -> Vec<Vec<Piece>> {
+    let pieces: Vec<Piece> = cell
+        .pieces()
+        .iter()
+        .map(|piece| Piece {
             text: Label::new(piece.text.as_str().replace('\n', " ")),
             tone: if piece.tone == Tone::Plain {
                 tone
@@ -255,10 +254,71 @@ fn row_pieces(row: &Row, widths: &[Count], aligns: &[Align], tone: Tone) -> Vec<
                 piece.tone
             },
             goal: piece.goal.clone(),
-        }));
-        pieces.push(space(slack - before));
-    }
-    pieces
+        })
+        .collect();
+    let found = tokens(&pieces);
+    wrap(&found.all, width)
+        .into_iter()
+        .map(|line| {
+            line.into_iter()
+                .map(|token| Piece {
+                    text: token.text,
+                    tone: token.tone,
+                    goal: token
+                        .goal
+                        .and_then(|goal| found.goals.get(goal.get()).cloned()),
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn row_lines(row: &Row, widths: &[Count], aligns: &[Align], tone: Tone) -> Vec<Vec<Piece>> {
+    let space = |columns: usize| Piece {
+        text: Label::new(" ".repeat(columns)),
+        tone: Tone::Plain,
+        goal: None,
+    };
+    let empty = Cell::default();
+    let cells: Vec<Vec<Vec<Piece>>> = widths
+        .iter()
+        .enumerate()
+        .map(|(column, width)| cell_lines(row.cells().get(column).unwrap_or(&empty), *width, tone))
+        .collect();
+    let tall = cells.iter().map(Vec::len).max().unwrap_or(0).max(1);
+    (0..tall)
+        .map(|at| {
+            let mut pieces = Vec::new();
+            for (column, width) in widths.iter().enumerate() {
+                if column > 0 {
+                    pieces.push(Piece {
+                        text: Label::new(" \u{2502} "),
+                        tone: Tone::Struck,
+                        goal: None,
+                    });
+                }
+                let line = cells
+                    .get(column)
+                    .and_then(|lines| lines.get(at))
+                    .cloned()
+                    .unwrap_or_default();
+                let used: usize = line
+                    .iter()
+                    .map(|piece| piece.text.as_str().chars().count())
+                    .sum();
+                let slack = width.get().saturating_sub(used);
+                let before = match aligns.get(column).copied().unwrap_or(Align::Left) {
+                    Align::Left => 0,
+                    Align::Right => slack,
+                    Align::Center => slack / 2,
+                };
+                pieces.push(space(before));
+                pieces.extend(line);
+                pieces.push(space(slack - before));
+            }
+            pieces
+        })
+        .collect()
 }
 
 struct Writer<'model> {
@@ -365,7 +425,7 @@ impl Writer<'_> {
             .map(|row| row.cells().len())
             .max()
             .unwrap_or(0);
-        let widths: Vec<Count> = (0..columns)
+        let natural: Vec<Count> = (0..columns)
             .map(|column| {
                 rows.iter()
                     .chain([header])
@@ -374,6 +434,11 @@ impl Writer<'_> {
                     .unwrap_or(Count::ZERO)
             })
             .collect();
+        let between = Count::new(3 * columns.saturating_sub(1));
+        let widths = fit_widths(
+            &natural,
+            Count::new(self.width.get().saturating_sub(between.get())),
+        );
         let rule: Vec<Piece> = vec![Piece {
             text: Label::new(
                 widths
@@ -385,11 +450,12 @@ impl Writer<'_> {
             tone: Tone::Struck,
             goal: None,
         }];
-        let lines = [row_pieces(header, &widths, aligns, Tone::Strong), rule]
+        let lines = row_lines(header, &widths, aligns, Tone::Strong)
             .into_iter()
+            .chain([rule])
             .chain(
                 rows.iter()
-                    .map(|row| row_pieces(row, &widths, aligns, Tone::Plain)),
+                    .flat_map(|row| row_lines(row, &widths, aligns, Tone::Plain)),
             );
         for pieces in lines {
             let found = tokens(&pieces);
@@ -555,4 +621,55 @@ pub(super) fn markdown(model: &Model, frame: &mut Frame<'_>, written: &Prose, ke
         previous = Some(block);
     }
     frame.finish();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn counts(widths: &[usize]) -> Vec<Count> {
+        widths.iter().copied().map(Count::new).collect()
+    }
+
+    fn plain(lines: &[Vec<Piece>]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| line.iter().map(|piece| piece.text.as_str()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn a_table_that_fits_keeps_its_widths_and_a_wide_one_shrinks_its_widest_columns() {
+        assert_eq!(
+            fit_widths(&counts(&[3, 10]), Count::new(20)),
+            counts(&[3, 10])
+        );
+        assert_eq!(
+            fit_widths(&counts(&[3, 40, 100]), Count::new(60)),
+            counts(&[3, 28, 29])
+        );
+        assert_eq!(
+            fit_widths(&counts(&[20, 20]), Count::new(10)),
+            counts(&[8, 8])
+        );
+    }
+
+    #[test]
+    fn a_cell_wider_than_its_column_wraps_onto_more_lines_of_the_row() {
+        let parsed = markdown::parse(&Prose::new(
+            "| a | notes |\n|---|---|\n| 1 | one two three four five |",
+        ));
+        let [Block::Table { rows, aligns, .. }] = parsed.as_slice() else {
+            panic!("{parsed:?}");
+        };
+        let row = rows.first().unwrap();
+        assert_eq!(
+            plain(&row_lines(row, &counts(&[1, 9]), aligns, Tone::Plain)),
+            [
+                "1 \u{2502} one two  ",
+                "  \u{2502} three    ",
+                "  \u{2502} four five",
+            ]
+        );
+    }
 }
