@@ -1,9 +1,10 @@
 use domain::{
-    ChangeKind, CommitId, DiffLine, FileChange, Hunk, Line, LineKind, RelativePath, SourceLine,
+    ChangeKind, Commit, CommitId, DiffLine, FileChange, Hunk, Line, LineKind, Login, Moment, Prose,
+    RelativePath, SourceLine,
 };
 use io_process::{Argument, Captured, Program};
 
-use crate::wire::{CommandLine, WireFile, WireHunk, WireKind};
+use crate::wire::{CommandLine, WireCommit, WireFile, WireHunk, WireKind};
 
 pub(crate) struct Invocation {
     pub(crate) program: Program,
@@ -21,6 +22,15 @@ impl From<&CommandLine> for Invocation {
                 .collect(),
         }
     }
+}
+
+pub(crate) fn commit_of(wire: &WireCommit) -> Option<Commit> {
+    Some(Commit {
+        id: CommitId::new(&wire.id)?,
+        author: Login::new(&wire.author),
+        when: Moment::new(&wire.when),
+        subject: Prose::new(&wire.subject),
+    })
 }
 
 pub(crate) fn commit(stdout: &Captured) -> Option<CommitId> {

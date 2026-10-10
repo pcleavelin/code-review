@@ -285,6 +285,7 @@ const DEPENDENCIES: [Allowed; 20] = [
             Literal::new("io-fonts"),
             Literal::new("io-vcs"),
             Literal::new("io-lsp"),
+            Literal::new("io-process"),
             Literal::new("cli"),
             Literal::new("ui"),
             Literal::new("platform"),

@@ -1,4 +1,5 @@
 mod diff;
+mod link;
 mod state;
 mod talk;
 
@@ -6,13 +7,17 @@ use std::fmt;
 
 use strum::VariantArray;
 
-pub use diff::{ChangeKind, DiffLine, FileChange, FileRow, Hunk, LineKind, NumberedLine};
+pub use diff::{
+    ChangeKind, DiffLayout, DiffLine, FileChange, FileRow, Hunk, LineKind, NumberedLine, Paired,
+    Pairing,
+};
+pub use link::{Linked, WebLink};
 pub use state::{
     Draft, DraftError, DraftId, DraftOn, DraftText, FileCount, Mark, Progress, Review, Seen, Side,
     Standing,
 };
 pub use talk::{
-    CodePlace, Conversation, Moment, Note, NoteKind, Prose, Thread, ThreadId, ThreadState,
+    CodePlace, Commit, Conversation, Moment, Note, NoteKind, Prose, Thread, ThreadId, ThreadState,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -16,6 +16,7 @@ use crate::theme::{
 pub(crate) enum View {
     Inbox,
     Changes,
+    Commits,
     Files,
     Symbols,
     Review,
@@ -45,6 +46,7 @@ impl View {
         ViewName(match self {
             Self::Inbox => "Inbox",
             Self::Changes => "Changes",
+            Self::Commits => "Commits",
             Self::Files => "Files",
             Self::Symbols => "Symbols",
             Self::Review => "Review",
@@ -61,7 +63,12 @@ impl View {
             Self::Review => Some(Tab::Review),
             Self::Source => Some(Tab::Source),
             Self::Search => Some(Tab::Search),
-            Self::Changes | Self::Symbols | Self::Files | Self::References | Self::Console => None,
+            Self::Changes
+            | Self::Commits
+            | Self::Symbols
+            | Self::Files
+            | Self::References
+            | Self::Console => None,
         }
     }
 
@@ -478,7 +485,12 @@ impl Default for Panels {
             answered: Ticket::default(),
             console_fit: ConsoleFit::Wanted,
         };
-        let nav = panels.panel(vec![View::Changes, View::Files, View::Symbols]);
+        let nav = panels.panel(vec![
+            View::Changes,
+            View::Commits,
+            View::Files,
+            View::Symbols,
+        ]);
         let centre = panels.panel(vec![View::Inbox, View::Review, View::Source, View::Search]);
         let references = panels.panel(vec![View::References]);
         let console = panels.panel(vec![View::Console]);

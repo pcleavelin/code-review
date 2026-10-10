@@ -113,6 +113,60 @@ pub(crate) fn diff(base: &str, head: &str) -> CommandLine {
     ])
 }
 
+pub(crate) const FIELD: char = '\u{1f}';
+
+pub(crate) fn log(base: &str, head: &str) -> CommandLine {
+    git(&[
+        "log",
+        "--no-color",
+        "--reverse",
+        "--format=%H%x1f%an%x1f%aI%x1f%s",
+        &format!("{base}..{head}"),
+    ])
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireCommit {
+    pub(crate) id: String,
+    pub(crate) author: String,
+    pub(crate) when: String,
+    pub(crate) subject: String,
+}
+
+pub(crate) fn parse_log(text: &str) -> Vec<WireCommit> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(4, FIELD);
+            Some(WireCommit {
+                id: fields.next()?.to_owned(),
+                author: fields.next()?.to_owned(),
+                when: fields.next()?.to_owned(),
+                subject: fields.next().unwrap_or_default().to_owned(),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn commit_diff(commit: &str) -> CommandLine {
+    git(&[
+        "-c",
+        "core.quotepath=off",
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--find-renames",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--unified=3",
+        &format!("{commit}^"),
+        commit,
+    ])
+}
+
+pub(crate) fn show(commit: &str, path: &str) -> CommandLine {
+    git(&["show", &format!("{commit}:{path}")])
+}
+
 pub(crate) fn add_worktree(tree: &str, commit: &str) -> CommandLine {
     git(&["worktree", "add", "--detach", "--force", tree, commit])
 }

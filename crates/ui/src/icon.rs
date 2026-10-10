@@ -25,6 +25,8 @@ pub enum Icon {
     Settings,
     Dot,
     Ellipsis,
+    LinkExternal,
+    Copy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +65,8 @@ impl Icon {
             Self::Settings => '\u{EB51}',
             Self::Dot => '\u{EA71}',
             Self::Ellipsis => '\u{EA7C}',
+            Self::LinkExternal => '\u{EB14}',
+            Self::Copy => '\u{EBCC}',
         })
     }
 
@@ -86,6 +90,8 @@ impl Icon {
             Self::Settings => "settings",
             Self::Dot => "dot",
             Self::Ellipsis => "ellipsis",
+            Self::LinkExternal => "link-external",
+            Self::Copy => "copy",
         })
     }
 

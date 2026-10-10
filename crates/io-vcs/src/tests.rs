@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use domain::{BranchName, ChangeKind, PrNumber, RefName, Root};
+use domain::{BranchName, ChangeKind, Line, PrNumber, RefName, RelativePath, Root};
 use io_process::{Argument, Process, Program};
 
 use crate::{Remote, RemoteUrl, Vcs, VcsError, VcsKind};
@@ -170,6 +170,59 @@ fn a_pull_request_is_fetched_diffed_against_its_merge_base_and_checked_out() {
     );
     vcs.check_out(&tree, &fetched.base).unwrap();
     assert!(tree.join("later.txt").exists());
+}
+
+#[test]
+fn a_pull_requests_commits_are_listed_oldest_first_and_each_diffs_against_its_parent() {
+    if !available("git") {
+        return;
+    }
+    let repo = Scratch::new("commits");
+    repo.run("git", &["init", "-q", "-b", "main"]);
+    repo.put(
+        "a.txt", "one
+",
+    );
+    repo.put(
+        "b.txt", "two
+",
+    );
+    commit_all(&repo, "base");
+    repo.run("git", &["checkout", "-q", "-b", "feature"]);
+    repo.put(
+        "a.txt",
+        "one changed
+",
+    );
+    commit_all(&repo, "first: touch a");
+    repo.put(
+        "b.txt",
+        "two changed
+",
+    );
+    commit_all(&repo, "second: touch b");
+    let vcs = Vcs::detect(&repo.root()).unwrap();
+    let base = vcs.resolve(&RefName::new("main")).unwrap();
+    let head = vcs.resolve(&RefName::new("feature")).unwrap();
+    let commits = vcs.commits(&base, &head).unwrap();
+    let subjects: Vec<&str> = commits
+        .iter()
+        .map(|commit| commit.subject.as_str())
+        .collect();
+    assert_eq!(subjects, ["first: touch a", "second: touch b"]);
+    assert_eq!(commits[1].id, head);
+    let touched: Vec<String> = vcs
+        .commit_changes(&commits[1].id)
+        .unwrap()
+        .iter()
+        .map(|change| change.path().as_str().to_owned())
+        .collect();
+    assert_eq!(touched, ["b.txt"]);
+    let before = vcs.read_at(&base, &RelativePath::new("a.txt")).unwrap();
+    assert_eq!(
+        before.line(Line::new(0)).map(domain::SourceLine::as_str),
+        Some("one")
+    );
 }
 
 #[test]

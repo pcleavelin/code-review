@@ -1,6 +1,6 @@
 use domain::{
     BranchName, CodePlace, CommitId, Conversation, Decision, Draft, DraftText, Line, Login, Moment,
-    Note, PrNumber, PrTitle, Prose, PullRequest, RelativePath, Thread, ThreadId,
+    Note, PrNumber, PrTitle, Prose, PullRequest, RelativePath, Thread, ThreadId, WebLink,
 };
 
 use crate::wire::{WireComment, WireNote, WirePlace, WirePull, WireReview, WireThread};
@@ -52,6 +52,7 @@ fn note(wire: &WireNote) -> Note {
         body: Prose::new(&wire.body),
         when: Moment::new(&wire.when),
         kind: wire.kind,
+        link: wire.link.as_deref().and_then(WebLink::new),
     }
 }
 

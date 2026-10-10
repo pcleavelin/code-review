@@ -2,8 +2,8 @@ use std::fmt;
 use std::path::PathBuf;
 
 use domain::{
-    CommitId, Conversation, Decision, Draft, DraftText, FileChange, PrNumber, Progress,
-    PullRequest, RelativePath, Review, Root, Seen, Standing,
+    Commit, CommitId, Conversation, Decision, Draft, DraftText, FileChange, FileText, Forge,
+    PrNumber, Progress, PullRequest, RelativePath, Review, Root, Seen, Standing,
 };
 use io_forge::{ForgeClient, Submitted};
 use io_review::ReviewStore;
@@ -71,6 +71,7 @@ pub struct Opened {
     pub base: CommitId,
     pub head: CommitId,
     pub changes: Vec<FileChange>,
+    pub commits: Vec<Commit>,
     pub review: Review,
     pub tree: PathBuf,
 }
@@ -135,6 +136,10 @@ impl Repo {
         &self.remote
     }
 
+    pub fn web(&self) -> Option<Forge> {
+        io_forge::forge_of(&self.url).ok()
+    }
+
     pub fn forge(&self) -> Result<ForgeClient, SessionError> {
         Ok(ForgeClient::connect(&self.url)?)
     }
@@ -197,6 +202,7 @@ impl Repo {
         Ok(Opened {
             number,
             changes: self.vcs.diff(&fetched.base, &fetched.head)?,
+            commits: self.vcs.commits(&fetched.base, &fetched.head)?,
             base: fetched.base,
             head: fetched.head,
             review: self.store.load(number)?,
@@ -208,6 +214,18 @@ impl Repo {
         let opened = self.state(number)?;
         self.vcs.check_out(&opened.tree, &opened.head)?;
         Ok(opened)
+    }
+
+    pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, SessionError> {
+        Ok(self.vcs.commit_changes(commit)?)
+    }
+
+    pub fn read_at(
+        &self,
+        commit: &CommitId,
+        path: &RelativePath,
+    ) -> Result<FileText, SessionError> {
+        Ok(self.vcs.read_at(commit, path)?)
     }
 
     pub fn review(&self, number: PrNumber) -> Result<Review, SessionError> {

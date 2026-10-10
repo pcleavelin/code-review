@@ -219,6 +219,38 @@ impl Process {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Opener;
+
+impl Opener {
+    const fn program() -> (&'static str, &'static [&'static str]) {
+        if cfg!(windows) {
+            ("rundll32", &["url.dll,FileProtocolHandler"])
+        } else if cfg!(target_os = "macos") {
+            ("open", &[])
+        } else {
+            ("xdg-open", &[])
+        }
+    }
+
+    pub fn open(target: &Argument) -> Result<(), ProcessError> {
+        let (name, leading) = Self::program();
+        let program = Program::new(name);
+        let arguments: Vec<Argument> = leading
+            .iter()
+            .map(|argument| Argument::new(argument))
+            .chain([target.clone()])
+            .collect();
+        command(&program, &arguments, &env::temp_dir())?
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(drop)
+            .map_err(|error| ProcessError::Start { program, error })
+    }
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "io-process is the one place that starts processes"

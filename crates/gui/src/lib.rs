@@ -1,5 +1,6 @@
 mod action;
 mod app;
+mod diffs;
 mod dump;
 mod element_tip;
 mod field;

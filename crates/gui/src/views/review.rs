@@ -4,6 +4,10 @@ use domain::{
 };
 use ui::{Count, Icon, Label, Run};
 
+use domain::{CommitId, DiffLayout, Linked, WebLink};
+
+use crate::diffs::Loading;
+
 use crate::action::Action;
 use crate::field::Which;
 use crate::ids;
@@ -52,6 +56,115 @@ fn side_word(side: Side) -> Label {
     })
 }
 
+fn commit_changes_window(model: &Model, frame: &mut Frame<'_>, commit: &CommitId) {
+    let Some(opened) = model.review.opened() else {
+        return;
+    };
+    frame.start(Container::ToolbarSmall);
+    let all = ids::ALL_CHANGES.target();
+    if frame.small_button("all changes", all).clicked() {
+        frame.push(Action::Review(ReviewAct::ViewCommit(None)));
+    }
+    frame.attach_tip(all);
+    let subject = opened
+        .commits
+        .iter()
+        .find(|known| &known.id == commit)
+        .map(|known| known.subject.to_string())
+        .unwrap_or_default();
+    frame.label_runs(vec![
+        Run::new(format!(" {commit} "), ORANGE),
+        Run::new(subject, TEXT),
+    ]);
+    frame.finish();
+    let Some(changes) = model.review.diffs.commit_changes(commit) else {
+        let note = match model.review.diffs.commits.get(commit) {
+            Some(Loading::Failed(why)) => why.clone(),
+            _ => Label::new("reading the commit's changes..."),
+        };
+        frame.note(note.as_str(), WEAK, Padding::Step);
+        return;
+    };
+    let id = ids::changes();
+    frame.scroll_column(id, model.scrolls.get(id), Scroller::Plain, None);
+    let shown = model.shown_path();
+    for (position, change) in changes.iter().enumerate() {
+        let path = change.path();
+        let row = TreeRow {
+            level: Count::ZERO,
+            runs: vec![Run::new(format!("  {path}"), TEXT)],
+            badges: vec![
+                Run::new(format!("+{}", change.added()), GREEN),
+                Run::new(format!("-{}", change.removed()), RED),
+            ],
+            marked: (shown.as_ref() == Some(path)).then_some(SELECTED),
+            action: None,
+        };
+        if frame
+            .tree_row(row, ids::CHANGE_ROW.nth(Count::new(position)))
+            .row
+            .clicked()
+        {
+            frame.push(Action::Review(ReviewAct::OpenChange(path.clone())));
+        }
+    }
+    frame.finish();
+}
+
+pub(super) fn commits_window(model: &Model, frame: &mut Frame<'_>) {
+    let Some(open) = model.review.open.as_ref() else {
+        frame.note(
+            "open a pull request in the Inbox to list its commits",
+            WEAK,
+            Padding::Step,
+        );
+        return;
+    };
+    let viewing = model.review.diffs.commit();
+    let id = ids::commits();
+    frame.scroll_column(id, model.scrolls.get(id), Scroller::Plain, None);
+    let all = TreeRow {
+        level: Count::ZERO,
+        runs: vec![Run::new(
+            format!("all changes  {} files", open.opened.changes.len()),
+            TEXT,
+        )],
+        badges: Vec::new(),
+        marked: viewing.is_none().then_some(SELECTED),
+        action: None,
+    };
+    if frame.tree_row(all, ids::ALL_CHANGES.target()).row.clicked() {
+        frame.push(Action::Review(ReviewAct::ViewCommit(None)));
+    }
+    for (position, commit) in open.opened.commits.iter().enumerate() {
+        let target = ids::COMMIT_ROW.nth(Count::new(position));
+        let row = TreeRow {
+            level: Count::ZERO,
+            runs: vec![
+                Run::new(format!("{} ", commit.id), ORANGE),
+                Run::new(commit.subject.to_string(), TEXT),
+                Run::new(format!("  {}  {}", commit.author, commit.when.day()), WEAK),
+            ],
+            badges: Vec::new(),
+            marked: (viewing == Some(&commit.id)).then_some(SELECTED),
+            action: open.link(&Linked::Commit(commit.id.clone())).map(|_| {
+                RowAction::new(Icon::LinkExternal, ids::LINK_OPEN.nth(Count::new(position)))
+            }),
+        };
+        let clicks = frame.tree_row(row, target);
+        if clicks.acted()
+            && let Some(link) = open.link(&Linked::Commit(commit.id.clone()))
+        {
+            frame.push(Action::Review(ReviewAct::OpenLink(link)));
+        } else if clicks.row.clicked() {
+            frame.push(Action::Review(ReviewAct::ViewCommit(Some(
+                commit.id.clone(),
+            ))));
+        }
+    }
+    frame.finish();
+}
+
 pub(super) fn changes_window(model: &Model, frame: &mut Frame<'_>) {
     let Some(opened) = model.review.opened() else {
         frame.note(
@@ -61,6 +174,10 @@ pub(super) fn changes_window(model: &Model, frame: &mut Frame<'_>) {
         );
         return;
     };
+    if let Some(commit) = model.review.diffs.commit() {
+        commit_changes_window(model, frame, commit);
+        return;
+    }
     frame.start(Container::ToolbarSmall);
     let progress = opened.review.progress(&opened.changes);
     frame.label(
@@ -126,16 +243,42 @@ pub(super) fn changes_window(model: &Model, frame: &mut Frame<'_>) {
     frame.finish();
 }
 
+fn layout_toggle(model: &Model, frame: &mut Frame<'_>) {
+    let layout = ids::LAYOUT.target();
+    let split = model.review.diffs.layout == DiffLayout::Split;
+    if frame
+        .button(
+            "split",
+            layout,
+            if split { Chosen::Chosen } else { Chosen::Plain },
+        )
+        .clicked()
+    {
+        frame.push(Action::Review(ReviewAct::ToggleLayout));
+    }
+    frame.attach_tip(layout);
+}
+
 pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
-    let Some(change) = model.review.change(path) else {
+    let Some(change) = model.review.shown_change(path) else {
         return;
     };
-    let seen = model.review.seen(change);
     frame.label_runs(vec![
         Run::new(kind_word(change.kind()), WEAK),
         Run::new(format!("  +{}", change.added()), GREEN),
         Run::new(format!(" -{}", change.removed()), RED),
     ]);
+    layout_toggle(model, frame);
+    if let Some(commit) = model.review.diffs.commit() {
+        frame.label(format!("commit {commit}"), ORANGE);
+        let all = ids::ALL_CHANGES.target();
+        if frame.small_button("all changes", all).clicked() {
+            frame.push(Action::Review(ReviewAct::ViewCommit(None)));
+        }
+        frame.attach_tip(all);
+        return;
+    }
+    let seen = model.review.seen(change);
     let toggle = ids::SEEN.target();
     let (word, chosen) = match seen {
         Seen::Seen => ("seen", Chosen::Chosen),
@@ -184,22 +327,71 @@ pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &Relat
     frame.attach_tip(whole);
 }
 
-fn note_head(note: &Note) -> Vec<Run> {
-    let mut runs = vec![
-        Run::new(note.author.as_str(), ACCENT),
-        Run::new(format!("  {}", note.when), WEAK),
-    ];
+pub(super) fn link_buttons(frame: &mut Frame<'_>, link: Option<WebLink>, key: &Label) {
+    let Some(link) = link else {
+        return;
+    };
+    let open = ids::LINK_OPEN.with(key);
+    if frame
+        .inline_button(
+            vec![Run::new(
+                format!(" {} ", Icon::LinkExternal.glyph().get()),
+                WEAK,
+            )],
+            open,
+        )
+        .clicked()
+    {
+        frame.push(Action::Review(ReviewAct::OpenLink(link.clone())));
+    }
+    frame.attach_tip(open);
+    let copy = ids::LINK_COPY.with(key);
+    if frame
+        .inline_button(
+            vec![Run::new(format!(" {} ", Icon::Copy.glyph().get()), WEAK)],
+            copy,
+        )
+        .clicked()
+    {
+        frame.push(Action::Review(ReviewAct::CopyLink(link)));
+    }
+    frame.attach_tip(copy);
+}
+
+fn note_head(model: &Model, frame: &mut Frame<'_>, note: &Note, key: &Label) {
+    frame.start(Container::FillRow);
+    let author = ids::AUTHOR.with(key);
+    if frame
+        .inline_button(vec![Run::new(note.author.as_str(), ACCENT)], author)
+        .clicked()
+        && let Some(link) = model
+            .review
+            .open
+            .as_ref()
+            .and_then(|open| open.link(&Linked::User(note.author.clone())))
+    {
+        frame.push(Action::Review(ReviewAct::OpenLink(link)));
+    }
+    frame.attach_tip(author);
+    let mut runs = vec![Run::new(format!("  {}", note.when), WEAK)];
     match note.kind {
         NoteKind::Comment => {}
         NoteKind::Approved => runs.push(Run::new("  approved", GREEN)),
         NoteKind::ChangesRequested => runs.push(Run::new("  requested changes", RED)),
     }
-    runs
+    frame.label_runs(runs);
+    link_buttons(frame, note.link.clone(), key);
+    frame.finish();
 }
 
-fn notes(frame: &mut Frame<'_>, thread: &Thread) {
-    for note in &thread.notes {
-        frame.label_runs(note_head(note));
+fn notes(model: &Model, frame: &mut Frame<'_>, thread: &Thread) {
+    for (position, note) in thread.notes.iter().enumerate() {
+        note_head(
+            model,
+            frame,
+            note,
+            &Label::new(format!("{}/{position}", thread.id)),
+        );
         if !note.body.is_empty() {
             frame.note(note.body.as_str(), TEXT, Padding::Step);
         }
@@ -275,7 +467,7 @@ pub(super) fn thread_box(model: &Model, frame: &mut Frame<'_>, thread: &Thread) 
         frame.attach_tip(reply);
     }
     frame.finish();
-    notes(frame, thread);
+    notes(model, frame, thread);
     for draft in replies_to(model, thread) {
         pending_reply(frame, draft);
     }
@@ -536,12 +728,19 @@ pub(super) fn review_tab(model: &Model, frame: &mut Frame<'_>) {
     let opened = &open.opened;
     let id = ids::review();
     frame.scroll_column(id, model.scrolls.get(id), Scroller::Plain, None);
+    frame.start(Container::FillRow);
     frame.title(format!(
         "{}#{} {}",
         open.repo.name(),
         pull.number,
         pull.title
     ));
+    link_buttons(
+        frame,
+        open.link(&Linked::Pull(pull.number)),
+        &Label::new("pull"),
+    );
+    frame.finish();
     frame.label_runs(vec![
         Run::new(format!("by {}", pull.author), WEAK),
         Run::new(format!("   {} <- {}", pull.base, pull.head), TEXT),

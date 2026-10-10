@@ -19,3 +19,5 @@ pub struct Process;
 pub fn run( program: &Program, arguments: &[Argument], directory: &Path, ) -> Result<Output, ProcessError>
 pub fn run_with_input( program: &Program, arguments: &[Argument], directory: &Path, input: &Captured, ) -> Result<Output, ProcessError>
 pub fn spawn( program: &Program, arguments: &[Argument], directory: &Path, ) -> Result<Spawned, ProcessError>
+pub struct Opener;
+pub fn open(target: &Argument) -> Result<(), ProcessError>

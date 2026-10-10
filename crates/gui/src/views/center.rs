@@ -1,8 +1,8 @@
 use std::mem;
 
 use domain::{
-    CodePlace, Draft, DraftOn, FileId, FileRow, FileText, Line, LineCount, LineKind, RelativePath,
-    Side, SourceLine, Span, Thread,
+    CodePlace, DiffLayout, Draft, DraftOn, FileId, FileRow, FileText, Line, LineCount, LineKind,
+    Linked, RelativePath, Side, SourceLine, Span, Thread,
 };
 use ui::{Axis, Button, Count, Icon, Id, Label, Px, Rect, Run, Scrollbar};
 
@@ -25,16 +25,32 @@ use crate::widgets::{
     Width,
 };
 
-use super::review;
+use super::{review, table};
 
-fn source_toolbar(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
+pub(super) fn source_toolbar(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
     frame.start(Container::Toolbar);
     frame.label(path.as_str(), TEXT);
+    let link = model.review.open.as_ref().and_then(|open| {
+        open.link(&Linked::File {
+            commit: model
+                .review
+                .diffs
+                .commit()
+                .unwrap_or(&open.opened.head)
+                .clone(),
+            path: path.clone(),
+            lines: model
+                .nav
+                .lines()
+                .and_then(|lines| Span::new(lines.low(), lines.high())),
+        })
+    });
+    review::link_buttons(frame, link, &Label::new("file"));
     review::change_controls(model, frame, path);
     frame.finish();
 }
 
-fn edge_scroll(vertical: Px, rect: Rect, row_height: Px) -> Px {
+pub(super) fn edge_scroll(vertical: Px, rect: Rect, row_height: Px) -> Px {
     let most = row_height * EDGE_SCROLL_MOST;
     if vertical < rect.top {
         -EDGE_SCROLL_BAND
@@ -69,7 +85,7 @@ impl InsetAt {
 }
 
 #[derive(Clone, Copy)]
-struct GoneLine<'rows> {
+pub(super) struct GoneLine<'rows> {
     old: Line,
     text: &'rows SourceLine,
 }
@@ -104,7 +120,7 @@ fn removed_blocks(rows: &[FileRow], last: Line) -> Vec<RemovedBlock<'_>> {
     blocks
 }
 
-enum InsetKind<'inset> {
+pub(super) enum InsetKind<'inset> {
     Removed {
         block: Count,
         lines: Vec<GoneLine<'inset>>,
@@ -115,7 +131,7 @@ enum InsetKind<'inset> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Layer {
+pub(super) enum Layer {
     Removed,
     Thread,
     Draft,
@@ -123,7 +139,7 @@ enum Layer {
 }
 
 impl InsetKind<'_> {
-    const fn layer(&self) -> Layer {
+    pub(super) const fn layer(&self) -> Layer {
         match self {
             Self::Removed { .. } => Layer::Removed,
             Self::Thread(_) => Layer::Thread,
@@ -133,14 +149,14 @@ impl InsetKind<'_> {
     }
 }
 
-struct Inset<'inset> {
+pub(super) struct Inset<'inset> {
     at: InsetAt,
-    height: Px,
-    kind: InsetKind<'inset>,
+    pub(super) height: Px,
+    pub(super) kind: InsetKind<'inset>,
 }
 
 impl Inset<'_> {
-    fn row_id(&self) -> Id {
+    pub(super) fn row_id(&self) -> Id {
         match &self.kind {
             InsetKind::Removed { block, .. } => ids::removed().nth(block.get()),
             InsetKind::Thread(thread) => ids::thread_box().with(thread.id.as_str()).with("row"),
@@ -162,30 +178,35 @@ fn place_at(blocks: &[RemovedBlock<'_>], side: Side, line: Line) -> InsetAt {
     }
 }
 
-fn insets<'inset>(
+pub(super) struct Noted<'inset> {
+    pub(super) side: Side,
+    pub(super) line: Line,
+    pub(super) inset: Inset<'inset>,
+}
+
+pub(super) fn noted<'inset>(
     model: &'inset Model,
     frame: &Frame<'_>,
-    rows: &'inset [FileRow],
     path: &'inset RelativePath,
-    last: Line,
-) -> Vec<Inset<'inset>> {
+) -> Vec<Noted<'inset>> {
     let row = frame.row_height();
-    let within = |at: InsetAt| match at {
-        InsetAt::Top => InsetAt::Top,
-        InsetAt::After(after) => InsetAt::After(after.min(last)),
-    };
-    let blocks = removed_blocks(rows, last);
-    let mut all: Vec<Inset<'inset>> = Vec::new();
-    for (number, block) in blocks.iter().enumerate() {
-        all.push(Inset {
-            at: within(block.at),
-            height: row * Count::new(block.lines.len()),
-            kind: InsetKind::Removed {
-                block: Count::new(number),
-                lines: block.lines.clone(),
-            },
+    let mut all: Vec<Noted<'inset>> = Vec::new();
+    let mut add = |side: Side, line: Line, guess: Px, kind: InsetKind<'inset>| {
+        let inset = Inset {
+            at: InsetAt::Top,
+            height: guess,
+            kind,
+        };
+        let height = frame
+            .ui
+            .placement(inset.row_id())
+            .map_or(inset.height, |placement| placement.rect.height);
+        all.push(Noted {
+            side,
+            line,
+            inset: Inset { height, ..inset },
         });
-    }
+    };
     let conversation = model
         .review
         .open
@@ -210,11 +231,12 @@ fn insets<'inset>(
             .map(|note| 1 + note.body.as_str().lines().count())
             .sum::<usize>()
             + replies;
-        all.push(Inset {
-            at: within(place_at(&blocks, side, line)),
-            height: row * Count::new(tall + 1) + COMMENT_FRAME,
-            kind: InsetKind::Thread(thread),
-        });
+        add(
+            side,
+            line,
+            row * Count::new(tall + 1) + COMMENT_FRAME,
+            InsetKind::Thread(thread),
+        );
     }
     for draft in model.review.drafts_in(path).filter(|draft| {
         draft
@@ -223,24 +245,57 @@ fn insets<'inset>(
             .is_none_or(|id| !threaded.contains(&id))
     }) {
         let tall = 1 + draft.text.as_str().lines().count().max(1);
-        all.push(Inset {
-            at: within(place_at(&blocks, draft.side, draft.line)),
-            height: row * Count::new(tall) + COMMENT_FRAME,
-            kind: InsetKind::Draft(draft),
-        });
+        add(
+            draft.side,
+            draft.line,
+            row * Count::new(tall) + COMMENT_FRAME,
+            InsetKind::Draft(draft),
+        );
     }
     if let Some(on) = model.review.draft.as_ref().filter(|on| &on.file == path) {
-        all.push(Inset {
-            at: within(place_at(&blocks, on.side, on.line)),
-            height: row * DRAFT_ROWS + DRAFT_FRAME,
-            kind: InsetKind::Editing(on),
-        });
+        add(
+            on.side,
+            on.line,
+            row * DRAFT_ROWS + DRAFT_FRAME,
+            InsetKind::Editing(on),
+        );
     }
-    for inset in &mut all {
-        if let Some(placement) = frame.ui.placement(inset.row_id()) {
-            inset.height = placement.rect.height;
-        }
+    all
+}
+
+fn insets<'inset>(
+    model: &'inset Model,
+    frame: &Frame<'_>,
+    rows: &'inset [FileRow],
+    path: &'inset RelativePath,
+    last: Line,
+) -> Vec<Inset<'inset>> {
+    let row = frame.row_height();
+    let within = |at: InsetAt| match at {
+        InsetAt::Top => InsetAt::Top,
+        InsetAt::After(after) => InsetAt::After(after.min(last)),
+    };
+    let blocks = removed_blocks(rows, last);
+    let mut all: Vec<Inset<'inset>> = Vec::new();
+    for (number, block) in blocks.iter().enumerate() {
+        let inset = Inset {
+            at: within(block.at),
+            height: row * Count::new(block.lines.len()),
+            kind: InsetKind::Removed {
+                block: Count::new(number),
+                lines: block.lines.clone(),
+            },
+        };
+        let height = frame
+            .ui
+            .placement(inset.row_id())
+            .map_or(inset.height, |placement| placement.rect.height);
+        all.push(Inset { height, ..inset });
     }
+    all.extend(noted(model, frame, path).into_iter().map(|noted| Inset {
+        at: within(place_at(&blocks, noted.side, noted.line)),
+        ..noted.inset
+    }));
     all.sort_by_key(|inset| (inset.at, inset.kind.layer()));
     all
 }
@@ -440,7 +495,7 @@ fn select_lines(
     }
 }
 
-fn inset(
+pub(super) fn inset(
     model: &Model,
     frame: &mut Frame<'_>,
     inset: &Inset<'_>,
@@ -565,7 +620,7 @@ fn fold_buttons(start: Line, end: Line, last: Line) -> Vec<FoldButton> {
     buttons
 }
 
-fn fold(frame: &mut Frame<'_>, path: &RelativePath, start: Line, end: Line, last: Line) {
+pub(super) fn fold(frame: &mut Frame<'_>, path: &RelativePath, start: Line, end: Line, last: Line) {
     let count = end.value() - start.value() + 1;
     frame.start(Container::Folded);
     frame.label_runs(vec![Run::new(format!("{:>5} ", "\u{2026}"), WEAK)]);
@@ -851,7 +906,32 @@ fn scroll_offset(
     offset
 }
 
+fn tabled(model: &Model) -> Option<RelativePath> {
+    let path = model.shown_path()?;
+    let split = model.review.diffs.layout == DiffLayout::Split;
+    (model.review.diffs.commit().is_some() || (split && model.review.change(&path).is_some()))
+        .then_some(path)
+}
+
+fn band(frame: &Frame<'_>, offset: Px, view: Px) -> Band {
+    if frame.ui.holding() {
+        Band {
+            offset: (offset - view).max(Px::ZERO),
+            bottom: offset + view * 2,
+        }
+    } else {
+        Band {
+            offset,
+            bottom: offset + view,
+        }
+    }
+}
+
 pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
+    if let Some(path) = tabled(model) {
+        table::table(model, frame, &path);
+        return;
+    }
     let Some(file) = model.nav.file() else {
         match model.nav.gone() {
             Some(path) => gone(model, frame, path),
@@ -929,17 +1009,7 @@ pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
         &sheet,
         &all,
         &marks,
-        if frame.ui.holding() {
-            Band {
-                offset: (scrolled.offset - view).max(Px::ZERO),
-                bottom: scrolled.offset + view * 2,
-            }
-        } else {
-            Band {
-                offset: scrolled.offset,
-                bottom: scrolled.offset + view,
-            }
-        },
+        band(frame, scrolled.offset, view),
     );
     if !segments.is_empty() {
         let scrollbar = frame

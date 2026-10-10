@@ -8,6 +8,7 @@ mod panel_tree;
 mod references;
 mod review;
 mod settings;
+mod table;
 mod tooltip;
 
 use crate::model::Model;

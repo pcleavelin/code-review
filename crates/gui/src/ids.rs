@@ -242,6 +242,34 @@ pub(crate) const WHOLE_FILE: Control = Control::new(
     Element::new("whole-file"),
     Words::new("show the whole file, or only the changes and the lines around them"),
 );
+pub(crate) const LINK_OPEN: Control = Control::new(
+    Element::new("link-open"),
+    Words::new("open it on the forge, in the browser"),
+);
+pub(crate) const LINK_COPY: Control = Control::new(
+    Element::new("link-copy"),
+    Words::new("copy its link on the forge"),
+);
+pub(crate) const AUTHOR: Control = Control::new(
+    Element::new("author"),
+    Words::new("open this person's page on the forge"),
+);
+pub(crate) const TABLE: Control = Control::new(
+    Element::new("table"),
+    Words::new("click a line to select it, shift-click or drag for more; type to comment on it"),
+);
+pub(crate) const LAYOUT: Control = Control::new(
+    Element::new("layout"),
+    Words::new("show the diff side by side, or as one column again"),
+);
+pub(crate) const ALL_CHANGES: Control = Control::new(
+    Element::new("all-changes"),
+    Words::new("back to the whole pull request's changes"),
+);
+pub(crate) const COMMIT_ROW: Control = Control::new(
+    Element::new("commit"),
+    Words::new("show only this commit's changes"),
+);
 pub(crate) const FOLD: Control = Control::new(
     Element::new("fold"),
     Words::new("show all of these unchanged lines"),
@@ -384,6 +412,13 @@ pub(crate) const CONTROLS: &[Control] = &[
     NEXT_HUNK,
     PREVIOUS_HUNK,
     WHOLE_FILE,
+    TABLE,
+    LAYOUT,
+    ALL_CHANGES,
+    COMMIT_ROW,
+    LINK_OPEN,
+    LINK_COPY,
+    AUTHOR,
     FOLD,
     FOLD_UP,
     FOLD_DOWN,
@@ -458,6 +493,10 @@ pub(crate) fn peek_outside() -> Id {
 
 pub(crate) fn console() -> Id {
     Id::new("console")
+}
+
+pub(crate) fn commits() -> Id {
+    Id::new("commits")
 }
 
 pub(crate) fn source() -> Id {

@@ -1,7 +1,7 @@
 use domain::{
     BranchName, CodePlace, CommitId, Conversation, Decision, Draft, DraftId, DraftText, Forge,
-    ForgeKind, Host, Line, Login, Moment, NoteKind, PrNumber, PrTitle, Prose, PullRequest,
-    RelativePath, RepoSlug, Side, ThreadId, ThreadState,
+    ForgeKind, Host, Line, Linked, Login, Moment, NoteKind, PrNumber, PrTitle, Prose, PullRequest,
+    RelativePath, RepoSlug, Side, Span, ThreadId, ThreadState,
 };
 use serde_json::json;
 
@@ -951,4 +951,66 @@ fn a_forgejo_reply_is_a_review_comment_on_its_own_line() {
         json!({"path": "src/lib.rs", "body": "done", "new_position": 10, "old_position": 0})
     );
     assert_eq!(comments.as_array().unwrap().len(), 4);
+}
+
+#[test]
+fn each_forge_spells_its_own_web_links() {
+    let commit = CommitId::new("0123456789abcdef").unwrap();
+    let file = |lines: Option<Span>| Linked::File {
+        commit: commit.clone(),
+        path: RelativePath::new("src/a b.rs"),
+        lines,
+    };
+    let range = Span::new(Line::new(9), Line::new(11));
+    let url = |kind: ForgeKind, linked: &Linked| wire::web_url(kind, "h.org", "o/r", linked);
+    let number = PrNumber::new(7).unwrap();
+    assert_eq!(
+        url(ForgeKind::GitHub, &Linked::Pull(number)),
+        "https://h.org/o/r/pull/7"
+    );
+    assert_eq!(
+        url(ForgeKind::GitLab, &Linked::Pull(number)),
+        "https://h.org/o/r/-/merge_requests/7"
+    );
+    assert_eq!(
+        url(ForgeKind::Forgejo, &Linked::Pull(number)),
+        "https://h.org/o/r/pulls/7"
+    );
+    assert_eq!(
+        url(ForgeKind::GitHub, &file(range)),
+        "https://h.org/o/r/blob/0123456789abcdef/src/a%20b.rs#L10-L12"
+    );
+    assert_eq!(
+        url(ForgeKind::GitLab, &file(range)),
+        "https://h.org/o/r/-/blob/0123456789abcdef/src/a%20b.rs#L10-12"
+    );
+    assert_eq!(
+        url(ForgeKind::Forgejo, &file(Some(Span::line(Line::new(0))))),
+        "https://h.org/o/r/src/commit/0123456789abcdef/src/a%20b.rs#L1"
+    );
+    assert_eq!(
+        url(ForgeKind::GitLab, &Linked::Commit(commit.clone())),
+        "https://h.org/o/r/-/commit/0123456789abcdef"
+    );
+    assert_eq!(
+        url(ForgeKind::GitHub, &Linked::User(Login::new("ann"))),
+        "https://h.org/ann"
+    );
+}
+
+#[test]
+fn a_gitlab_note_links_to_its_anchor_on_the_merge_request() {
+    let threads = wire::anchored(
+        wire::parse_discussions(
+            &json!([{"id": "d1", "notes": [{"id": 42, "body": "hi", "author": {"username": "ann"},
+                "created_at": "2026-01-01T00:00:00Z", "system": false}]}])
+            .to_string(),
+        )
+        .unwrap(),
+        "https://g.org/o/r/-/merge_requests/3",
+    );
+    assert_eq!(
+        threads[0].notes[0].link.as_deref(),
+        Some("https://g.org/o/r/-/merge_requests/3#note_42")
+    );
 }

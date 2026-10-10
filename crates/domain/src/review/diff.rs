@@ -96,6 +96,74 @@ pub enum ChangeKind {
     Renamed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DiffLayout {
+    Unified,
+    Split,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pairing {
+    Same,
+    Changed,
+    Removed,
+    Added,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Paired {
+    pub old: Option<Line>,
+    pub new: Option<Line>,
+    pub pairing: Pairing,
+}
+
+impl Paired {
+    const fn same(old: Line, new: Line) -> Self {
+        Self {
+            old: Some(old),
+            new: Some(new),
+            pairing: Pairing::Same,
+        }
+    }
+}
+
+fn flush(
+    removed: &mut Vec<Line>,
+    added: &mut Vec<Line>,
+    layout: DiffLayout,
+    out: &mut Vec<Paired>,
+) {
+    match layout {
+        DiffLayout::Split => {
+            let longest = removed.len().max(added.len());
+            for index in 0..longest {
+                let old = removed.get(index).copied();
+                let new = added.get(index).copied();
+                let pairing = match (old, new) {
+                    (Some(_), Some(_)) => Pairing::Changed,
+                    (Some(_), None) => Pairing::Removed,
+                    (None, _) => Pairing::Added,
+                };
+                out.push(Paired { old, new, pairing });
+            }
+        }
+        DiffLayout::Unified => {
+            out.extend(removed.iter().map(|old| Paired {
+                old: Some(*old),
+                new: None,
+                pairing: Pairing::Removed,
+            }));
+            out.extend(added.iter().map(|new| Paired {
+                old: None,
+                new: Some(*new),
+                pairing: Pairing::Added,
+            }));
+        }
+    }
+    removed.clear();
+    added.clear();
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileRow {
     Head { line: Line, kind: LineKind },
@@ -183,6 +251,84 @@ impl FileChange {
                 .collect();
             on.contains(&lines.start()) && on.contains(&lines.end())
         })
+    }
+
+    pub fn old_text(&self, new: &FileText) -> FileText {
+        let mut lines: Vec<&str> = Vec::new();
+        let mut at = Line::new(0);
+        for hunk in &self.hunks {
+            if let Some(span) = hunk.new_start.previous().and_then(|end| Span::new(at, end)) {
+                lines.extend(
+                    new.lines(span)
+                        .into_iter()
+                        .flatten()
+                        .map(SourceLine::as_str),
+                );
+            }
+            at = hunk.new_start;
+            for line in hunk.numbered() {
+                match line.kind {
+                    LineKind::Context | LineKind::Removed => lines.push(line.text.as_str()),
+                    LineKind::Added => {}
+                }
+                if let Some(next) = line.new.and_then(Line::next) {
+                    at = next;
+                }
+            }
+        }
+        if let Some(span) = new.count().last().and_then(|last| Span::new(at, last)) {
+            lines.extend(
+                new.lines(span)
+                    .into_iter()
+                    .flatten()
+                    .map(SourceLine::as_str),
+            );
+        }
+        let mut whole = lines.join("\n");
+        whole.push('\n');
+        FileText::from(whole.as_str())
+    }
+
+    pub fn paired(&self, old: LineCount, new: LineCount, layout: DiffLayout) -> Vec<Paired> {
+        let mut out = Vec::new();
+        let (mut at_old, mut at_new) = (Line::new(0), Line::new(0));
+        let (mut removed, mut added) = (Vec::new(), Vec::new());
+        for hunk in &self.hunks {
+            while at_old < hunk.old_start && at_new < hunk.new_start {
+                out.push(Paired::same(at_old, at_new));
+                at_old = at_old.next().unwrap_or(at_old);
+                at_new = at_new.next().unwrap_or(at_new);
+            }
+            for line in hunk.numbered() {
+                match (line.kind, line.old, line.new) {
+                    (LineKind::Context, Some(old_line), Some(new_line)) => {
+                        flush(&mut removed, &mut added, layout, &mut out);
+                        out.push(Paired::same(old_line, new_line));
+                    }
+                    (LineKind::Removed, Some(old_line), _) => {
+                        if !added.is_empty() {
+                            flush(&mut removed, &mut added, layout, &mut out);
+                        }
+                        removed.push(old_line);
+                    }
+                    (LineKind::Added, _, Some(new_line)) => added.push(new_line),
+                    _ => {}
+                }
+                if let Some(next) = line.old.and_then(Line::next) {
+                    at_old = next;
+                }
+                if let Some(next) = line.new.and_then(Line::next) {
+                    at_new = next;
+                }
+            }
+            flush(&mut removed, &mut added, layout, &mut out);
+        }
+        while at_old.value() < old.value() && at_new.value() < new.value() {
+            out.push(Paired::same(at_old, at_new));
+            at_old = at_old.next().unwrap_or(at_old);
+            at_new = at_new.next().unwrap_or(at_new);
+        }
+        out
     }
 
     pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow> {

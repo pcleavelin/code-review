@@ -7,7 +7,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
-use domain::{BranchName, CommitId, FileChange, PrNumber, RefName, Root};
+use domain::{
+    BranchName, Commit, CommitId, FileChange, FileText, PrNumber, RefName, RelativePath, Root,
+};
 use io_process::Process;
 
 use crate::convert::{Invocation, commit, file_change};
@@ -233,6 +235,33 @@ impl Vcs {
             .into_iter()
             .map(file_change)
             .collect())
+    }
+
+    pub fn commits(&self, base: &CommitId, head: &CommitId) -> Result<Vec<Commit>, VcsError> {
+        let stdout = Self::run(
+            &wire::log(base.as_str(), head.as_str()),
+            self.root.as_path(),
+        )?;
+        Ok(wire::parse_log(&stdout.text())
+            .iter()
+            .filter_map(convert::commit_of)
+            .collect())
+    }
+
+    pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, VcsError> {
+        let stdout = Self::run(&wire::commit_diff(commit.as_str()), self.root.as_path())?;
+        Ok(wire::parse_diff(&stdout.text())
+            .into_iter()
+            .map(file_change)
+            .collect())
+    }
+
+    pub fn read_at(&self, commit: &CommitId, path: &RelativePath) -> Result<FileText, VcsError> {
+        let stdout = Self::run(
+            &wire::show(commit.as_str(), path.as_str()),
+            self.root.as_path(),
+        )?;
+        Ok(FileText::from(stdout.text().as_str()))
     }
 
     pub fn check_out(&self, tree: &Path, commit: &CommitId) -> Result<(), VcsError> {

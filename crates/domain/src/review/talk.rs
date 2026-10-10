@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::review::{Login, Side};
+use crate::review::{CommitId, Login, Side, WebLink};
 use crate::text::{Line, RelativePath};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -65,6 +65,14 @@ impl fmt::Display for Prose {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Commit {
+    pub id: CommitId,
+    pub author: Login,
+    pub when: Moment,
+    pub subject: Prose,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ThreadId(String);
 
@@ -98,6 +106,7 @@ pub struct Note {
     pub body: Prose,
     pub when: Moment,
     pub kind: NoteKind,
+    pub link: Option<WebLink>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

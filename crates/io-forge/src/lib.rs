@@ -5,8 +5,8 @@ use std::env;
 use std::fmt;
 
 use domain::{
-    Conversation, Decision, Draft, DraftText, Forge, ForgeKind, Host, PrNumber, PullRequest,
-    RefName, RepoSlug,
+    Conversation, Decision, Draft, DraftText, Forge, ForgeKind, Host, Linked, PrNumber,
+    PullRequest, RefName, RepoSlug, WebLink,
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
@@ -200,23 +200,34 @@ fn token(kind: ForgeKind, host: &Host) -> Option<Token> {
         })
 }
 
+pub fn forge_of(url: &RemoteUrl) -> Result<Forge, ForgeError> {
+    let unreadable = || ForgeError::UnreadableUrl(url.clone());
+    let remote = wire::parse_remote(url.as_str()).ok_or_else(unreadable)?;
+    let host = Host::new(&remote.host).ok_or_else(unreadable)?;
+    let slug = RepoSlug::new(&remote.path).ok_or_else(unreadable)?;
+    let chosen = env::var(EnvVar::ReviewForge.name())
+        .ok()
+        .and_then(|name| wire::forge_named(&name));
+    let kind = chosen
+        .or_else(|| wire::detect(host.as_str()))
+        .ok_or_else(|| ForgeError::UnknownHost(host.clone()))?;
+    Ok(Forge::new(kind, host, slug))
+}
+
+pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink> {
+    WebLink::new(&wire::web_url(
+        forge.kind(),
+        forge.host().as_str(),
+        forge.slug().as_str(),
+        linked,
+    ))
+}
+
 impl ForgeClient {
     pub fn connect(url: &RemoteUrl) -> Result<Self, ForgeError> {
-        let unreadable = || ForgeError::UnreadableUrl(url.clone());
-        let remote = wire::parse_remote(url.as_str()).ok_or_else(unreadable)?;
-        let host = Host::new(&remote.host).ok_or_else(unreadable)?;
-        let slug = RepoSlug::new(&remote.path).ok_or_else(unreadable)?;
-        let chosen = env::var(EnvVar::ReviewForge.name())
-            .ok()
-            .and_then(|name| wire::forge_named(&name));
-        let kind = chosen
-            .or_else(|| wire::detect(host.as_str()))
-            .ok_or_else(|| ForgeError::UnknownHost(host.clone()))?;
-        let token = token(kind, &host);
-        Ok(Self {
-            forge: Forge::new(kind, host, slug),
-            token,
-        })
+        let forge = forge_of(url)?;
+        let token = token(forge.kind(), forge.host());
+        Ok(Self { forge, token })
     }
 
     pub fn forge(&self) -> &Forge {
@@ -331,6 +342,13 @@ impl ForgeClient {
                 threads
             }
         };
+        let pull_url = wire::web_url(
+            self.forge.kind(),
+            self.forge.host().as_str(),
+            self.forge.slug().as_str(),
+            &Linked::Pull(pull.number),
+        );
+        let threads = wire::anchored(threads, &pull_url);
         convert::conversation(&pull.description, &threads)
             .ok_or_else(|| ForgeError::Malformed(ResponseBody::default()))
     }

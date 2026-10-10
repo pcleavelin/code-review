@@ -198,10 +198,11 @@ fn tab(model: &Model, frame: &mut Frame<'_>, view: View, chosen: Chosen) {
 
 fn body(model: &Model, frame: &mut Frame<'_>, view: View, area: Extent) {
     match view {
-        View::Changes | View::Symbols | View::Files => {
+        View::Changes | View::Commits | View::Symbols | View::Files => {
             frame.start(Container::PanelColumn);
             match view {
                 View::Changes => review::changes_window(model, frame),
+                View::Commits => review::commits_window(model, frame),
                 View::Symbols => left::symbols_window(model, frame),
                 _ => left::files_window(model, frame),
             }

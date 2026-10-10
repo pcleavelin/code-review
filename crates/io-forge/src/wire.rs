@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use domain::{Decision, ForgeKind, NoteKind, Side, ThreadState};
+use domain::{Decision, ForgeKind, Linked, NoteKind, Side, Span, ThreadState};
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
 
@@ -416,6 +416,7 @@ pub(crate) struct WireNote {
     pub(crate) body: String,
     pub(crate) when: String,
     pub(crate) kind: NoteKind,
+    pub(crate) link: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -453,6 +454,86 @@ fn note(value: &Value, author: &str, when: &str, kind: NoteKind) -> WireNote {
         body: text_at(value, BODY).unwrap_or_default(),
         when: text_at(value, when).unwrap_or_default(),
         kind,
+        link: text_at(value, "/html_url").or_else(|| {
+            value
+                .pointer(ID)
+                .and_then(Value::as_u64)
+                .map(|id| format!("{NOTE_ANCHOR}{id}"))
+        }),
+    }
+}
+
+pub(crate) const NOTE_ANCHOR: &str = "#note_";
+
+pub(crate) fn anchored(mut threads: Vec<WireThread>, pull_url: &str) -> Vec<WireThread> {
+    for note in threads
+        .iter_mut()
+        .flat_map(|thread| thread.notes.iter_mut())
+    {
+        if let Some(link) = note.link.as_mut()
+            && link.starts_with(NOTE_ANCHOR)
+        {
+            *link = format!("{pull_url}{link}");
+        }
+    }
+    threads
+}
+
+fn url_path(path: &str) -> String {
+    path.chars()
+        .map(|character| match character {
+            ' ' => "%20".to_owned(),
+            '#' => "%23".to_owned(),
+            '?' => "%3F".to_owned(),
+            '%' => "%25".to_owned(),
+            other => other.to_string(),
+        })
+        .collect()
+}
+
+pub(crate) fn web_url(kind: ForgeKind, host: &str, slug: &str, linked: &Linked) -> String {
+    let repo = format!("https://{host}/{slug}");
+    let lines = |lines: &Option<Span>| match (kind, lines) {
+        (_, None) => String::new(),
+        (_, Some(span)) if span.start() == span.end() => format!("#L{}", span.end().number()),
+        (ForgeKind::GitLab, Some(span)) => {
+            format!("#L{}-{}", span.start().number(), span.end().number())
+        }
+        (ForgeKind::GitHub | ForgeKind::Forgejo, Some(span)) => {
+            format!("#L{}-L{}", span.start().number(), span.end().number())
+        }
+    };
+    match (kind, linked) {
+        (ForgeKind::GitHub, Linked::Pull(number)) => format!("{repo}/pull/{number}"),
+        (ForgeKind::GitLab, Linked::Pull(number)) => format!("{repo}/-/merge_requests/{number}"),
+        (ForgeKind::Forgejo, Linked::Pull(number)) => format!("{repo}/pulls/{number}"),
+        (ForgeKind::GitLab, Linked::Commit(commit)) => {
+            format!("{repo}/-/commit/{}", commit.as_str())
+        }
+        (ForgeKind::GitHub | ForgeKind::Forgejo, Linked::Commit(commit)) => {
+            format!("{repo}/commit/{}", commit.as_str())
+        }
+        (
+            kind,
+            Linked::File {
+                commit,
+                path,
+                lines: span,
+            },
+        ) => {
+            let at = match kind {
+                ForgeKind::GitHub => "blob",
+                ForgeKind::GitLab => "-/blob",
+                ForgeKind::Forgejo => "src/commit",
+            };
+            format!(
+                "{repo}/{at}/{}/{}{}",
+                commit.as_str(),
+                url_path(path.as_str()),
+                lines(span)
+            )
+        }
+        (_, Linked::User(login)) => format!("https://{host}/{login}"),
     }
 }
 

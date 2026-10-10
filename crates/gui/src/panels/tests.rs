@@ -8,7 +8,7 @@ fn rect(left: i32, top: i32, width: i32, height: i32) -> Rect {
     Rect::new(Px::new(left), Px::new(top), Px::new(width), Px::new(height))
 }
 
-const DEFAULT: &str = "down6(820 right5(220 0[Changes* Files Symbols] right4(740 1[Inbox* Review Source Search] 2[References*])) 3[Console*])";
+const DEFAULT: &str = "down6(820 right5(220 0[Changes* Commits Files Symbols] right4(740 1[Inbox* Review Source Search] 2[References*])) 3[Console*])";
 
 #[test]
 fn the_default_tree_holds_every_view_once() {
@@ -63,7 +63,7 @@ fn a_split_opens_the_picker_on_an_empty_panel_and_a_pick_moves_the_view() {
     assert_eq!(panels.picker(), None);
     assert_eq!(
         panels.to_string(),
-        "down6(820 right5(220 0[Changes* Files Symbols] right4(740 right8(500 1[Inbox* Review Search] 7[Source*]) 2[References*])) 3[Console*])"
+        "down6(820 right5(220 0[Changes* Commits Files Symbols] right4(740 right8(500 1[Inbox* Review Search] 7[Source*]) 2[References*])) 3[Console*])"
     );
 }
 
@@ -73,7 +73,7 @@ fn taking_the_last_view_from_a_panel_closes_it() {
     panels.put(View::References, BranchId(0));
     assert_eq!(
         panels.to_string(),
-        "down6(820 right5(220 0[Changes Files Symbols References*] 1[Inbox* Review Source Search]) 3[Console*])"
+        "down6(820 right5(220 0[Changes Commits Files Symbols References*] 1[Inbox* Review Source Search]) 3[Console*])"
     );
 }
 
@@ -88,7 +88,7 @@ fn a_drop_on_an_edge_splits_the_panel_on_that_side() {
     panels.drop_view(View::Console, target);
     assert_eq!(
         panels.to_string(),
-        "right5(220 down8(500 0[Changes* Files Symbols] 7[Console*]) right4(740 1[Inbox* Review Source Search] 2[References*]))"
+        "right5(220 down8(500 0[Changes* Commits Files Symbols] 7[Console*]) right4(740 1[Inbox* Review Source Search] 2[References*]))"
     );
     let alone = DropTarget {
         panel: BranchId(7),
@@ -107,7 +107,7 @@ fn closing_a_panel_hands_its_place_to_its_sibling() {
     panels.close(BranchId(2));
     assert_eq!(
         panels.to_string(),
-        "right5(220 0[Changes* Files Symbols] 1[Inbox* Review Source Search])"
+        "right5(220 0[Changes* Commits Files Symbols] 1[Inbox* Review Source Search])"
     );
     panels.close(BranchId(0));
     assert!(panels.is_single());
@@ -192,7 +192,7 @@ fn a_tree_survives_its_saved_layout() {
     assert_eq!(restored.layout(), panels.layout());
     assert_eq!(
         restored.to_string(),
-        "down8(700 right6(220 0[Changes* Files Symbols] right5(740 down3(500 1[Inbox* Review Source] 2[Search*]) 4[References*])) 7[Console*])"
+        "down8(700 right6(220 0[Changes* Commits Files Symbols] right5(740 down3(500 1[Inbox* Review Source] 2[Search*]) 4[References*])) 7[Console*])"
     );
 }
 
@@ -221,7 +221,7 @@ fn closing_a_panels_last_tab_closes_the_panel_but_never_the_last_panel() {
     panels.close_view(View::References);
     assert_eq!(
         panels.to_string(),
-        "down6(820 right5(220 0[Changes* Files Symbols] 1[Inbox* Review Search]) 3[Console*])"
+        "down6(820 right5(220 0[Changes* Commits Files Symbols] 1[Inbox* Review Search]) 3[Console*])"
     );
     for view in View::VARIANTS {
         panels.close_view(*view);
@@ -240,7 +240,7 @@ fn a_closed_view_is_brought_back_in_a_split_beside_the_view_it_serves() {
     panels.bring(View::References, View::Source);
     assert_eq!(
         panels.to_string(),
-        "down6(820 right5(220 0[Changes* Files Symbols] right8(500 1[Inbox* Review Source Search] 7[References*])) 3[Console*])"
+        "down6(820 right5(220 0[Changes* Commits Files Symbols] right8(500 1[Inbox* Review Source Search] 7[References*])) 3[Console*])"
     );
     panels.activate(View::Symbols);
     panels.bring(View::Changes, View::Source);

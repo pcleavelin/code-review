@@ -20,7 +20,7 @@ repo::pub struct RepoName(String);
 repo::pub fn new(text: &str) -> Self
 repo::pub fn as_str(&self) -> &str
 repo::pub fn answers_to(&self, asked: &Self) -> bool
-repo::pub struct Opened { pub number: PrNumber, pub base: CommitId, pub head: CommitId, pub changes: Vec<FileChange>, pub review: Review, pub tree: PathBuf, }
+repo::pub struct Opened { pub number: PrNumber, pub base: CommitId, pub head: CommitId, pub changes: Vec<FileChange>, pub commits: Vec<Commit>, pub review: Review, pub tree: PathBuf, }
 repo::pub fn change(&self, path: &RelativePath) -> Option<&FileChange>
 repo::pub fn seen(&self, change: &FileChange) -> Seen
 repo::pub struct Entry { pub repo: RepoName, pub pull: PullRequest, pub progress: Option<Progress>, pub drafts: Vec<Draft>, pub standing: Standing, }
@@ -29,6 +29,7 @@ repo::pub fn find(root: &Root) -> Result<Self, SessionError>
 repo::pub const fn root(&self) -> &Root
 repo::pub const fn name(&self) -> &RepoName
 repo::pub const fn remote(&self) -> &Remote
+repo::pub fn web(&self) -> Option<Forge>
 repo::pub fn forge(&self) -> Result<ForgeClient, SessionError>
 repo::pub fn pulls(&self) -> Result<Vec<PullRequest>, SessionError>
 repo::pub fn inbox(&self) -> Result<Vec<Entry>, SessionError>
@@ -37,6 +38,8 @@ repo::pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, Ses
 repo::pub fn fetch(&self, pull: &PullRequest) -> Result<Opened, SessionError>
 repo::pub fn state(&self, number: PrNumber) -> Result<Opened, SessionError>
 repo::pub fn reopen(&self, number: PrNumber) -> Result<Opened, SessionError>
+repo::pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, SessionError>
+repo::pub fn read_at( &self, commit: &CommitId, path: &RelativePath, ) -> Result<FileText, SessionError>
 repo::pub fn review(&self, number: PrNumber) -> Result<Review, SessionError>
 repo::pub fn save(&self, opened: &Opened) -> Result<(), SessionError>
 repo::pub const fn store(&self) -> &ReviewStore

@@ -206,6 +206,9 @@ review::diff::pub const fn old_start(&self) -> Line
 review::diff::pub const fn new_start(&self) -> Line
 review::diff::pub fn numbered(&self) -> impl Iterator<Item = NumberedLine<'_>>
 review::diff::pub enum ChangeKind { Added, Deleted, Modified, Renamed, }
+review::diff::pub enum DiffLayout { Unified, Split, }
+review::diff::pub enum Pairing { Same, Changed, Removed, Added, }
+review::diff::pub struct Paired { pub old: Option<Line>, pub new: Option<Line>, pub pairing: Pairing, }
 review::diff::pub enum FileRow { Head { line: Line, kind: LineKind }, Removed { old: Line, text: SourceLine }, }
 review::diff::pub struct FileChange { path: RelativePath, old_path: Option<RelativePath>, kind: ChangeKind, hunks: Vec<Hunk>, }
 review::diff::pub const fn new( path: RelativePath, old_path: Option<RelativePath>, kind: ChangeKind, hunks: Vec<Hunk>, ) -> Self
@@ -217,7 +220,13 @@ review::diff::pub fn added(&self) -> LineCount
 review::diff::pub fn removed(&self) -> LineCount
 review::diff::pub fn hash(&self) -> TextHash
 review::diff::pub fn commentable(&self, side: Side, lines: Span) -> bool
+review::diff::pub fn old_text(&self, new: &FileText) -> FileText
+review::diff::pub fn paired(&self, old: LineCount, new: LineCount, layout: DiffLayout) -> Vec<Paired>
 review::diff::pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow>
+review::link::pub struct WebLink(String);
+review::link::pub fn new(text: &str) -> Option<Self>
+review::link::pub fn as_str(&self) -> &str
+review::link::pub enum Linked { Pull(PrNumber), Commit(CommitId), File { commit: CommitId, path: RelativePath, lines: Option<Span>, }, User(Login), }
 review::state::pub enum Side { Old, New, }
 review::state::pub const fn name(self) -> Spelling
 review::state::pub struct DraftId(u32);
@@ -267,11 +276,12 @@ review::talk::pub struct Prose(String);
 review::talk::pub fn new(text: &str) -> Self
 review::talk::pub fn as_str(&self) -> &str
 review::talk::pub fn is_empty(&self) -> bool
+review::talk::pub struct Commit { pub id: CommitId, pub author: Login, pub when: Moment, pub subject: Prose, }
 review::talk::pub struct ThreadId(String);
 review::talk::pub fn new(text: &str) -> Option<Self>
 review::talk::pub fn as_str(&self) -> &str
 review::talk::pub enum NoteKind { Comment, Approved, ChangesRequested, }
-review::talk::pub struct Note { pub author: Login, pub body: Prose, pub when: Moment, pub kind: NoteKind, }
+review::talk::pub struct Note { pub author: Login, pub body: Prose, pub when: Moment, pub kind: NoteKind, pub link: Option<WebLink>, }
 review::talk::pub struct CodePlace { pub file: RelativePath, pub side: Side, pub line: Line, }
 review::talk::pub enum ThreadState { Open, Resolved, Outdated, }
 review::talk::pub struct Thread { pub id: ThreadId, pub place: Option<CodePlace>, pub state: ThreadState, pub notes: Vec<Note>, }

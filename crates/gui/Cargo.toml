@@ -13,6 +13,8 @@ io-review = { path = "../io-review" }
 io-config = { path = "../io-config" }
 io-fonts = { path = "../io-fonts" }
 io-lsp = { path = "../io-lsp" }
+io-process = { path = "../io-process" }
+io-forge = { path = "../io-forge" }
 cli = { path = "../cli" }
 ui = { path = "../ui" }
 platform = { path = "../platform" }

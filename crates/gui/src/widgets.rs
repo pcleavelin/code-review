@@ -422,6 +422,15 @@ impl Frame<'_> {
             .leaf(Kind::None, Layout::row().grow_width(), Style::NONE, None);
     }
 
+    pub(crate) fn custom_block(&mut self, draw: Box<dyn Draw>, height: Px, id: Id) -> Interaction {
+        self.ui.leaf(
+            Kind::Custom(draw),
+            Layout::row().grow_width().height(height),
+            Style::NONE,
+            Some(id),
+        )
+    }
+
     pub(crate) fn spacer(&mut self, height: Px) {
         self.ui
             .leaf(Kind::None, Layout::row().height(height), Style::NONE, None);

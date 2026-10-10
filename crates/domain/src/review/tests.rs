@@ -1,6 +1,6 @@
 use crate::review::{
-    ChangeKind, CommitId, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk,
-    LineKind, Moment, PrNumber, RepoSlug, Review, Seen, Side, Standing,
+    ChangeKind, CommitId, DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow,
+    Hunk, LineKind, Moment, Pairing, PrNumber, RepoSlug, Review, Seen, Side, Standing,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -267,4 +267,61 @@ fn a_slug_needs_an_owner_and_a_name() {
     );
     assert!(RepoSlug::new("owner//repo").is_none());
     assert!(RepoSlug::new("repo").is_none());
+}
+
+#[test]
+fn the_old_file_is_the_head_file_with_each_hunk_undone() {
+    let head = FileText::from("top\na\nx\nc\nend\n");
+    let change = change(
+        "src/lib.rs",
+        vec![Hunk::new(
+            Line::new(1),
+            Line::new(1),
+            vec![
+                line(LineKind::Context, "a"),
+                line(LineKind::Removed, "b"),
+                line(LineKind::Added, "x"),
+                line(LineKind::Context, "c"),
+            ],
+        )],
+    );
+    assert_eq!(
+        change.old_text(&head),
+        FileText::from("top\na\nb\nc\nend\n")
+    );
+}
+
+#[test]
+fn split_pairs_a_replaced_line_and_unified_stacks_it() {
+    let file = replace_b_with_x();
+    let three = FileText::from("a\nx\nc\n").count();
+    let pairs = |layout: DiffLayout| -> Vec<(Option<u32>, Option<u32>, Pairing)> {
+        file.paired(three, three, layout)
+            .iter()
+            .map(|pair| {
+                (
+                    pair.old.map(Line::value),
+                    pair.new.map(Line::value),
+                    pair.pairing,
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        pairs(DiffLayout::Split),
+        vec![
+            (Some(0), Some(0), Pairing::Same),
+            (Some(1), Some(1), Pairing::Changed),
+            (Some(2), Some(2), Pairing::Same),
+        ]
+    );
+    assert_eq!(
+        pairs(DiffLayout::Unified),
+        vec![
+            (Some(0), Some(0), Pairing::Same),
+            (Some(1), None, Pairing::Removed),
+            (None, Some(1), Pairing::Added),
+            (Some(2), Some(2), Pairing::Same),
+        ]
+    );
 }

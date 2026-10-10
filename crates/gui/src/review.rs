@@ -3,16 +3,19 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 use domain::{
-    CodePlace, Conversation, Decision, Draft, DraftId, DraftOn, DraftText, FileChange, FileRow,
-    FileText, Hunk, Line, LineKind, PrNumber, PullRequest, RelativePath, Root, Seen, Side, Span,
-    Standing,
+    CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn, DraftText,
+    FileChange, FileRow, FileText, Forge, Hunk, Line, LineKind, Linked, PrNumber, PullRequest,
+    RelativePath, Root, Seen, Side, Span, Standing, WebLink,
 };
 use index::Indexed;
+use io_process::{Argument, Opener};
 use io_review::ReviewStamp;
+use platform::ClipboardRequest;
 use session::{Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName};
 use ui::{Count, Label, Typed};
 
 use crate::app::App;
+use crate::diffs::{DiffJobs, Diffs, SidesKey};
 use crate::field::Which;
 use crate::keys::Going;
 use crate::model::{LineSelection, Model, Tab};
@@ -51,9 +54,16 @@ pub(crate) struct OpenReview {
     pub(crate) pull: PullRequest,
     pub(crate) opened: Opened,
     pub(crate) talk: Talk,
+    pub(crate) web: Option<Forge>,
 }
 
 impl OpenReview {
+    pub(crate) fn link(&self, linked: &Linked) -> Option<WebLink> {
+        self.web
+            .as_ref()
+            .and_then(|forge| io_forge::web_link(forge, linked))
+    }
+
     pub(crate) fn conversation(&self) -> Option<&Conversation> {
         match &self.talk {
             Talk::Got(conversation) => Some(conversation),
@@ -87,6 +97,7 @@ pub(crate) struct ReviewJobs {
     talk: Option<Job<Result<Conversation, Label>>>,
     submit: Option<Job<Result<Submitted, Label>>>,
     pin: Option<Job<Result<PinLanded, Label>>>,
+    pub(crate) diffs: DiffJobs,
 }
 
 struct PinLanded {
@@ -101,6 +112,7 @@ impl ReviewJobs {
             || self.talk.is_some()
             || self.submit.is_some()
             || self.pin.is_some()
+            || self.diffs.busy()
     }
 }
 
@@ -149,6 +161,7 @@ pub(crate) struct Reviewing {
     pub(crate) submitting: Submitting,
     pub(crate) whole: BTreeSet<RelativePath>,
     pub(crate) unfolded: BTreeMap<RelativePath, Vec<Span>>,
+    pub(crate) diffs: Diffs,
     stamp: Option<ReviewStamp>,
     last_poll: Instant,
 }
@@ -171,6 +184,7 @@ impl Reviewing {
             submitting: Submitting::Idle,
             whole: BTreeSet::new(),
             unfolded: BTreeMap::new(),
+            diffs: Diffs::default(),
             stamp: None,
             last_poll: Instant::now(),
         }
@@ -186,6 +200,17 @@ impl Reviewing {
 
     pub(crate) fn change(&self, path: &RelativePath) -> Option<&FileChange> {
         self.opened()?.change(path)
+    }
+
+    pub(crate) fn shown_change(&self, path: &RelativePath) -> Option<&FileChange> {
+        match self.diffs.commit() {
+            Some(commit) => self
+                .diffs
+                .commit_changes(commit)?
+                .iter()
+                .find(|change| change.path() == path),
+            None => self.change(path),
+        }
     }
 
     pub(crate) fn seen(&self, change: &FileChange) -> Seen {
@@ -351,6 +376,11 @@ pub(crate) enum ReviewAct {
     RemoveDraft(DraftId),
     RefreshTalk,
     Submit(Decision),
+    OpenLink(WebLink),
+    CopyLink(WebLink),
+    ViewCommit(Option<CommitId>),
+    NeedSides(SidesKey),
+    ToggleLayout,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -379,6 +409,10 @@ pub(crate) enum ReviewStatus {
     Submitted { decision: Decision, comments: Count },
     SubmitFailed(Label),
     Reloaded,
+    LinkOpened(WebLink),
+    LinkCopied(WebLink),
+    LinkFailed(Label),
+    CommitComment,
 }
 
 impl ReviewStatus {
@@ -393,6 +427,8 @@ impl ReviewStatus {
             | Self::Drafted(_)
             | Self::DraftRemoved(_)
             | Self::Submitted { .. }
+            | Self::LinkOpened(_)
+            | Self::LinkCopied(_)
             | Self::Reloaded => Tone::Done,
             Self::NotOpened
             | Self::NotAChange
@@ -400,11 +436,13 @@ impl ReviewStatus {
             | Self::NotInDiff
             | Self::EmptyDraft
             | Self::LastChange
+            | Self::CommitComment
             | Self::Busy => Tone::Warning,
             Self::PinFailed(_)
             | Self::OpenFailed(_)
             | Self::TalkFailed(_)
             | Self::NotSaved(_)
+            | Self::LinkFailed(_)
             | Self::SubmitFailed(_) => Tone::Problem,
             Self::Opening(_) | Self::Submitting => Tone::Plain,
         }
@@ -461,6 +499,14 @@ impl fmt::Display for ReviewStatus {
             }
             Self::SubmitFailed(why) => write!(formatter, "submit failed: {}", why.as_str()),
             Self::Reloaded => formatter.write_str("review reloaded (changed outside the window)"),
+            Self::LinkOpened(link) => write!(formatter, "opened {link}"),
+            Self::CommitComment => formatter.write_str(
+                "comments go on the whole pull request's changes: pick 'all changes' first",
+            ),
+            Self::LinkCopied(link) => write!(formatter, "copied {link}"),
+            Self::LinkFailed(why) => {
+                write!(formatter, "the browser did not start: {}", why.as_str())
+            }
         }
     }
 }
@@ -540,7 +586,7 @@ impl Model {
     pub(crate) fn open_change(&mut self, path: &RelativePath) {
         let first = self
             .review
-            .change(path)
+            .shown_change(path)
             .and_then(|change| change_starts(change).first().copied());
         match self.index.find_file(path) {
             Some(file) => self.open_line(file, first.unwrap_or(Line::new(0))),
@@ -598,7 +644,7 @@ impl Model {
         let here = self.nav.lines().map(LineSelection::low);
         let starts = shown
             .as_ref()
-            .and_then(|path| self.review.change(path))
+            .and_then(|path| self.review.shown_change(path))
             .map(change_starts)
             .unwrap_or_default();
         let target = if forward {
@@ -725,6 +771,9 @@ impl App {
                 self.model.pick_removed(path, line, picking);
             }
             ReviewAct::StartDraft(on) => self.start_draft(on),
+            ReviewAct::StartDraftHere if self.model.review.diffs.commit().is_some() => {
+                self.model.say(ReviewStatus::CommitComment);
+            }
             ReviewAct::StartDraftHere => match self.model.draft_here() {
                 Some(on) => self.start_draft(on),
                 None => self.model.say(ReviewStatus::SelectALine),
@@ -737,6 +786,25 @@ impl App {
             ReviewAct::RemoveDraft(id) => self.remove_draft(id),
             ReviewAct::RefreshTalk => self.ask_talk(),
             ReviewAct::Submit(decision) => self.submit(decision),
+            ReviewAct::OpenLink(link) => match Opener::open(&Argument::new(link.as_str())) {
+                Ok(()) => self.model.say(ReviewStatus::LinkOpened(link)),
+                Err(error) => self
+                    .model
+                    .say(ReviewStatus::LinkFailed(Label::new(format!("{error:?}")))),
+            },
+            ReviewAct::ViewCommit(commit) => self.view_commit(commit),
+            ReviewAct::NeedSides(key) => self.need_sides(key),
+            ReviewAct::ToggleLayout => {
+                let diffs = &mut self.model.review.diffs;
+                diffs.layout = match diffs.layout {
+                    DiffLayout::Unified => DiffLayout::Split,
+                    DiffLayout::Split => DiffLayout::Unified,
+                };
+            }
+            ReviewAct::CopyLink(link) => {
+                self.clipboard = ClipboardRequest::Copy(Label::new(link.as_str()));
+                self.model.say(ReviewStatus::LinkCopied(link));
+            }
         }
     }
 
@@ -931,6 +999,7 @@ impl App {
         self.poll_open();
         self.poll_talk();
         self.poll_submit();
+        self.poll_diffs();
         self.poll_review_disk();
     }
 
@@ -1056,7 +1125,9 @@ impl App {
         review.draft = None;
         review.whole.clear();
         review.unfolded.clear();
+        review.diffs.forget();
         review.open = Some(OpenReview {
+            web: repo.web(),
             repo,
             pull,
             opened,
