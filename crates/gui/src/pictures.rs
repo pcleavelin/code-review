@@ -3,7 +3,7 @@ use std::mem;
 use std::rc::Rc;
 use std::time::Duration;
 
-use domain::WebLink;
+use domain::{PictureSource, SignedPicture, WebLink};
 use ui::{Count, Extent, Label, Picture, PictureBytes, PictureKey, Px};
 
 use crate::app::{App, picture_cache};
@@ -75,6 +75,11 @@ pub(crate) struct Pictures {
 }
 
 impl Pictures {
+    pub(crate) fn forget_failed(&mut self) {
+        self.loaded
+            .retain(|_, loading| !matches!(loading, Loading::Failed(_)));
+    }
+
     pub(crate) fn get(&self, link: &WebLink) -> Option<&Loading<Animation>> {
         self.loaded.get(link)
     }
@@ -145,13 +150,25 @@ impl App {
     }
 
     fn start_pictures(&mut self) {
+        let open = self.model.review.open.as_ref();
+        let repo = open.map(|open| open.repo.clone());
+        let signed: Vec<SignedPicture> = open
+            .and_then(|open| open.conversation())
+            .map(|conversation| conversation.signed_pictures.clone())
+            .unwrap_or_default();
         let jobs = &mut self.jobs.pictures;
         while jobs.running.len() < AT_ONCE.get() && !jobs.waiting.is_empty() {
             let link = jobs.waiting.remove(0);
             let cache = picture_cache();
+            let repo = repo.clone();
+            let signed = signed.clone();
             jobs.running.push(Job::start(move || {
-                let result =
-                    io_picture::load(&link, &cache).map_err(|error| Label::new(error.to_string()));
+                let source = repo.and_then(|repo| repo.forge().ok()).map_or_else(
+                    || PictureSource::anonymous(&link),
+                    |forge| forge.picture_source(&link, &signed),
+                );
+                let result = io_picture::load(&link, &source, &cache)
+                    .map_err(|error| Label::new(error.to_string()));
                 Fetched { link, result }
             }));
         }

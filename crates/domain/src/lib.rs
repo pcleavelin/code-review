@@ -14,7 +14,9 @@ pub use index::{
     SymbolName, SymbolQuery, TreeEntry, TypeName, Verdict,
 };
 pub use layout::{LayoutPanel, LayoutSplit, LayoutTree, Share, SplitDirection, ViewKey};
-pub use picture::{Picture, PictureFrame, PixelCount, Rgba};
+pub use picture::{
+    Credential, Picture, PictureFrame, PictureSource, PixelCount, Rgba, SignedPicture,
+};
 pub use review::{
     BranchName, ChangeKind, CodePlace, Commit, CommitId, Conversation, Decision, DiffLayout,
     DiffLine, Draft, DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount, FileRow,

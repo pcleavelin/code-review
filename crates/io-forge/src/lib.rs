@@ -6,8 +6,9 @@ use std::env;
 use std::fmt;
 
 use domain::{
-    Conversation, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeKind, Host, Linked,
-    PrNumber, PullRequest, RefName, RepoSlug, WebLink,
+    Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeKind,
+    Host, Linked, PictureSource, PrNumber, Prose, PullRequest, RefName, RepoSlug, SignedPicture,
+    WebLink,
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
@@ -406,25 +407,43 @@ impl ForgeClient {
     pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, ForgeError> {
         let api = self.api();
         let number = pull.number.get();
+        let mut signed = Vec::new();
         let threads = match self.forge.kind() {
             ForgeKind::GitLab => self.read_pages(&api, &api.discussions(number), |items| {
                 wire::parse_discussions(items, pull.head_commit.as_str())
             })?,
             ForgeKind::GitHub => {
-                let mut threads = self.read_pages(
-                    &api,
-                    &api.issue_comments(number),
-                    wire::parse_issue_comments,
-                )?;
-                threads.extend(
-                    self.read_pages(&api, &api.reviews(number), wire::parse_reviews)?
-                        .threads,
+                let (mut threads, issue_signed) =
+                    self.read_pages(&api, &api.issue_comments(number), |items| {
+                        Some((
+                            wire::parse_issue_comments(items)?,
+                            wire::signed_in_page(items),
+                        ))
+                    })?;
+                signed.extend(issue_signed);
+                let (reviews, review_signed) =
+                    self.read_pages(&api, &api.reviews(number), |items| {
+                        Some((wire::parse_reviews(items)?, wire::signed_in_page(items)))
+                    })?;
+                threads.extend(reviews.threads);
+                signed.extend(review_signed);
+                let (code_threads, code_signed) =
+                    self.read_pages(&api, &api.review_comments(number), |items| {
+                        Some((
+                            wire::parse_github_code_threads(items)?,
+                            wire::signed_in_page(items),
+                        ))
+                    })?;
+                threads.extend(code_threads);
+                signed.extend(code_signed);
+                signed.extend(
+                    self.read(&api, &api.pull(number), |body| {
+                        serde_json::from_str::<Value>(body.as_str())
+                            .ok()
+                            .map(|rendered| wire::signed_in_item(&rendered))
+                    })
+                    .unwrap_or_default(),
                 );
-                threads.extend(self.read_pages(
-                    &api,
-                    &api.review_comments(number),
-                    wire::parse_github_code_threads,
-                )?);
                 threads
             }
             ForgeKind::Forgejo => {
@@ -453,9 +472,40 @@ impl ForgeClient {
             self.forge.slug().as_str(),
             &Linked::Pull(pull.number),
         );
-        let threads = wire::anchored(threads, &pull_url);
-        convert::conversation(&pull.description, &threads)
+        let mut threads = wire::anchored(threads, &pull_url);
+        let mut description = pull.description.clone();
+        if self.forge.kind() == ForgeKind::GitLab {
+            for note in threads
+                .iter_mut()
+                .flat_map(|thread| thread.notes.iter_mut())
+            {
+                note.body = api.absolute_uploads(&note.body);
+            }
+            description = Prose::new(&api.absolute_uploads(description.as_str()));
+        }
+        convert::conversation(&description, &threads, &signed)
             .ok_or_else(|| ForgeError::Malformed(ResponseBody::default()))
+    }
+
+    pub fn picture_source(&self, link: &WebLink, signed: &[SignedPicture]) -> PictureSource {
+        let api = self.api();
+        if let (Some(token), Some(from)) = (
+            self.token.as_ref(),
+            api.picture_behind_token(link.as_str())
+                .and_then(|url| WebLink::new(&url)),
+        ) {
+            return PictureSource {
+                from,
+                credential: Some(Credential::new(&api.authorization(token.as_str()))),
+            };
+        }
+        signed
+            .iter()
+            .find(|picture| &picture.written == link)
+            .map_or_else(
+                || PictureSource::anonymous(link),
+                |picture| PictureSource::anonymous(&picture.signed),
+            )
     }
 
     pub fn submit(

@@ -78,6 +78,12 @@ impl HostMark {
 
 const GIT_SUFFIX: &str = ".git";
 const GITHUB_API: &str = "api.github.com";
+const UPLOADS: &str = "uploads/";
+const PARENT: &str = "..";
+const UNSAFE_IN_PATH: [char; 2] = ['?', '#'];
+const GITLAB_PROJECT: &str = "-/project/";
+const ATTACHMENTS: &str = "attachments/";
+const UPLOAD_LEADS: [&str; 2] = ["](", "src=\""];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WireRemote {
@@ -232,6 +238,7 @@ impl Setting {
 }
 
 const ACCEPT_JSON: &str = "Accept: application/json";
+const ACCEPT_GITHUB_FULL: &str = "Accept: application/vnd.github.full+json";
 const SEND_JSON: &str = "Content-Type: application/json";
 const PAGING_THEN_STATUS: &str = "\n%header{link}\n%{http_code}";
 const NEXT: &str = "rel=\"next\"";
@@ -327,6 +334,7 @@ const MERGE_REQUEST_FIELDS: PullFields = PullFields {
 const USER: &str = "/user/login";
 const AUTHOR: &str = "/author/username";
 const BODY: &str = "/body";
+const BODY_HTML: &str = "/body_html";
 const CREATED: &str = "/created_at";
 const SUBMITTED: &str = "/submitted_at";
 const UPDATED: &str = "/updated_at";
@@ -494,6 +502,93 @@ fn note(value: &Value, author: &str, when: &str, kind: NoteKind) -> WireNote {
     }
 }
 
+const GITHUB_SITE: &str = "https://github.com/";
+const ASSETS: &str = "assets";
+const USER_ATTACHMENTS: &str = "user-attachments";
+const SIGNED_IMAGES: &str = "https://private-user-images.githubusercontent.com/";
+const MARKDOWN_IMAGE: &str = "![";
+const MARKDOWN_TARGET: &str = "](";
+const HTML_IMAGE: &str = "<img";
+const HTML_SOURCE: &str = " src=\"";
+const ESCAPED_AMPERSAND: &str = "&amp;";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireSignedPicture {
+    pub(crate) written: String,
+    pub(crate) signed: String,
+}
+
+fn html_source(tag_start: &str) -> Option<String> {
+    let tag = tag_start.split('>').next()?;
+    let (_, rest) = tag.split_once(HTML_SOURCE)?;
+    let (source, _) = rest.split_once('"')?;
+    Some(source.replace(ESCAPED_AMPERSAND, "&"))
+}
+
+fn markdown_target(image_start: &str) -> Option<String> {
+    let (_, rest) = image_start.split_once(MARKDOWN_TARGET)?;
+    let end = rest
+        .find(|character: char| character == ')' || character.is_whitespace())
+        .unwrap_or(rest.len());
+    rest.get(..end).map(str::to_owned)
+}
+
+fn pictures_in(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    loop {
+        let markdown = rest.find(MARKDOWN_IMAGE);
+        let html = rest.find(HTML_IMAGE);
+        let (at, source) = match (markdown, html) {
+            (Some(markdown), Some(html)) if html < markdown => {
+                (html, rest.get(html..).and_then(html_source))
+            }
+            (Some(markdown), _) => (markdown, rest.get(markdown..).and_then(markdown_target)),
+            (None, Some(html)) => (html, rest.get(html..).and_then(html_source)),
+            (None, None) => return found,
+        };
+        found.extend(source);
+        rest = rest.get(at + 1..).unwrap_or_default();
+    }
+}
+
+fn last_segment(link: &str) -> &str {
+    let path = link.split(UNSAFE_IN_PATH).next().unwrap_or(link);
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+pub(crate) fn signed_in_item(item: &Value) -> Vec<WireSignedPicture> {
+    let (Some(body), Some(html)) = (text_at(item, BODY), text_at(item, BODY_HTML)) else {
+        return Vec::new();
+    };
+    let written: Vec<String> = pictures_in(&body)
+        .into_iter()
+        .filter(|link| {
+            link.strip_prefix(GITHUB_SITE).is_some_and(|path| {
+                let segments: Vec<&str> = path.split('/').collect();
+                (segments.first() == Some(&USER_ATTACHMENTS) && segments.get(1) == Some(&ASSETS))
+                    || segments.get(2) == Some(&ASSETS)
+            })
+        })
+        .collect();
+    let signed: Vec<String> = pictures_in(&html)
+        .into_iter()
+        .filter(|link| link.starts_with(SIGNED_IMAGES))
+        .collect();
+    if written.len() != signed.len() {
+        return Vec::new();
+    }
+    written
+        .into_iter()
+        .zip(signed)
+        .filter(|(written, signed)| signed.contains(last_segment(written)))
+        .map(|(written, signed)| WireSignedPicture { written, signed })
+        .collect()
+}
+
+pub(crate) fn signed_in_page(items: &[Value]) -> Vec<WireSignedPicture> {
+    items.iter().flat_map(signed_in_item).collect()
+}
 pub(crate) const NOTE_ANCHOR: &str = "#note_";
 
 pub(crate) fn anchored(mut threads: Vec<WireThread>, pull_url: &str) -> Vec<WireThread> {
@@ -831,6 +926,8 @@ pub(crate) struct Api {
     kind: ForgeKind,
     origin: String,
     repo: String,
+    site: String,
+    slug: String,
 }
 
 impl Api {
@@ -849,7 +946,51 @@ impl Api {
             }
             ForgeKind::Forgejo => format!("{origin}api/v1/repos/{slug}"),
         };
-        Self { kind, origin, repo }
+        Self {
+            kind,
+            origin,
+            repo,
+            site: format!("https://{host}/"),
+            slug: slug.to_owned(),
+        }
+    }
+
+    pub(crate) fn picture_behind_token(&self, link: &str) -> Option<String> {
+        let on_site = link
+            .strip_prefix(&self.site)
+            .filter(|rest| !rest.contains(PARENT) && !rest.contains(UNSAFE_IN_PATH))?;
+        let in_repo = on_site
+            .strip_prefix(&self.slug)
+            .and_then(|rest| rest.strip_prefix('/'));
+        match self.kind {
+            ForgeKind::GitHub => None,
+            ForgeKind::GitLab => {
+                if let Some(upload) = in_repo.and_then(|rest| rest.strip_prefix(UPLOADS)) {
+                    return Some(format!("{}/{UPLOADS}{upload}", self.repo));
+                }
+                let (project, upload) = on_site
+                    .strip_prefix(GITLAB_PROJECT)?
+                    .split_once(&format!("/{UPLOADS}"))?;
+                (!project.is_empty() && project.chars().all(|digit| digit.is_ascii_digit()))
+                    .then(|| format!("{}api/v4/projects/{project}/{UPLOADS}{upload}", self.site))
+            }
+            ForgeKind::Forgejo => {
+                let attachment = on_site
+                    .strip_prefix(ATTACHMENTS)
+                    .or_else(|| in_repo.and_then(|rest| rest.strip_prefix(ATTACHMENTS)))?;
+                (!attachment.is_empty()).then(|| format!("{}{ATTACHMENTS}{attachment}", self.site))
+            }
+        }
+    }
+
+    pub(crate) fn absolute_uploads(&self, text: &str) -> String {
+        let web = format!("{}{}/", self.site, self.slug);
+        UPLOAD_LEADS.iter().fold(text.to_owned(), |text, lead| {
+            text.replace(
+                &format!("{lead}/{UPLOADS}"),
+                &format!("{lead}{web}{UPLOADS}"),
+            )
+        })
     }
 
     pub(crate) fn next_request(&self, next_url: &str) -> Option<Request> {
@@ -858,7 +999,7 @@ impl Api {
             .then(|| Request::get(next_url.to_owned()))
     }
 
-    fn authorization(&self, token: &str) -> String {
+    pub(crate) fn authorization(&self, token: &str) -> String {
         match self.kind {
             ForgeKind::GitHub => format!("Authorization: Bearer {token}"),
             ForgeKind::GitLab => format!("PRIVATE-TOKEN: {token}"),
@@ -868,7 +1009,11 @@ impl Api {
 
     pub(crate) fn config(&self, request: &Request, token: Option<&str>) -> String {
         let mut config = setting(Setting::Url, &request.url);
-        config.push_str(&setting(Setting::Header, ACCEPT_JSON));
+        let accept = match self.kind {
+            ForgeKind::GitHub => ACCEPT_GITHUB_FULL,
+            ForgeKind::GitLab | ForgeKind::Forgejo => ACCEPT_JSON,
+        };
+        config.push_str(&setting(Setting::Header, accept));
         if let Some(token) = token {
             config.push_str(&setting(Setting::Header, &self.authorization(token)));
         }

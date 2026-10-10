@@ -375,6 +375,7 @@ fn a_file_draws_its_open_and_resolved_threads_but_not_outdated_ones() {
             thread_on("settled", "src/lib.rs", ThreadState::Resolved),
             thread_on("elsewhere", "src/main.rs", ThreadState::Open),
         ],
+        signed_pictures: Vec::new(),
     };
     let file = RelativePath::new("src/lib.rs");
     let drawn: Vec<&str> = conversation

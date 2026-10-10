@@ -1,8 +1,8 @@
 use domain::{
     BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft, DraftId,
     DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login, Moment,
-    NoteKind, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SourceLine,
-    Span, ThreadId, ThreadState,
+    NoteKind, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SignedPicture,
+    SourceLine, Span, ThreadId, ThreadState, WebLink,
 };
 use serde_json::{Value, json};
 
@@ -164,7 +164,7 @@ fn a_get_config_carries_url_accept_auth_and_status_but_no_method_or_data() {
     assert_eq!(
         config,
         "url = \"https://api.github.com/repos/owner/repo/pulls/3\"\n\
-         header = \"Accept: application/json\"\n\
+         header = \"Accept: application/vnd.github.full+json\"\n\
          header = \"Authorization: Bearer tok\"\n\
          write-out = \"\\n%header{link}\\n%{http_code}\"\n"
     );
@@ -216,7 +216,7 @@ fn quotes_backslashes_and_newlines_cannot_break_out_of_a_config_string() {
         lines,
         vec![
             "url = \"https://x/a\\\"b\\\\c\"",
-            "header = \"Accept: application/json\"",
+            "header = \"Accept: application/vnd.github.full+json\"",
             "header = \"Authorization: Bearer t\\\"ok\\nurl = \\\"https://evil\\\"\"",
             "request = \"POST\"",
             "header = \"Content-Type: application/json\"",
@@ -999,7 +999,7 @@ const GITHUB_REVIEW_COMMENTS: &str = r#"[
 ]"#;
 
 fn conversation(threads: &[WireThread]) -> Conversation {
-    convert::conversation(&expected_pull().description, threads).unwrap()
+    convert::conversation(&expected_pull().description, threads, &[]).unwrap()
 }
 
 fn github_conversation() -> Conversation {
@@ -1437,5 +1437,325 @@ fn a_gitlab_note_links_to_its_anchor_on_the_merge_request() {
     assert_eq!(
         threads[0].notes[0].link.as_deref(),
         Some("https://g.org/o/r/-/merge_requests/3#note_42")
+    );
+}
+
+const ASSET: &str = "1602defc-b15c-4cd2-a365-883dc83cf28d";
+const SECOND_ASSET: &str = "cdd9c04f-b6da-4cce-85b9-166c7dfed696";
+
+fn signed_url(asset: &str) -> String {
+    format!(
+        "https://private-user-images.githubusercontent.com/287214856/653790064-{asset}.png?jwt=eyJ0eXAi.eyJpc3Mi.yGrTXF0E"
+    )
+}
+
+fn github_item(body: &str, html: &str) -> Value {
+    json!({"id": 1, "body": body, "body_html": html})
+}
+
+fn recorded_github_item() -> Value {
+    github_item(
+        &format!(
+            "Before:\n<img width=\"755\" height=\"425\" alt=\"image\" src=\"https://github.com/user-attachments/assets/{ASSET}\" />\n\n![badge](https://img.shields.io/badge/x-y-green.svg)\n\nAfter:\n![image](https://github.com/user-attachments/assets/{SECOND_ASSET})\n"
+        ),
+        &format!(
+            "<p>Before:<br>\n<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"{first}\"><img width=\"755\" height=\"425\" alt=\"image\" src=\"{first}\" style=\"max-width: 100%;\" class=\"js-gh-image-fallback\"></a></p>\n<p><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://camo.githubusercontent.com/abc\"><img src=\"https://camo.githubusercontent.com/abc\" alt=\"badge\" data-canonical-src=\"https://img.shields.io/badge/x-y-green.svg\" style=\"max-width: 100%;\"></a></p>\n<p>After:<br>\n<img src=\"{second}\" alt=\"image\"></p>",
+            first = signed_url(ASSET),
+            second = signed_url(SECOND_ASSET)
+        ),
+    )
+}
+
+#[test]
+fn github_attachments_are_paired_in_order_with_the_signed_pictures_of_the_rendered_body() {
+    let signed = wire::signed_in_item(&recorded_github_item());
+    let pairs: Vec<(String, String)> = signed
+        .into_iter()
+        .map(|picture| (picture.written, picture.signed))
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![
+            (
+                format!("https://github.com/user-attachments/assets/{ASSET}"),
+                signed_url(ASSET)
+            ),
+            (
+                format!("https://github.com/user-attachments/assets/{SECOND_ASSET}"),
+                signed_url(SECOND_ASSET)
+            ),
+        ]
+    );
+}
+
+#[test]
+fn github_pictures_that_do_not_line_up_are_left_unsigned() {
+    let missing_one = github_item(
+        &format!("![a](https://github.com/user-attachments/assets/{ASSET})"),
+        "<p>no picture here</p>",
+    );
+    assert_eq!(wire::signed_in_item(&missing_one), vec![]);
+    let crossed = github_item(
+        &format!(
+            "![a](https://github.com/user-attachments/assets/{ASSET}) ![b](https://github.com/user-attachments/assets/{SECOND_ASSET})"
+        ),
+        &format!(
+            "<img src=\"{}\"><img src=\"{}\">",
+            signed_url(SECOND_ASSET),
+            signed_url(ASSET)
+        ),
+    );
+    assert_eq!(wire::signed_in_item(&crossed), vec![]);
+}
+
+fn forge_client(kind: ForgeKind, host: &str, slug: &str, token: Option<&str>) -> ForgeClient {
+    ForgeClient {
+        forge: Forge::new(kind, Host::new(host).unwrap(), RepoSlug::new(slug).unwrap()),
+        token: token.and_then(Token::new),
+    }
+}
+
+fn source_of(
+    client: &ForgeClient,
+    link: &str,
+    signed: &[SignedPicture],
+) -> (String, Option<String>) {
+    let source = client.picture_source(&WebLink::new(link).unwrap(), signed);
+    (
+        source.from.as_str().to_owned(),
+        source
+            .credential
+            .map(|credential| credential.as_header().to_owned()),
+    )
+}
+
+#[test]
+fn a_gitlab_upload_is_fetched_through_the_uploads_api_with_the_token() {
+    let gitlab = forge_client(ForgeKind::GitLab, "gitlab.com", "group/repo", Some("tok"));
+    assert_eq!(
+        source_of(
+            &gitlab,
+            "https://gitlab.com/group/repo/uploads/0123abcd/shot.png",
+            &[]
+        ),
+        (
+            "https://gitlab.com/api/v4/projects/group%2Frepo/uploads/0123abcd/shot.png".to_owned(),
+            Some("PRIVATE-TOKEN: tok".to_owned())
+        )
+    );
+    assert_eq!(
+        source_of(
+            &gitlab,
+            "https://gitlab.com/-/project/278964/uploads/0123abcd/shot.png",
+            &[]
+        ),
+        (
+            "https://gitlab.com/api/v4/projects/278964/uploads/0123abcd/shot.png".to_owned(),
+            Some("PRIVATE-TOKEN: tok".to_owned())
+        )
+    );
+}
+
+#[test]
+fn a_forgejo_attachment_is_fetched_from_its_attachment_route_with_the_token() {
+    let forgejo = forge_client(
+        ForgeKind::Forgejo,
+        "codeberg.org",
+        "owner/repo",
+        Some("tok"),
+    );
+    let expected = (
+        "https://codeberg.org/attachments/5e2c4d3a-0000-4f00-9000-000000000001".to_owned(),
+        Some("Authorization: token tok".to_owned()),
+    );
+    assert_eq!(
+        source_of(
+            &forgejo,
+            "https://codeberg.org/attachments/5e2c4d3a-0000-4f00-9000-000000000001",
+            &[]
+        ),
+        expected
+    );
+    assert_eq!(
+        source_of(
+            &forgejo,
+            "https://codeberg.org/owner/repo/attachments/5e2c4d3a-0000-4f00-9000-000000000001",
+            &[]
+        ),
+        expected
+    );
+}
+
+#[test]
+fn the_token_never_goes_to_a_picture_on_another_host() {
+    for (client, link) in [
+        (
+            forge_client(ForgeKind::GitLab, "gitlab.com", "group/repo", Some("tok")),
+            "https://gitlab.com.evil.example/group/repo/uploads/0123abcd/shot.png",
+        ),
+        (
+            forge_client(
+                ForgeKind::Forgejo,
+                "codeberg.org",
+                "owner/repo",
+                Some("tok"),
+            ),
+            "https://evil.example/attachments/5e2c4d3a",
+        ),
+        (
+            forge_client(
+                ForgeKind::Forgejo,
+                "codeberg.org",
+                "owner/repo",
+                Some("tok"),
+            ),
+            "https://codeberg.org/owner/repo/raw/branch/main/logo.png",
+        ),
+        (
+            forge_client(ForgeKind::GitLab, "gitlab.com", "group/repo", Some("tok")),
+            "https://gitlab.com@evil.example/group/repo/uploads/0123abcd/shot.png",
+        ),
+        (
+            forge_client(ForgeKind::GitLab, "gitlab.com", "group/repo", Some("tok")),
+            "https://gitlab.com/-/project/abc/uploads/0123abcd/shot.png",
+        ),
+        (
+            forge_client(ForgeKind::GitLab, "gitlab.com", "group/repo", Some("tok")),
+            "http://gitlab.com/group/repo/uploads/0123abcd/shot.png",
+        ),
+        (
+            forge_client(
+                ForgeKind::Forgejo,
+                "codeberg.org",
+                "owner/repo",
+                Some("tok"),
+            ),
+            "https://codeberg.org/attachments/../api/v1/user",
+        ),
+        (
+            forge_client(
+                ForgeKind::Forgejo,
+                "codeberg.org",
+                "owner/repo",
+                Some("tok"),
+            ),
+            "https://codeberg.org/attachments/5e2c4d3a?redirect=https://evil.example",
+        ),
+        (
+            forge_client(ForgeKind::GitHub, "github.com", "owner/repo", Some("tok")),
+            "https://github.com/user-attachments/assets/1602defc",
+        ),
+    ] {
+        assert_eq!(
+            source_of(&client, link, &[]),
+            (link.to_owned(), None),
+            "{link}"
+        );
+    }
+}
+
+#[test]
+fn without_a_token_a_forge_upload_is_fetched_as_it_is_written() {
+    let gitlab = forge_client(ForgeKind::GitLab, "gitlab.com", "group/repo", None);
+    let link = "https://gitlab.com/group/repo/uploads/0123abcd/shot.png";
+    assert_eq!(source_of(&gitlab, link, &[]), (link.to_owned(), None));
+}
+
+#[test]
+fn a_github_attachment_is_fetched_from_its_signed_picture_without_the_token() {
+    let github = forge_client(ForgeKind::GitHub, "github.com", "owner/repo", Some("tok"));
+    let written = format!("https://github.com/user-attachments/assets/{ASSET}");
+    let signed = [SignedPicture {
+        written: WebLink::new(&written).unwrap(),
+        signed: WebLink::new(&signed_url(ASSET)).unwrap(),
+    }];
+    assert_eq!(
+        source_of(&github, &written, &signed),
+        (signed_url(ASSET), None)
+    );
+}
+
+#[test]
+fn gitlab_upload_links_relative_to_the_project_become_absolute() {
+    let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
+    assert_eq!(
+        api.absolute_uploads(
+            "![shot](/uploads/0123abcd/shot.png) and <img src=\"/uploads/4567/b.png\"> and ![x](https://h.org/uploads/1/c.png)"
+        ),
+        "![shot](https://gitlab.com/group/repo/uploads/0123abcd/shot.png) and <img src=\"https://gitlab.com/group/repo/uploads/4567/b.png\"> and ![x](https://h.org/uploads/1/c.png)"
+    );
+}
+
+#[test]
+fn a_picture_source_never_prints_its_token() {
+    let gitlab = forge_client(
+        ForgeKind::GitLab,
+        "gitlab.com",
+        "group/repo",
+        Some("glpat-secret"),
+    );
+    let source = gitlab.picture_source(
+        &WebLink::new("https://gitlab.com/group/repo/uploads/0123abcd/shot.png").unwrap(),
+        &[],
+    );
+    assert!(source.credential.is_some());
+    let printed = format!("{source:?}");
+    assert!(!printed.contains("glpat-secret"), "{printed}");
+}
+
+#[test]
+fn a_github_picture_without_a_signed_twin_is_fetched_as_written() {
+    let github = forge_client(ForgeKind::GitHub, "github.com", "owner/repo", Some("tok"));
+    let other = format!("https://github.com/user-attachments/assets/{SECOND_ASSET}");
+    let signed = [SignedPicture {
+        written: WebLink::new(&format!(
+            "https://github.com/user-attachments/assets/{ASSET}"
+        ))
+        .unwrap(),
+        signed: WebLink::new(&signed_url(ASSET)).unwrap(),
+    }];
+    assert_eq!(source_of(&github, &other, &signed), (other.clone(), None));
+}
+
+#[test]
+fn a_repository_file_named_like_assets_is_not_an_attachment() {
+    let item = github_item(
+        "![logo](https://github.com/owner/repo/blob/main/assets/logo.png)",
+        "<img src=\"https://camo.githubusercontent.com/abc\">",
+    );
+    assert_eq!(wire::signed_in_item(&item), vec![]);
+    let old_form = github_item(
+        &format!("![a](https://github.com/owner/repo/assets/6049908/{ASSET})"),
+        &format!("<img src=\"{}&amp;X-Amz-Expires=300\">", signed_url(ASSET)),
+    );
+    assert_eq!(
+        wire::signed_in_item(&old_form)
+            .into_iter()
+            .map(|picture| picture.signed)
+            .collect::<Vec<String>>(),
+        vec![format!("{}&X-Amz-Expires=300", signed_url(ASSET))]
+    );
+}
+
+#[test]
+fn only_github_asks_for_rendered_bodies() {
+    let accept = |kind: ForgeKind| {
+        let api = Api::new(kind, "example.org", "owner/repo");
+        api.config(&api.list(), None)
+            .lines()
+            .find(|line| line.contains("Accept"))
+            .map(str::to_owned)
+    };
+    assert_eq!(
+        accept(ForgeKind::GitHub).as_deref(),
+        Some("header = \"Accept: application/vnd.github.full+json\"")
+    );
+    assert_eq!(
+        accept(ForgeKind::GitLab).as_deref(),
+        Some("header = \"Accept: application/json\"")
+    );
+    assert_eq!(
+        accept(ForgeKind::Forgejo).as_deref(),
+        Some("header = \"Accept: application/json\"")
     );
 }

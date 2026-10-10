@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::picture::SignedPicture;
 use crate::review::{CommitId, Login, Side, WebLink};
 use crate::text::{Line, RelativePath};
 
@@ -141,6 +142,7 @@ impl Thread {
 pub struct Conversation {
     pub description: Prose,
     pub threads: Vec<Thread>,
+    pub signed_pictures: Vec<SignedPicture>,
 }
 
 impl Conversation {

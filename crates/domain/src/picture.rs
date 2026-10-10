@@ -1,6 +1,8 @@
 use std::fmt;
 use std::time::Duration;
 
+use crate::review::WebLink;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PixelCount(u32);
 
@@ -44,4 +46,44 @@ pub struct Picture {
     pub width: PixelCount,
     pub height: PixelCount,
     pub frames: Vec<PictureFrame>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct Credential(String);
+
+impl Credential {
+    pub fn new(header: &str) -> Self {
+        Self(header.to_owned())
+    }
+
+    pub fn as_header(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Credential {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Credential(hidden)")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PictureSource {
+    pub from: WebLink,
+    pub credential: Option<Credential>,
+}
+
+impl PictureSource {
+    pub fn anonymous(link: &WebLink) -> Self {
+        Self {
+            from: link.clone(),
+            credential: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SignedPicture {
+    pub written: WebLink,
+    pub signed: WebLink,
 }

@@ -1079,7 +1079,10 @@ impl App {
             return;
         };
         match result {
-            Ok(conversation) => open.talk = Talk::Got(conversation),
+            Ok(conversation) => {
+                open.talk = Talk::Got(conversation);
+                self.model.review.pictures.forget_failed();
+            }
             Err(why) => {
                 open.talk = Talk::Failed(why.clone());
                 self.model.say(ReviewStatus::TalkFailed(why));

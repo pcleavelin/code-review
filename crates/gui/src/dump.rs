@@ -146,7 +146,11 @@ impl Dump for Reviewing {
         let talk = match &open.talk {
             Talk::Asking => "asking".to_owned(),
             Talk::Failed(why) => format!("failed {:?}", why.as_str()),
-            Talk::Got(talk) => format!("{} threads", talk.threads.len()),
+            Talk::Got(talk) => format!(
+                "{} threads, {} signed pictures",
+                talk.threads.len(),
+                talk.signed_pictures.len()
+            ),
         };
         lines.line(format_args!("talk {talk}"));
         if let Some(conversation) = open.conversation() {

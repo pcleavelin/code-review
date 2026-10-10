@@ -137,3 +137,33 @@ fn a_cut_off_animation_keeps_the_frames_before_the_cut() {
     let colors: Vec<Vec<u8>> = picture.frames.iter().map(first_pixel).collect();
     assert_eq!(colors, vec![vec![255, 0, 0, 255], vec![0, 255, 0, 255]]);
 }
+
+#[test]
+fn an_authorized_fetch_sends_its_header_on_stdin_and_asks_where_a_redirect_goes() {
+    let link = WebLink::new("https://gitlab.com/api/v4/projects/1/uploads/ab/c.png").unwrap();
+    let credential = Credential::new("PRIVATE-TOKEN: t\"ok");
+    assert_eq!(
+        Config::authorized(&link, &credential).0,
+        "url = \"https://gitlab.com/api/v4/projects/1/uploads/ab/c.png\"\nheader = \"PRIVATE-TOKEN: t\\\"ok\"\nwrite-out = \"\\n%{redirect_url}\"\n"
+    );
+    let staying: Vec<&str> = CURL_ARGUMENTS_NO_REDIRECT
+        .iter()
+        .map(|argument| argument.0)
+        .collect();
+    assert!(!staying.contains(&"--location"), "{staying:?}");
+    assert!(staying.contains(&"--fail"), "{staying:?}");
+}
+
+#[test]
+fn a_redirect_is_followed_without_the_header_and_a_picture_keeps_its_bytes() {
+    let redirected = Captured::of(b"<html>moved</html>\nhttps://storage.example/c.png?sig=1");
+    assert_eq!(
+        redirect_of(&redirected).map(|link| link.as_str().to_owned()),
+        Some("https://storage.example/c.png?sig=1".to_owned())
+    );
+    let mut bytes = png(2, 2).as_bytes().to_vec();
+    bytes.push(b'\n');
+    let served = Captured::of(&bytes);
+    assert_eq!(redirect_of(&served), None);
+    assert_eq!(body_of(&served).as_bytes(), png(2, 2).as_bytes());
+}

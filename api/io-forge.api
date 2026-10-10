@@ -21,4 +21,5 @@ pub fn head_ref(&self, number: PrNumber) -> RefName
 pub fn open_pulls(&self) -> Result<Vec<PullRequest>, ForgeError>
 pub fn pull(&self, number: PrNumber) -> Result<PullRequest, ForgeError>
 pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, ForgeError>
+pub fn picture_source(&self, link: &WebLink, signed: &[SignedPicture]) -> PictureSource
 pub fn submit( &self, pull: &PullRequest, drafts: &[Draft], changes: &[FileChange], decision: Decision, body: Option<&DraftText>, ) -> Result<Submitted, ForgeError>

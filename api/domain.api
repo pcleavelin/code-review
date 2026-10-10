@@ -177,6 +177,12 @@ picture::pub const fn new(bytes: Vec<u8>) -> Self
 picture::pub fn into_bytes(self) -> Vec<u8>
 picture::pub struct PictureFrame { pub rgba: Rgba, pub shown_for: Duration, }
 picture::pub struct Picture { pub width: PixelCount, pub height: PixelCount, pub frames: Vec<PictureFrame>, }
+picture::pub struct Credential(String);
+picture::pub fn new(header: &str) -> Self
+picture::pub fn as_header(&self) -> &str
+picture::pub struct PictureSource { pub from: WebLink, pub credential: Option<Credential>, }
+picture::pub fn anonymous(link: &WebLink) -> Self
+picture::pub struct SignedPicture { pub written: WebLink, pub signed: WebLink, }
 review::pub struct Spelling(&'static str);
 review::pub const fn as_str(self) -> &'static str
 review::pub enum ForgeKind { GitHub, GitLab, Forgejo, }
@@ -295,7 +301,7 @@ review::talk::pub struct CodePlace { pub file: RelativePath, pub side: Side, pub
 review::talk::pub enum ThreadState { Open, Resolved, Outdated, }
 review::talk::pub struct Thread { pub id: ThreadId, pub place: Option<CodePlace>, pub state: ThreadState, pub notes: Vec<Note>, }
 review::talk::pub fn started(&self) -> Option<&Moment>
-review::talk::pub struct Conversation { pub description: Prose, pub threads: Vec<Thread>, }
+review::talk::pub struct Conversation { pub description: Prose, pub threads: Vec<Thread>, pub signed_pictures: Vec<SignedPicture>, }
 review::talk::pub fn on_code(&self) -> impl Iterator<Item = &Thread>
 review::talk::pub fn on_pull(&self) -> impl Iterator<Item = &Thread>
 review::talk::pub fn drawn_in<'talk>( &'talk self, file: &'talk RelativePath, ) -> impl Iterator<Item = &'talk Thread>

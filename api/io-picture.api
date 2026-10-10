@@ -1,4 +1,4 @@
 pub enum PictureError { Process(ProcessError), Fetch(Captured), Decode(image::ImageError), }
 pub struct PictureCache(PathBuf);
 pub const fn new(folder: PathBuf) -> Self
-pub fn load(link: &WebLink, cache: &PictureCache) -> Result<Picture, PictureError>
+pub fn load( link: &WebLink, source: &PictureSource, cache: &PictureCache, ) -> Result<Picture, PictureError>

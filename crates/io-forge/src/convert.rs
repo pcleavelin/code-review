@@ -1,10 +1,12 @@
 use domain::{
     BranchName, CodePlace, CommitId, Conversation, Decision, Draft, DraftText, FileChange, Line,
-    Login, Moment, Note, PrNumber, PrTitle, Prose, PullRequest, RelativePath, Thread, ThreadId,
-    WebLink,
+    Login, Moment, Note, PrNumber, PrTitle, Prose, PullRequest, RelativePath, SignedPicture,
+    Thread, ThreadId, WebLink,
 };
 
-use crate::wire::{WireComment, WireNote, WirePlace, WirePull, WireReview, WireThread};
+use crate::wire::{
+    WireComment, WireNote, WirePlace, WirePull, WireReview, WireSignedPicture, WireThread,
+};
 
 pub(crate) fn pull(wire: &WirePull) -> Option<PullRequest> {
     Some(PullRequest {
@@ -85,11 +87,23 @@ fn thread(wire: &WireThread) -> Option<Thread> {
     })
 }
 
-pub(crate) fn conversation(description: &Prose, threads: &[WireThread]) -> Option<Conversation> {
+fn signed_picture(wire: &WireSignedPicture) -> Option<SignedPicture> {
+    Some(SignedPicture {
+        written: WebLink::new(&wire.written)?,
+        signed: WebLink::new(&wire.signed)?,
+    })
+}
+
+pub(crate) fn conversation(
+    description: &Prose,
+    threads: &[WireThread],
+    signed: &[WireSignedPicture],
+) -> Option<Conversation> {
     let mut threads: Vec<Thread> = threads.iter().map(thread).collect::<Option<_>>()?;
     threads.sort_by(|left, right| left.started().cmp(&right.started()));
     Some(Conversation {
         description: description.clone(),
         threads,
+        signed_pictures: signed.iter().filter_map(signed_picture).collect(),
     })
 }

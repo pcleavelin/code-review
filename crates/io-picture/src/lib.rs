@@ -2,9 +2,12 @@ use std::fmt;
 use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
+use std::str;
 use std::time::Duration;
 
-use domain::{Picture, PictureFrame, PixelCount, Rgba, TextHash, WebLink};
+use domain::{
+    Credential, Picture, PictureFrame, PictureSource, PixelCount, Rgba, TextHash, WebLink,
+};
 use image::codecs::gif::GifDecoder;
 use image::codecs::png::PngDecoder;
 use image::codecs::webp::WebPDecoder;
@@ -34,6 +37,20 @@ const CURL_ARGUMENTS: [Literal; 10] = [
     Literal("--config"),
     Literal("-"),
 ];
+
+const CURL_ARGUMENTS_NO_REDIRECT: [Literal; 9] = [
+    Literal("--silent"),
+    Literal("--show-error"),
+    Literal("--fail"),
+    Literal("--max-time"),
+    Literal("30"),
+    Literal("--max-filesize"),
+    Literal("25000000"),
+    Literal("--config"),
+    Literal("-"),
+];
+
+const WRITE_OUT_REDIRECT: Literal = Literal("\\n%{redirect_url}");
 
 #[derive(Debug)]
 pub enum PictureError {
@@ -68,23 +85,44 @@ impl PictureCache {
 
 struct Config(String);
 
-impl Config {
-    fn of(link: &WebLink) -> Self {
-        let url: String = link
-            .as_str()
-            .chars()
-            .filter(|character| !character.is_control())
-            .flat_map(|character| match character {
-                '"' | '\\' => vec!['\\', character],
-                other => vec![other],
-            })
-            .collect();
-        Self(format!("url = \"{url}\"\n"))
+struct Escaped(String);
+
+impl Escaped {
+    fn of(value: &str) -> Self {
+        Self(
+            value
+                .chars()
+                .filter(|character| !character.is_control())
+                .flat_map(|character| match character {
+                    '"' | '\\' => vec!['\\', character],
+                    other => vec![other],
+                })
+                .collect(),
+        )
     }
 }
 
-fn fetch(link: &WebLink, cache: &PictureCache) -> Result<Captured, PictureError> {
-    let arguments: Vec<Argument> = CURL_ARGUMENTS
+impl Config {
+    fn of(link: &WebLink) -> Self {
+        Self(format!("url = \"{}\"\n", Escaped::of(link.as_str()).0))
+    }
+
+    fn authorized(link: &WebLink, credential: &Credential) -> Self {
+        Self(format!(
+            "url = \"{}\"\nheader = \"{}\"\nwrite-out = \"{}\"\n",
+            Escaped::of(link.as_str()).0,
+            Escaped::of(credential.as_header()).0,
+            WRITE_OUT_REDIRECT.0
+        ))
+    }
+}
+
+fn run_curl(
+    arguments: &[Literal],
+    config: &Config,
+    cache: &PictureCache,
+) -> Result<Captured, PictureError> {
+    let arguments: Vec<Argument> = arguments
         .iter()
         .map(|argument| Argument::new(argument.0))
         .collect();
@@ -92,13 +130,49 @@ fn fetch(link: &WebLink, cache: &PictureCache) -> Result<Captured, PictureError>
         &Program::new(CURL.0),
         &arguments,
         &cache.0,
-        &Captured::of(Config::of(link).0.as_bytes()),
+        &Captured::of(config.0.as_bytes()),
     )
     .map_err(PictureError::Process)?;
     if output.success() {
         Ok(output.stdout)
     } else {
         Err(PictureError::Fetch(output.stderr))
+    }
+}
+
+fn body_of(answer: &Captured) -> Captured {
+    let bytes = answer.as_bytes();
+    Captured::of(
+        bytes
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .and_then(|at| bytes.get(..at))
+            .unwrap_or(bytes),
+    )
+}
+
+fn redirect_of(answer: &Captured) -> Option<WebLink> {
+    let bytes = answer.as_bytes();
+    bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .and_then(|at| bytes.get(at + 1..))
+        .and_then(|tail| str::from_utf8(tail).ok())
+        .and_then(WebLink::new)
+}
+
+fn fetch(source: &PictureSource, cache: &PictureCache) -> Result<Captured, PictureError> {
+    let Some(credential) = &source.credential else {
+        return run_curl(&CURL_ARGUMENTS, &Config::of(&source.from), cache);
+    };
+    let answer = run_curl(
+        &CURL_ARGUMENTS_NO_REDIRECT,
+        &Config::authorized(&source.from, credential),
+        cache,
+    )?;
+    match redirect_of(&answer) {
+        Some(next) => run_curl(&CURL_ARGUMENTS, &Config::of(&next), cache),
+        None => Ok(body_of(&answer)),
     }
 }
 
@@ -197,13 +271,23 @@ fn decode(bytes: &Captured) -> Result<Picture, PictureError> {
     Ok(still(&image))
 }
 
-pub fn load(link: &WebLink, cache: &PictureCache) -> Result<Picture, PictureError> {
+pub fn load(
+    link: &WebLink,
+    source: &PictureSource,
+    cache: &PictureCache,
+) -> Result<Picture, PictureError> {
     let place = cache.place(link);
     if let Ok(bytes) = fs::read(&place) {
         return decode(&Captured::of(&bytes));
     }
     drop(fs::create_dir_all(&cache.0));
-    let bytes = fetch(link, cache)?;
+    let bytes = fetch(source, cache).or_else(|refused| {
+        if source.credential.is_some() {
+            fetch(&PictureSource::anonymous(link), cache)
+        } else {
+            Err(refused)
+        }
+    })?;
     drop(io_store::write(&place, bytes.as_bytes()));
     decode(&bytes)
 }
