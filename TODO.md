@@ -42,8 +42,11 @@
 
 ## Inherited from codemap
 
-2. The call graph view was not carried over. Trigger: a pull request whose change is only
-   understood by following calls across files.
+2. The call graph view was not carried over. `calltree`, `callers` and `callees` follow calls
+   across files as text, from the CLI and from the window's Console (tried on ripgrep#3549:
+   `calltree ripgrep#3549 PathPrinter::write 2` prints two levels across four files). A drawn
+   view needs a pull request where that text is not enough to follow the change. Trigger: such
+   a pull request, seen in a run.
 3. No GUI scenario harness (`tests/gui.rs`) and no `cargo xtask parity` comparison: both
    depended on codemap's scenario tables, which were removed with the tours. Port
    `tests/common/gui.rs` and `parity.rs` before the GUI changes again.
