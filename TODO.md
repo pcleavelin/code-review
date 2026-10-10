@@ -29,8 +29,9 @@
 10. Pictures are fetched without the forge's token, so a private repository's attachments
     do not load (they show as a failed picture that opens in the browser). GitHub serves them
     behind its web session, not the API token. Animated pictures show their first frame.
-11. Markdown: a table wider than its box is clipped rather than wrapped; HTML other than
-    `<img>` is dropped to its text; footnotes and math are plain text.
+11. Markdown: HTML other than `<img>` is drawn as its text with the tags dropped, footnotes and
+    math as plain text. Trigger: a description or comment whose meaning is lost that way (a
+    `<details>` block read as running text, a footnote, an equation).
 12. The old side of the split view, and a commit's view of a file a later commit changes again,
     draw lines without go to definition or hover: neither text is the tree the index and the
     servers read. Trigger: a review that needs to follow a removed call. Comments are not taken

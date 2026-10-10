@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy }
+        $m! { gui: open, deleted, split, copy, markdown }
     };
 }
 
@@ -270,5 +270,19 @@ quit
             "DUMP field Command caret=4 first=0 rows=1 text=\"kept\"",
             "status=\"copied 3 lines\"",
         ],
+    }
+}
+
+pub(crate) fn markdown() -> Scenario {
+    Scenario {
+        script: "OPEN
+hover-id md-link@description/0/5
+wait 2
+rect md-link@description/0/5
+dump
+shot {shots}/description.png
+quit
+",
+        shows: &["DUMP rect md-link@description/0/5 = Some("],
     }
 }

@@ -170,6 +170,10 @@ fn ids_hash_like_the_legacy_names() {
         Id::from_name("left@Symbols"),
         Id::new("left").with("Symbols")
     );
+    assert_eq!(
+        Id::from_name("md-link@description/0/5"),
+        Id::new("md-link").with("description/0/5")
+    );
     assert_eq!(Id::from_name("paths"), Id::new("paths"));
 }
 

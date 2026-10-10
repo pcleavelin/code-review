@@ -70,7 +70,11 @@ pub(crate) const SECOND: &[(&str, &str)] = &[(
 pub(crate) const GONE: &str = "old.txt";
 pub(crate) const GONE_LINES: usize = 400;
 
-pub(crate) const DESCRIPTION: &str = "Squares the inputs before adding them.";
+pub(crate) const DESCRIPTION: &str = "Squares the inputs before adding them.
+
+| input | squared | notes |
+|---|---:|---|
+| 3 | 9 | the square grows faster than the sum once the input passes two, which is the point of this change; measured on the shapes benchmark, see https://example.com/bench |";
 
 pub(crate) fn binary() -> PathBuf {
     env::var_os("REVIEW_BIN").map_or_else(
