@@ -77,6 +77,7 @@ impl HostMark {
 }
 
 const GIT_SUFFIX: &str = ".git";
+const GITHUB_API: &str = "api.github.com";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WireRemote {
@@ -216,7 +217,8 @@ impl Setting {
 
 const ACCEPT_JSON: &str = "Accept: application/json";
 const SEND_JSON: &str = "Content-Type: application/json";
-const STATUS_LAST: &str = "\n%{http_code}";
+const PAGING_THEN_STATUS: &str = "\n%header{link}\n%{http_code}";
+const NEXT: &str = "rel=\"next\"";
 
 fn escape(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
@@ -241,13 +243,26 @@ fn setting(name: Setting, value: &str) -> String {
 pub(crate) struct WireResponse {
     pub(crate) status: u16,
     pub(crate) body: String,
+    pub(crate) next_url: Option<String>,
+}
+
+fn next_page(paging: &str) -> Option<String> {
+    paging.split('<').find_map(|entry| {
+        let (url, parameters) = entry.split_once('>')?;
+        parameters
+            .split([',', ';'])
+            .any(|parameter| parameter.trim() == NEXT)
+            .then(|| url.trim().to_owned())
+    })
 }
 
 pub(crate) fn parse_response(stdout: &str) -> Option<WireResponse> {
-    let (body, status) = stdout.rsplit_once('\n')?;
+    let (rest, status) = stdout.rsplit_once('\n')?;
+    let (body, paging) = rest.rsplit_once('\n')?;
     Some(WireResponse {
         status: status.trim().parse().ok()?,
         body: body.to_owned(),
+        next_url: next_page(paging),
     })
 }
 
@@ -550,7 +565,7 @@ fn on_pull(id: String, note: WireNote) -> WireThread {
     }
 }
 
-fn items(text: &str) -> Option<Vec<Value>> {
+pub(crate) fn items(text: &str) -> Option<Vec<Value>> {
     serde_json::from_str(text).ok()
 }
 
@@ -783,25 +798,33 @@ fn with_body(mut value: Value, body: Option<&String>) -> Value {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Api {
     kind: ForgeKind,
+    origin: String,
     repo: String,
 }
 
 impl Api {
     pub(crate) fn new(kind: ForgeKind, host: &str, slug: &str) -> Self {
-        let repo = match kind {
-            ForgeKind::GitHub if host == HostMark::GitHub.name() => {
-                format!("https://api.github.com/repos/{slug}")
-            }
-            ForgeKind::GitHub => format!("https://{host}/api/v3/repos/{slug}"),
-            ForgeKind::GitLab => {
-                format!(
-                    "https://{host}/api/v4/projects/{}",
-                    slug.replace('/', "%2F")
-                )
-            }
-            ForgeKind::Forgejo => format!("https://{host}/api/v1/repos/{slug}"),
+        let github = kind == ForgeKind::GitHub && host == HostMark::GitHub.name();
+        let origin = if github {
+            format!("https://{GITHUB_API}/")
+        } else {
+            format!("https://{host}/")
         };
-        Self { kind, repo }
+        let repo = match kind {
+            ForgeKind::GitHub if github => format!("{origin}repos/{slug}"),
+            ForgeKind::GitHub => format!("{origin}api/v3/repos/{slug}"),
+            ForgeKind::GitLab => {
+                format!("{origin}api/v4/projects/{}", slug.replace('/', "%2F"))
+            }
+            ForgeKind::Forgejo => format!("{origin}api/v1/repos/{slug}"),
+        };
+        Self { kind, origin, repo }
+    }
+
+    pub(crate) fn next_request(&self, next_url: &str) -> Option<Request> {
+        next_url
+            .starts_with(&self.origin)
+            .then(|| Request::get(next_url.to_owned()))
     }
 
     fn authorization(&self, token: &str) -> String {
@@ -825,7 +848,7 @@ impl Api {
             config.push_str(&setting(Setting::Header, SEND_JSON));
             config.push_str(&setting(Setting::Data, &body.to_string()));
         }
-        config.push_str(&setting(Setting::WriteOut, STATUS_LAST));
+        config.push_str(&setting(Setting::WriteOut, PAGING_THEN_STATUS));
         config
     }
 
@@ -856,10 +879,8 @@ impl Api {
         }
     }
 
-    pub(crate) fn parse_pulls(&self, text: &str) -> Option<Vec<WirePull>> {
-        let value: Value = serde_json::from_str(text).ok()?;
-        value
-            .as_array()?
+    pub(crate) fn parse_pulls(&self, items: &[Value]) -> Option<Vec<WirePull>> {
+        items
             .iter()
             .map(|pull| read_pull(pull, self.fields()))
             .collect()
@@ -879,7 +900,7 @@ impl Api {
         })
     }
 
-    const fn page(&self) -> &'static str {
+    const fn page_size(&self) -> &'static str {
         match self.kind {
             ForgeKind::GitHub | ForgeKind::GitLab => "per_page=100",
             ForgeKind::Forgejo => "limit=50",
@@ -890,7 +911,7 @@ impl Api {
         Request::get(format!(
             "{}/issues/{number}/comments?{}",
             self.repo,
-            self.page()
+            self.page_size()
         ))
     }
 
@@ -898,7 +919,7 @@ impl Api {
         Request::get(format!(
             "{}/{number}/reviews?{}",
             self.pulls_url(),
-            self.page()
+            self.page_size()
         ))
     }
 
@@ -906,7 +927,7 @@ impl Api {
         Request::get(format!(
             "{}/{number}/comments?{}",
             self.pulls_url(),
-            self.page()
+            self.page_size()
         ))
     }
 
@@ -921,7 +942,7 @@ impl Api {
         Request::get(format!(
             "{}/{number}/discussions?{}",
             self.pulls_url(),
-            self.page()
+            self.page_size()
         ))
     }
 

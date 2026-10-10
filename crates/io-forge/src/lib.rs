@@ -1,6 +1,7 @@
 mod convert;
 mod wire;
 
+use std::collections::HashSet;
 use std::env;
 use std::fmt;
 
@@ -10,8 +11,9 @@ use domain::{
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
+use serde_json::Value;
 
-use crate::wire::{Api, EnvVar, Request};
+use crate::wire::{Api, EnvVar, Request, WireResponse};
 
 #[derive(Clone, PartialEq, Eq)]
 struct Token(String);
@@ -200,6 +202,31 @@ fn token(kind: ForgeKind, host: &Host) -> Option<Token> {
         })
 }
 
+fn every_page(
+    api: &Api,
+    first: &Request,
+    mut request: impl FnMut(&Request) -> Result<WireResponse, ForgeError>,
+) -> Result<Vec<Value>, ForgeError> {
+    let mut items = Vec::new();
+    let mut requested = HashSet::new();
+    let mut upcoming = Some(first.clone());
+    while let Some(page) = upcoming.take() {
+        if !requested.insert(page.url.clone()) {
+            break;
+        }
+        let response = request(&page)?;
+        items.extend(
+            wire::items(&response.body)
+                .ok_or_else(|| ForgeError::Malformed(ResponseBody::new(&response.body)))?,
+        );
+        upcoming = response
+            .next_url
+            .as_deref()
+            .and_then(|url| api.next_request(url));
+    }
+    Ok(items)
+}
+
 pub fn forge_of(url: &RemoteUrl) -> Result<Forge, ForgeError> {
     let unreadable = || ForgeError::UnreadableUrl(url.clone());
     let remote = wire::parse_remote(url.as_str()).ok_or_else(unreadable)?;
@@ -247,6 +274,11 @@ impl ForgeClient {
     }
 
     fn call(&self, api: &Api, request: &Request) -> Result<ResponseBody, ForgeError> {
+        self.exchange(api, request)
+            .map(|response| ResponseBody::new(&response.body))
+    }
+
+    fn exchange(&self, api: &Api, request: &Request) -> Result<WireResponse, ForgeError> {
         let config = api.config(request, self.token.as_ref().map(Token::as_str));
         let arguments: Vec<Argument> = wire::curl_arguments()
             .iter()
@@ -266,11 +298,28 @@ impl ForgeClient {
         let response = wire::parse_response(&stdout)
             .ok_or_else(|| ForgeError::Malformed(ResponseBody::new(&stdout)))?;
         let status = HttpStatus::new(response.status);
-        let body = ResponseBody::new(&response.body);
         if status.success() {
-            Ok(body)
+            Ok(response)
         } else {
-            Err(ForgeError::Http { status, body })
+            Err(ForgeError::Http {
+                status,
+                body: ResponseBody::new(&response.body),
+            })
+        }
+    }
+
+    fn read_pages<T>(
+        &self,
+        api: &Api,
+        request: &Request,
+        parse: impl FnOnce(&[Value]) -> Option<T>,
+    ) -> Result<T, ForgeError> {
+        let items = every_page(api, request, |page| self.exchange(api, page))?;
+        match parse(&items) {
+            Some(parsed) => Ok(parsed),
+            None => Err(ForgeError::Malformed(ResponseBody::new(
+                &Value::Array(items).to_string(),
+            ))),
         }
     }
 
@@ -286,8 +335,8 @@ impl ForgeClient {
 
     pub fn open_pulls(&self) -> Result<Vec<PullRequest>, ForgeError> {
         let api = self.api();
-        self.read(&api, &api.list(), |body| {
-            api.parse_pulls(body.as_str())
+        self.read_pages(&api, &api.list(), |items| {
+            api.parse_pulls(items)
                 .and_then(|pulls| pulls.iter().map(convert::pull).collect())
         })
     }

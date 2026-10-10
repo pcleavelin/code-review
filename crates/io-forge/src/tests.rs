@@ -3,14 +3,14 @@ use domain::{
     ForgeKind, Host, Line, Linked, Login, Moment, NoteKind, PrNumber, PrTitle, Prose, PullRequest,
     RelativePath, RepoSlug, Side, Span, ThreadId, ThreadState,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::convert;
 use crate::wire::{
     self, Api, Method, Request, WireDiffRefs, WireRemote, WireResponse, WireThread, detect,
-    forge_named, parse_remote, parse_response,
+    forge_named, items, parse_remote, parse_response,
 };
-use crate::{ForgeClient, ForgeError, Token};
+use crate::{ForgeClient, ForgeError, Token, every_page};
 
 const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -162,7 +162,7 @@ fn a_get_config_carries_url_accept_auth_and_status_but_no_method_or_data() {
         "url = \"https://api.github.com/repos/owner/repo/pulls/3\"\n\
          header = \"Accept: application/json\"\n\
          header = \"Authorization: Bearer tok\"\n\
-         write-out = \"\\n%{http_code}\"\n"
+         write-out = \"\\n%header{link}\\n%{http_code}\"\n"
     );
 }
 
@@ -217,21 +217,133 @@ fn quotes_backslashes_and_newlines_cannot_break_out_of_a_config_string() {
             "request = \"POST\"",
             "header = \"Content-Type: application/json\"",
             "data-binary = \"{\\\"body\\\":\\\"line \\\\\\\"one\\\\\\\"\\\\nC:\\\\\\\\path\\\"}\"",
-            "write-out = \"\\n%{http_code}\"",
+            "write-out = \"\\n%header{link}\\n%{http_code}\"",
         ]
     );
 }
 
 #[test]
-fn the_status_is_the_last_line_and_the_body_keeps_its_own_newlines() {
+fn the_status_is_the_last_line_the_link_header_before_it_and_the_body_keeps_its_newlines() {
     assert_eq!(
-        parse_response("{\"a\":\n1}\n\n404"),
+        parse_response("{\"a\":\n1}\n\n<https://x.org/p?page=2>; rel=\"next\"\n404"),
         Some(WireResponse {
             status: 404,
             body: "{\"a\":\n1}\n".to_owned(),
+            next_url: Some("https://x.org/p?page=2".to_owned()),
+        })
+    );
+    assert_eq!(
+        parse_response("[]\n\n200"),
+        Some(WireResponse {
+            status: 200,
+            body: "[]".to_owned(),
+            next_url: None,
         })
     );
     assert_eq!(parse_response("no status"), None);
+}
+
+const GITHUB_PAGING: &str = "<https://api.github.com/repositories/53631945/pulls?state=open&per_page=30&page=2>; rel=\"next\", <https://api.github.com/repositories/53631945/pulls?state=open&per_page=30&page=3>; rel=\"last\"";
+const GITLAB_PAGING: &str = "<https://gitlab.com/api/v4/projects/g%2Fr/merge_requests?page=1&per_page=2&state=opened>; rel=\"prev\", <https://gitlab.com/api/v4/projects/g%2Fr/merge_requests?page=3&per_page=2&state=opened>; rel=\"next\", <https://gitlab.com/api/v4/projects/g%2Fr/merge_requests?page=1&per_page=2&state=opened>; rel=\"first\"";
+const FORGEJO_PAGING: &str = "<https://codeberg.org/api/v1/repos/o/r/pulls?limit=2&page=2&state=open>; rel=\"next\",<https://codeberg.org/api/v1/repos/o/r/pulls?limit=2&page=72&state=open>; rel=\"last\"";
+const LAST_PAGE_PAGING: &str = "<https://codeberg.org/api/v1/repos/o/r/pulls?limit=2&page=1&state=open>; rel=\"first\",<https://codeberg.org/api/v1/repos/o/r/pulls?limit=2&page=71&state=open>; rel=\"prev\"";
+
+fn next_of(paging: &str) -> Option<String> {
+    parse_response(&format!("[]\n{paging}\n200")).and_then(|response| response.next_url)
+}
+
+#[test]
+fn the_next_page_is_the_link_marked_next_in_every_forges_spelling() {
+    assert_eq!(
+        next_of(GITHUB_PAGING).as_deref(),
+        Some("https://api.github.com/repositories/53631945/pulls?state=open&per_page=30&page=2")
+    );
+    assert_eq!(
+        next_of(GITLAB_PAGING).as_deref(),
+        Some(
+            "https://gitlab.com/api/v4/projects/g%2Fr/merge_requests?page=3&per_page=2&state=opened"
+        )
+    );
+    assert_eq!(
+        next_of(FORGEJO_PAGING).as_deref(),
+        Some("https://codeberg.org/api/v1/repos/o/r/pulls?limit=2&page=2&state=open")
+    );
+    assert_eq!(next_of(LAST_PAGE_PAGING), None);
+}
+
+fn page(body: &str, next: Option<&str>) -> WireResponse {
+    WireResponse {
+        status: 200,
+        body: body.to_owned(),
+        next_url: next.map(str::to_owned),
+    }
+}
+
+fn fetched_pages(api: &Api, pages: &[(&str, WireResponse)]) -> (Vec<Value>, Vec<String>) {
+    let mut asked = Vec::new();
+    let items = every_page(api, &api.list(), |request| {
+        asked.push(request.url.clone());
+        Ok(pages
+            .iter()
+            .find(|(url, _)| *url == request.url)
+            .map(|(_, response)| response.clone())
+            .unwrap())
+    })
+    .unwrap();
+    (items, asked)
+}
+
+#[test]
+fn a_list_follows_next_links_until_the_last_page_and_keeps_every_item_in_order() {
+    let api = Api::new(ForgeKind::GitHub, "github.com", "owner/repo");
+    let first = "https://api.github.com/repos/owner/repo/pulls?state=open&per_page=100";
+    let second = "https://api.github.com/repositories/1/pulls?state=open&per_page=100&page=2";
+    let third = "https://api.github.com/repositories/1/pulls?state=open&per_page=100&page=3";
+    let (items, asked) = fetched_pages(
+        &api,
+        &[
+            (first, page("[1, 2]", Some(second))),
+            (second, page("[3]", Some(third))),
+            (third, page("[4]", None)),
+        ],
+    );
+    assert_eq!(items, vec![json!(1), json!(2), json!(3), json!(4)]);
+    assert_eq!(asked, vec![first, second, third]);
+}
+
+#[test]
+fn a_next_link_to_another_host_is_not_followed_so_the_token_stays_with_the_forge() {
+    let api = Api::new(ForgeKind::Forgejo, "codeberg.org", "owner/repo");
+    let first = "https://codeberg.org/api/v1/repos/owner/repo/pulls?state=open&limit=50";
+    let (items, asked) = fetched_pages(
+        &api,
+        &[(
+            first,
+            page(
+                "[1]",
+                Some("https://codeberg.org.evil.example/steal?page=2"),
+            ),
+        )],
+    );
+    assert_eq!(items, vec![json!(1)]);
+    assert_eq!(asked, vec![first]);
+}
+
+#[test]
+fn a_next_link_back_to_a_page_already_read_ends_the_list() {
+    let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
+    let first =
+        "https://gitlab.com/api/v4/projects/group%2Frepo/merge_requests?state=opened&per_page=100";
+    let second = "https://gitlab.com/api/v4/projects/group%2Frepo/merge_requests?page=2";
+    let (items, asked) = fetched_pages(
+        &api,
+        &[
+            (first, page("[1]", Some(second))),
+            (second, page("[2]", Some(first))),
+        ],
+    );
+    assert_eq!(items, vec![json!(1), json!(2)]);
+    assert_eq!(asked, vec![first, second]);
 }
 
 const GITHUB_PULLS: &str = r#"[{
@@ -273,7 +385,7 @@ fn expected_pull() -> PullRequest {
 
 fn listed(kind: ForgeKind, text: &str) -> Vec<PullRequest> {
     Api::new(kind, "example.org", "owner/repo")
-        .parse_pulls(text)
+        .parse_pulls(&items(text).unwrap())
         .unwrap()
         .into_iter()
         .map(|pull| convert::pull(&pull).unwrap())
@@ -315,11 +427,11 @@ fn a_single_pull_parses_like_a_listed_one() {
 #[test]
 fn a_list_in_the_other_forges_shape_or_with_a_bad_sha_is_malformed() {
     let api = Api::new(ForgeKind::GitLab, "gitlab.com", "owner/repo");
-    assert_eq!(api.parse_pulls(GITHUB_PULLS), None);
-    assert_eq!(api.parse_pulls("{\"message\": \"404\"}"), None);
+    assert_eq!(api.parse_pulls(&items(GITHUB_PULLS).unwrap()), None);
+    assert_eq!(items("{\"message\": \"404\"}"), None);
     let bad_sha = GITHUB_PULLS.replace(SHA, "not-hex");
     let pulls = Api::new(ForgeKind::GitHub, "github.com", "owner/repo")
-        .parse_pulls(&bad_sha)
+        .parse_pulls(&items(&bad_sha).unwrap())
         .unwrap();
     assert_eq!(pulls.iter().map(convert::pull).next(), Some(None));
 }

@@ -5,9 +5,6 @@
 1. Submitting a review has not been run against a live forge: GitHub, GitLab and Forgejo
    listing were run against public repositories, and the request bodies are unit-tested, but
    no review has been posted. Try each on a pull request you own.
-2. Listing reads one page only (100 on GitHub and GitLab, 50 on Forgejo); a repository with
-   more open pull requests loses the rest without a sign. Follow the `Link`/`X-Next-Page`
-   headers.
 3. GitLab: a draft sends only the line of its own side, and GitLab wants both for an unchanged
    (context) line, so a draft on a context line comes back as HTTP 400. A renamed file's
    old-side draft names the new path. The review is several requests (one per draft, then the
