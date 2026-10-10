@@ -555,7 +555,7 @@ pub(super) fn inset(
         InsetKind::Draft(draft) => {
             frame.start(Container::CommentRow(inset.row_id()));
             frame.indent(gutter);
-            review::draft_box(frame, draft);
+            review::draft_box(model, frame, draft);
             frame.finish();
         }
         InsetKind::Editing(on) => {

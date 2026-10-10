@@ -507,6 +507,10 @@ pub(crate) fn web_url(kind: ForgeKind, host: &str, slug: &str, linked: &Linked) 
         (ForgeKind::GitHub, Linked::Pull(number)) => format!("{repo}/pull/{number}"),
         (ForgeKind::GitLab, Linked::Pull(number)) => format!("{repo}/-/merge_requests/{number}"),
         (ForgeKind::Forgejo, Linked::Pull(number)) => format!("{repo}/pulls/{number}"),
+        (ForgeKind::GitLab, Linked::Issue(number)) => format!("{repo}/-/issues/{number}"),
+        (ForgeKind::GitHub | ForgeKind::Forgejo, Linked::Issue(number)) => {
+            format!("{repo}/issues/{number}")
+        }
         (ForgeKind::GitLab, Linked::Commit(commit)) => {
             format!("{repo}/-/commit/{}", commit.as_str())
         }

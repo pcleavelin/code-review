@@ -12,7 +12,7 @@ use wgpu::{
 
 use crate::atlas::Upload;
 use crate::gpu::{BufferName, ByteCount, GpuBuffer, bytes_of};
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, Source};
 use crate::report::report;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -108,14 +108,21 @@ impl Renderer {
         if self.indices.as_slice().is_empty() {
             return;
         }
-        pass.set_pipeline(&self.pipeline.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
         pass.set_index_buffer(index_buffer.buffer.slice(..), IndexFormat::Uint32);
         let screen = Rect::at(Point::default(), self.size);
         for batch in &self.batches {
             let visible = batch.clip.intersect(screen);
+            let (pipeline, group) = match batch.source {
+                Source::Atlas => (&self.pipeline, &self.bind_group),
+                Source::Picture(key) => match self.pictures.get(&key) {
+                    Some(painted) => (&self.picture_pipeline, &painted.group),
+                    None => continue,
+                },
+            };
             if batch.end > batch.start && !visible.is_empty() {
+                pass.set_pipeline(&pipeline.pipeline);
+                pass.set_bind_group(0, group, &[]);
                 pass.set_scissor_rect(
                     visible.left.unsigned(),
                     visible.top.unsigned(),

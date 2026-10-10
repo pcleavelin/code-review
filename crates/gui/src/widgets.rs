@@ -138,6 +138,7 @@ pub(crate) enum Container {
     CommentRow(Id),
     Removed(Id),
     Folded,
+    Markdown(Id),
 }
 
 struct Shape {
@@ -270,6 +271,11 @@ impl Container {
                 None,
             ),
             Self::FillRow => Shape::new(Layout::row().grow_width(), Style::NONE, None),
+            Self::Markdown(id) => Shape::new(
+                Layout::column().grow_width().padding(LABEL_PADDING),
+                Style::NONE,
+                Some(id),
+            ),
             Self::Tooltip { at } => floating(at, None, TOOLTIP_PADDING, BORDER, None),
             Self::ElementTip { at } => floating(
                 at,
@@ -359,6 +365,16 @@ impl Frame<'_> {
         self.ui.leaf(
             text_kind(runs, size, Wrap::None),
             Layout::row().padding(LABEL_PADDING),
+            Style::NONE,
+            None,
+        );
+    }
+
+    pub(crate) fn text_line(&mut self, runs: Vec<Run>) {
+        let size = self.metrics.font;
+        self.ui.leaf(
+            text_kind(runs, size, Wrap::None),
+            Layout::row(),
             Style::NONE,
             None,
         );

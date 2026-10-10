@@ -6,6 +6,7 @@ use std::time::Duration;
 use domain::LayoutTree;
 use domain::{Index, Line, RelativePath, Root};
 use io_config::{LayoutStore, Reach, SettingsStore};
+use io_picture::PictureCache;
 use platform::{
     ClipboardRequest, Cursor, Exit, Frame as PlatformFrame, Outcome, Renderer, ScriptLine,
     Visibility,
@@ -63,6 +64,15 @@ const FOCUS_GRACE: Count = Count::new(4);
 const ANIMATING: Duration = Duration::from_millis(8);
 const BUSY: Duration = Duration::from_millis(50);
 const IDLE: Duration = Duration::from_millis(1000);
+
+const PICTURES: Folder = Folder("code-review-pictures");
+
+#[derive(Clone, Copy, Debug)]
+struct Folder(&'static str);
+
+pub(crate) fn picture_cache() -> PictureCache {
+    PictureCache::new(env::temp_dir().join(PICTURES.0))
+}
 
 fn scripted() -> bool {
     env::var_os("REVIEW_SCRIPT").is_some() || env::var_os("REVIEW_SHOT").is_some()

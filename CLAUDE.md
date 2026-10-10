@@ -96,7 +96,9 @@ rule applies.
 | **Pin** | A repository the Inbox lists: a local clone named by path, or a URL cloned (blobless) into the clones folder. Kept in the pins file: `REVIEW_PINS`, else `<config>/code-review/pins`; clones in `REVIEW_CLONES`, else `<data>/code-review/clones`. Named `owner/name` from its remote; the short `name` works when it is unique. |
 | **Address** | A pull request on the command line: `owner/name#12`, `name#12`, `name!12` (GitLab), or `12` / `#12` inside a pinned clone or when one pinned repository has it. |
 | **Standing** | Where a pull request is for this reviewer: new (never opened), updated (its head moved since it was last opened), reviewing, reviewed (every change seen, no drafts). |
-| **Thread** | A conversation on the forge: on a line of the code (open, resolved, outdated) or on the pull request itself. Read on open and on refresh, never stored; a reply is a draft that names its thread. |
+| **Thread** | A conversation on the forge: on a line of the code (open, resolved, outdated) or on the pull request itself. Read on open and on refresh, never stored; a reply is a draft that names its thread. Every note, the description and every draft is drawn as markdown: links, `#12`, `!12`, `@user` and commit hashes link to the forge, pictures are fetched once into a temporary cache and drawn in place. |
+| **Commit** | One commit of the pull request (`git log base..head`). The Commits view lists them; picking one shows its own changes against its parent, unified or split; comments stay on the whole pull request's changes. |
+| **Link** | Where an entity lives on the forge: the pull request, a comment, an author, a commit, a file at a commit with the selected lines. Every one has a button that opens it in the browser and one that copies it; `io-forge` spells each forge's URLs. |
 | **Xref** | Symbol A calls or references symbol B. Xrefs to a symbol are its callers, xrefs from it its callees. |
 
 ## Why it is built this way
@@ -127,6 +129,10 @@ rule applies.
 - **The GUI is one selection** (a file and lines, a symbol when one is focused); every view
   shows it. Opening a pull request fetches, checks out, diffs and indexes in the background,
   then swaps the index and the servers in one step.
+- **A split diff needs no second checkout.** The old side of a file is its head side with each
+  hunk undone, so the split view (and a commit's view, which reads the commit's file once)
+  highlights both sides with the same parsers the index uses, and folds, selects and comments
+  like the unified view.
 - **Nothing moves out from under the pointer.** A button the pointer rests on keeps its place
   and size until the pointer leaves it; whatever its click changes moves around it, and what
   slides under a vanished button takes no click until the pointer leaves. Rapid clicks on one
@@ -143,7 +149,8 @@ rule applies.
 `domain` (the model, no I/O), `io-*` (one crate per outside format or program: `io-vcs` git,
 `io-forge` forge APIs through curl, `io-review` the review files, `io-cache` the index cache,
 `io-config` the user's layout and settings, `io-fonts` installed fonts, `io-lsp`, `io-source`,
-`io-process`, `io-store`, `io-clipboard` the system clipboard), `index` (tree-sitter resolvers,
+`io-process` (also the browser opener), `io-store`, `io-clipboard` the system clipboard,
+`io-picture` pictures fetched through curl, cached in the temporary folder and decoded), `index` (tree-sitter resolvers,
 server orchestration), `session` (the pinned repositories and their reviews: the inbox,
 finding the forge, opening a pull request, saving a review, submitting it; the one place
 `cli` and `gui` share), `cli` (text commands, also the GUI's Console), `ui` (the element tree), `platform` (wgpu,
@@ -188,8 +195,11 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
   every background job have answered), `rect <id>`, `click-id <id> [ctrl|alt|shift]`,
   `dblclick-id <id>`, `hover-id <id>`, `absent <id>`, `shot <file.png>`, `dump`. A `script:`
   line on stderr fails the run. Id names are the ones in `crates/gui/src/ids.rs`: `name`,
-  `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, changed files `change/<n>`, thread rows `thread/<n>`, a thread's
-  reply button `reply@<thread id>`, a fold `fold@<first line>`, a
+  `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, changed files `change/<n>`,
+  commits `commit/<n>`, `all-changes`, the split toggle `layout`, thread rows `thread/<n>`,
+  a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up/<first line>`,
+  `fold-down/<last line>` and `fold/<first line>`, link buttons `link-open@<key>` and
+  `link-copy@<key>` (`pull`, `file`, `<thread>/<note>`), a
   removed line `draft-removed@<old line>`, a draft's remove button `draft-remove@<id>`, every
   view's tab `tab@<View>`). Rects come from the previous frame, so `wait 1` after anything
   that changes the layout. `dump` prints the selection, the review (pulls, the open pull

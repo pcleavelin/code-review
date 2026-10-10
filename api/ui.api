@@ -1,5 +1,12 @@
 canvas::pub trait Measure
-canvas::pub enum Command { Clip(Rect), Fill { rect: Rect, color: Color, }, Quad { corners: [Vector; 4], color: Color, }, Circle { center: Vector, radius: Coordinate, color: Color, }, Text { at: Point, size: FontSize, text: Label, color: Color, }, Grid { at: Point, size: FontSize, grid: Rc<Grid>, }, }
+canvas::pub struct PictureKey(u64);
+canvas::pub const fn new(value: u64) -> Self
+canvas::pub const fn get(self) -> u64
+canvas::pub struct PictureBytes(Vec<u8>);
+canvas::pub const fn new(rgba: Vec<u8>) -> Self
+canvas::pub fn as_slice(&self) -> &[u8]
+canvas::pub struct Picture { pub key: PictureKey, pub size: Extent, pub rgba: PictureBytes, }
+canvas::pub enum Command { Clip(Rect), Fill { rect: Rect, color: Color, }, Quad { corners: [Vector; 4], color: Color, }, Circle { center: Vector, radius: Coordinate, color: Color, }, Text { at: Point, size: FontSize, text: Label, color: Color, }, Grid { at: Point, size: FontSize, grid: Rc<Grid>, }, Picture { rect: Rect, picture: Rc<Picture>, }, }
 canvas::pub struct DrawList { commands: Vec<Command>, }
 canvas::pub fn commands(&self) -> impl Iterator<Item = &Command>
 canvas::pub fn is_empty(&self) -> bool
@@ -17,6 +24,7 @@ canvas::pub fn curve(&mut self, points: [Vector; 4], width: Coordinate, color: C
 canvas::pub fn circle(&mut self, center: Vector, radius: Coordinate, color: Color)
 canvas::pub fn text(&mut self, at: Point, size: FontSize, text: impl Into<Label>, color: Color) -> Px
 canvas::pub fn grid(&mut self, at: Point, size: FontSize, grid: &Rc<Grid>)
+canvas::pub fn picture(&mut self, rect: Rect, picture: &Rc<Picture>)
 color::pub struct Color([u8; 4]);
 color::pub const TRANSPARENT: Self = Self([0; 4]);
 color::pub const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> Self

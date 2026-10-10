@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::f32::consts::TAU;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -5,19 +6,22 @@ use std::sync::Arc;
 use io_fonts::FontFile;
 use ui::{
     Color, Command, Coordinate, Count, DrawList, Extent, FontSize, Glyph, Grid, Label, Measure,
-    Point, Px, Rect, Repaint, Scale, Vector,
+    Picture, PictureKey, Point, Px, Rect, Repaint, Scale, Vector,
 };
 use wgpu::{
-    BindGroup, Buffer, BufferDescriptor, BufferUsages, Device, FilterMode, Instance, PresentMode,
-    Queue, RequestAdapterOptions, Sampler, SamplerDescriptor, Surface, SurfaceConfiguration,
-    Texture, TextureFormat, TextureUsages,
+    BindGroup, Buffer, BufferDescriptor, BufferUsages, Device, Extent3d, FilterMode, Instance,
+    Origin3d, PresentMode, Queue, RequestAdapterOptions, Sampler, SamplerDescriptor, Surface,
+    SurfaceConfiguration, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect,
+    TextureFormat, TextureUsages,
 };
 use winit::window::Window;
 
 use crate::atlas::{Atlas, Entry, Sprite, SpriteKey, Texel, TextureArea};
 use crate::error::{Reason, StartError};
 use crate::font::{Font, Metrics};
-use crate::gpu::{GpuBuffer, Pipeline, Vertex, atlas_texture, bind_group, block_on};
+use crate::gpu::{
+    GpuBuffer, Pipeline, Shader, Vertex, atlas_texture, bind_group, block_on, picture_texture,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub(crate) struct IndexSlot(u32);
@@ -67,10 +71,38 @@ impl Indices {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Source {
+    Atlas,
+    Picture(PictureKey),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Batch {
     pub(crate) clip: Rect,
     pub(crate) start: IndexSlot,
     pub(crate) end: IndexSlot,
+    pub(crate) source: Source,
+}
+
+pub(crate) struct Painted {
+    pub(crate) group: BindGroup,
+    used: FrameCount,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+struct FrameCount(u64);
+
+impl FrameCount {
+    const KEPT: u64 = 600;
+    const MOST: usize = 96;
+
+    const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+
+    const fn stale(self, now: Self) -> bool {
+        now.0.saturating_sub(self.0) > Self::KEPT
+    }
 }
 
 pub struct Renderer {
@@ -80,8 +112,13 @@ pub struct Renderer {
     pub(crate) queue: Queue,
     pub(crate) config: SurfaceConfiguration,
     pub(crate) pipeline: Pipeline,
+    pub(crate) picture_pipeline: Pipeline,
     pub(crate) bind_group: BindGroup,
     sampler: Sampler,
+    smooth: Sampler,
+    pub(crate) pictures: BTreeMap<PictureKey, Painted>,
+    frame: FrameCount,
+    source: Source,
     pub(crate) uniforms: Buffer,
     pub(crate) texture: Texture,
     pub(crate) vertex_buffer: Option<GpuBuffer>,
@@ -127,10 +164,16 @@ impl Renderer {
         config.present_mode = PresentMode::AutoVsync;
         config.usage |= TextureUsages::COPY_SRC;
         surface.configure(&device, &config);
-        let pipeline = Pipeline::new(&device, config.format);
+        let pipeline = Pipeline::new(&device, config.format, Shader::TEXT);
+        let picture_pipeline = Pipeline::new(&device, config.format, Shader::PICTURE);
         let sampler = device.create_sampler(&SamplerDescriptor {
             mag_filter: FilterMode::Nearest,
             min_filter: FilterMode::Nearest,
+            ..SamplerDescriptor::default()
+        });
+        let smooth = device.create_sampler(&SamplerDescriptor {
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
             ..SamplerDescriptor::default()
         });
         let uniforms = device.create_buffer(&BufferDescriptor {
@@ -161,8 +204,13 @@ impl Renderer {
             queue,
             config,
             pipeline,
+            picture_pipeline,
             bind_group: group,
             sampler,
+            smooth,
+            pictures: BTreeMap::new(),
+            frame: FrameCount::default(),
+            source: Source::Atlas,
             uniforms,
             texture,
             vertex_buffer: None,
@@ -268,19 +316,104 @@ impl Renderer {
         self.indices.clear();
         self.batches.clear();
         self.clip = Rect::at(Point::default(), self.size);
+        self.source = Source::Atlas;
+        self.frame = self.frame.next();
+        if self.pictures.len() > FrameCount::MOST {
+            let now = self.frame;
+            self.pictures.retain(|_, painted| !painted.used.stale(now));
+        }
     }
 
     fn cut(&mut self) {
         let count = self.indices.count();
         let clip = self.clip;
+        let source = self.source;
         match self.batches.last_mut() {
-            Some(batch) if batch.start == batch.end => batch.clip = clip,
+            Some(batch) if batch.start == batch.end => {
+                batch.clip = clip;
+                batch.source = source;
+            }
             _ => self.batches.push(Batch {
                 clip,
                 start: count,
                 end: count,
+                source,
             }),
         }
+    }
+
+    fn switch(&mut self, source: Source) {
+        if self.source != source {
+            self.source = source;
+            self.cut();
+        }
+    }
+
+    fn paint_picture(&mut self, picture: &Picture) -> bool {
+        if let Some(painted) = self.pictures.get_mut(&picture.key) {
+            painted.used = self.frame;
+            return true;
+        }
+        let size = Extent3d {
+            width: picture.size.width.unsigned(),
+            height: picture.size.height.unsigned(),
+            depth_or_array_layers: 1,
+        };
+        let expected = u64::from(size.width) * u64::from(size.height) * 4;
+        if size.width == 0
+            || size.height == 0
+            || u64::try_from(picture.rgba.as_slice().len()).ok() != Some(expected)
+        {
+            return false;
+        }
+        let texture = picture_texture(&self.device, size);
+        self.queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            picture.rgba.as_slice(),
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size.width * 4),
+                rows_per_image: Some(size.height),
+            },
+            size,
+        );
+        let group = bind_group(
+            &self.device,
+            &self.picture_pipeline.bind_layout,
+            &self.uniforms,
+            &texture,
+            &self.smooth,
+        );
+        self.pictures.insert(
+            picture.key,
+            Painted {
+                group,
+                used: self.frame,
+            },
+        );
+        true
+    }
+
+    fn picture(&mut self, rect: Rect, picture: &Picture) {
+        if rect.is_empty() || !self.paint_picture(picture) {
+            return;
+        }
+        self.switch(Source::Picture(picture.key));
+        let corners = Self::corners(
+            Vector::of_point(rect.origin()),
+            Vector::of_point(Point::new(rect.right(), rect.bottom())),
+        );
+        let whole = TextureArea {
+            start: Vector::new(Coordinate::new(0.0), Coordinate::new(0.0)),
+            end: Vector::new(Coordinate::new(1.0), Coordinate::new(1.0)),
+        };
+        self.quad(corners, whole, Color::rgba(255, 255, 255, 255));
+        self.switch(Source::Atlas);
     }
 
     fn extend_batch(&mut self) {
@@ -447,6 +580,7 @@ impl Renderer {
                     color,
                 } => self.text(*at, *size, text, *color),
                 Command::Grid { at, size, grid } => self.grid(*at, *size, grid),
+                Command::Picture { rect, picture } => self.picture(*rect, picture),
             }
         }
     }

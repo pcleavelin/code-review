@@ -270,6 +270,22 @@ pub(crate) const COMMIT_ROW: Control = Control::new(
     Element::new("commit"),
     Words::new("show only this commit's changes"),
 );
+pub(crate) const MARKDOWN: Control = Control::new(
+    Element::new("markdown"),
+    Words::new("text written on the forge"),
+);
+pub(crate) const MD_LINK: Control = Control::new(
+    Element::new("md-link"),
+    Words::new("open this link in the browser"),
+);
+pub(crate) const MD_CODE: Control = Control::new(
+    Element::new("md-code"),
+    Words::new("code quoted in the text"),
+);
+pub(crate) const PICTURE: Control = Control::new(
+    Element::new("picture"),
+    Words::new("open the picture in the browser"),
+);
 pub(crate) const FOLD: Control = Control::new(
     Element::new("fold"),
     Words::new("show all of these unchanged lines"),
@@ -412,6 +428,10 @@ pub(crate) const CONTROLS: &[Control] = &[
     NEXT_HUNK,
     PREVIOUS_HUNK,
     WHOLE_FILE,
+    MARKDOWN,
+    MD_LINK,
+    MD_CODE,
+    PICTURE,
     TABLE,
     LAYOUT,
     ALL_CHANGES,

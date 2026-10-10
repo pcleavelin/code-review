@@ -169,6 +169,13 @@ layout::pub const fn share(&self) -> Share
 layout::pub fn first(&self) -> &LayoutTree
 layout::pub fn second(&self) -> &LayoutTree
 layout::pub enum LayoutTree { Split(LayoutSplit), Panel(LayoutPanel), }
+picture::pub struct PixelCount(u32);
+picture::pub const fn new(value: u32) -> Self
+picture::pub const fn get(self) -> u32
+picture::pub struct Rgba(Vec<u8>);
+picture::pub const fn new(bytes: Vec<u8>) -> Self
+picture::pub fn into_bytes(self) -> Vec<u8>
+picture::pub struct Picture { pub width: PixelCount, pub height: PixelCount, pub rgba: Rgba, }
 review::pub struct Spelling(&'static str);
 review::pub const fn as_str(self) -> &'static str
 review::pub enum ForgeKind { GitHub, GitLab, Forgejo, }
@@ -226,7 +233,7 @@ review::diff::pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow>
 review::link::pub struct WebLink(String);
 review::link::pub fn new(text: &str) -> Option<Self>
 review::link::pub fn as_str(&self) -> &str
-review::link::pub enum Linked { Pull(PrNumber), Commit(CommitId), File { commit: CommitId, path: RelativePath, lines: Option<Span>, }, User(Login), }
+review::link::pub enum Linked { Pull(PrNumber), Issue(PrNumber), Commit(CommitId), File { commit: CommitId, path: RelativePath, lines: Option<Span>, }, User(Login), }
 review::state::pub enum Side { Old, New, }
 review::state::pub const fn name(self) -> Spelling
 review::state::pub struct DraftId(u32);

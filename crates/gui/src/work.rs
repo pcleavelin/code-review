@@ -281,7 +281,7 @@ fn definition_found(session: &mut io_lsp::LspSession, probe: &Probe) -> Option<F
     });
     let grid = span.map_or_else(
         || Grid::new(Count::ZERO, Count::ZERO),
-        |span| grid::build(&source, span),
+        |span| grid::build(&source, span, grid::Gutter::Numbered),
     );
     Some(Found {
         file: definition.file,

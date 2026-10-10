@@ -1,0 +1,13 @@
+[package]
+name = "io-picture"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+domain = { path = "../domain" }
+io-process = { path = "../io-process" }
+io-store = { path = "../io-store" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+
+[lints]
+workspace = true

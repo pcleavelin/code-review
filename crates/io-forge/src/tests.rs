@@ -989,6 +989,10 @@ fn each_forge_spells_its_own_web_links() {
         "https://h.org/o/r/src/commit/0123456789abcdef/src/a%20b.rs#L1"
     );
     assert_eq!(
+        url(ForgeKind::GitLab, &Linked::Issue(number)),
+        "https://h.org/o/r/-/issues/7"
+    );
+    assert_eq!(
         url(ForgeKind::GitLab, &Linked::Commit(commit.clone())),
         "https://h.org/o/r/-/commit/0123456789abcdef"
     );

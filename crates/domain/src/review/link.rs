@@ -46,6 +46,7 @@ impl fmt::Display for WebLink {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Linked {
     Pull(PrNumber),
+    Issue(PrNumber),
     Commit(CommitId),
     File {
         commit: CommitId,

@@ -5,7 +5,7 @@ use ui::{Button, Canvas, Count, Grid, Px, Rect};
 
 use crate::action::Action;
 use crate::diffs::{Loading, Sides, SidesKey};
-use crate::grid;
+use crate::grid::{self, Gutter};
 use crate::ids;
 use crate::keys::LineGesture;
 use crate::model::Model;
@@ -203,7 +203,7 @@ struct RowLook {
 
 fn cell(source: &SourceFile, line: Line, fill: Option<ui::Color>, selected: Option<Span>) -> Cell {
     Cell {
-        grid: Rc::new(grid::build(source, Span::line(line))),
+        grid: Rc::new(grid::build(source, Span::line(line), Gutter::Numbered)),
         fill: if selected.is_some_and(|span| span.contains(line)) {
             Some(LINES_SELECTED)
         } else {

@@ -4,7 +4,7 @@ use domain::{
 };
 use ui::{Count, Icon, Label, Run};
 
-use domain::{CommitId, DiffLayout, Linked, WebLink};
+use domain::{CommitId, DiffLayout, Linked, Prose, WebLink};
 
 use crate::diffs::Loading;
 
@@ -23,6 +23,7 @@ use crate::widgets::{
 };
 
 use super::inbox::{standing_color, standing_word};
+use super::markdown::markdown;
 
 fn seen_mark(seen: Seen) -> Run {
     match seen {
@@ -393,7 +394,12 @@ fn notes(model: &Model, frame: &mut Frame<'_>, thread: &Thread) {
             &Label::new(format!("{}/{position}", thread.id)),
         );
         if !note.body.is_empty() {
-            frame.note(note.body.as_str(), TEXT, Padding::Step);
+            markdown(
+                model,
+                frame,
+                &note.body,
+                &Label::new(format!("{}/{position}", thread.id)),
+            );
         }
     }
 }
@@ -413,7 +419,7 @@ fn state_word(state: ThreadState) -> Label {
     })
 }
 
-fn pending_reply(frame: &mut Frame<'_>, draft: &Draft) {
+fn pending_reply(model: &Model, frame: &mut Frame<'_>, draft: &Draft) {
     frame.start(Container::FillRow);
     frame.label_runs(vec![
         Run::new("you", ORANGE),
@@ -426,7 +432,12 @@ fn pending_reply(frame: &mut Frame<'_>, draft: &Draft) {
     }
     frame.attach_tip(remove);
     frame.finish();
-    frame.note(draft.text.as_str(), TEXT, Padding::Step);
+    markdown(
+        model,
+        frame,
+        &Prose::new(draft.text.as_str()),
+        &Label::new(format!("reply/{}", draft.id)),
+    );
 }
 
 pub(super) fn replies_to<'model>(model: &'model Model, thread: &Thread) -> Vec<&'model Draft> {
@@ -469,12 +480,12 @@ pub(super) fn thread_box(model: &Model, frame: &mut Frame<'_>, thread: &Thread) 
     frame.finish();
     notes(model, frame, thread);
     for draft in replies_to(model, thread) {
-        pending_reply(frame, draft);
+        pending_reply(model, frame, draft);
     }
     frame.finish();
 }
 
-pub(super) fn draft_box(frame: &mut Frame<'_>, draft: &Draft) {
+pub(super) fn draft_box(model: &Model, frame: &mut Frame<'_>, draft: &Draft) {
     frame.start(Container::Comment {
         look: CommentLook::Saved,
         id: ids::draft_box().with(&format!("box{}", draft.id)),
@@ -503,7 +514,12 @@ pub(super) fn draft_box(frame: &mut Frame<'_>, draft: &Draft) {
     }
     frame.attach_tip(remove);
     frame.finish();
-    frame.note(draft.text.as_str(), TEXT, Padding::Step);
+    markdown(
+        model,
+        frame,
+        &Prose::new(draft.text.as_str()),
+        &Label::new(format!("draft/{}", draft.id)),
+    );
     frame.finish();
 }
 
@@ -608,7 +624,7 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     if talk.description.is_empty() {
         frame.note("(no description)", WEAK, Padding::Step);
     } else {
-        frame.note(talk.description.as_str(), TEXT, Padding::Step);
+        markdown(model, frame, &talk.description, &Label::new("description"));
     }
     frame.start(Container::ToolbarSmall);
     frame.label(

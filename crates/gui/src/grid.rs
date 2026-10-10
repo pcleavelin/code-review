@@ -8,7 +8,17 @@ use crate::theme::{self, TEXT, WEAK};
 
 pub(crate) const GUTTER: Count = Count::new(6);
 
-pub(crate) fn build(file: &SourceFile, span: Span) -> Grid {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Gutter {
+    Numbered,
+    Bare,
+}
+
+pub(crate) fn build(file: &SourceFile, span: Span, gutter: Gutter) -> Grid {
+    let margin = match gutter {
+        Gutter::Numbered => GUTTER,
+        Gutter::Bare => Count::ZERO,
+    };
     let text = file.text();
     let widest = span
         .lines()
@@ -17,11 +27,14 @@ pub(crate) fn build(file: &SourceFile, span: Span) -> Grid {
         .max()
         .unwrap_or(0);
     let rows = usize::try_from(span.count().value()).unwrap_or(0);
-    let mut grid = Grid::new(Count::new(widest) + GUTTER, Count::new(rows));
+    let mut grid = Grid::new(Count::new(widest) + margin, Count::new(rows));
     for (row, line) in span.lines().enumerate() {
         let row = Count::new(row);
-        let gutter = format!("{:5} ", line.number());
-        for (column, glyph) in gutter.chars().enumerate() {
+        let number = match gutter {
+            Gutter::Numbered => format!("{:5} ", line.number()),
+            Gutter::Bare => String::new(),
+        };
+        for (column, glyph) in number.chars().enumerate() {
             grid.set(
                 Count::new(column),
                 row,
@@ -51,7 +64,7 @@ pub(crate) fn build(file: &SourceFile, span: Span) -> Grid {
                 _ => TEXT,
             };
             grid.set(
-                Count::new(column) + GUTTER,
+                Count::new(column) + margin,
                 row,
                 Cell {
                     glyph: Glyph::new(glyph),
@@ -90,7 +103,7 @@ impl Grids {
         if self.0.len() > Self::MOST {
             self.0.clear();
         }
-        let grid = Rc::new(build(file, span));
+        let grid = Rc::new(build(file, span, Gutter::Numbered));
         self.0.insert(key, Rc::clone(&grid));
         grid
     }

@@ -8,7 +8,7 @@ mod layout;
 mod text;
 mod tree;
 
-pub use canvas::{Canvas, Command, DrawList, Measure};
+pub use canvas::{Canvas, Command, DrawList, Measure, Picture, PictureBytes, PictureKey};
 pub use color::{Color, Repaint};
 pub use geometry::{Axis, Coordinate, Count, Extent, FontSize, Point, Px, Rect, Scale, Vector};
 pub use icon::{Icon, IconName};

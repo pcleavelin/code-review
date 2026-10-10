@@ -1,6 +1,7 @@
 mod id;
 mod index;
 mod layout;
+mod picture;
 mod review;
 mod settings;
 mod text;
@@ -13,6 +14,7 @@ pub use index::{
     SymbolName, SymbolQuery, TreeEntry, TypeName, Verdict,
 };
 pub use layout::{LayoutPanel, LayoutSplit, LayoutTree, Share, SplitDirection, ViewKey};
+pub use picture::{Picture, PixelCount, Rgba};
 pub use review::{
     BranchName, ChangeKind, CodePlace, Commit, CommitId, Conversation, Decision, DiffLayout,
     DiffLine, Draft, DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount, FileRow,

@@ -15,6 +15,8 @@ io-fonts = { path = "../io-fonts" }
 io-lsp = { path = "../io-lsp" }
 io-process = { path = "../io-process" }
 io-forge = { path = "../io-forge" }
+io-picture = { path = "../io-picture" }
+pulldown-cmark = { version = "0.13", default-features = false }
 cli = { path = "../cli" }
 ui = { path = "../ui" }
 platform = { path = "../platform" }

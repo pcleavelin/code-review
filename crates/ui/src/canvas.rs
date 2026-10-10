@@ -1,3 +1,4 @@
+use std::fmt;
 use std::rc::Rc;
 
 use crate::color::Color;
@@ -7,6 +8,45 @@ use crate::text::{Grid, Label};
 
 pub trait Measure {
     fn cell(&mut self, size: FontSize) -> Extent;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PictureKey(u64);
+
+impl PictureKey {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct PictureBytes(Vec<u8>);
+
+impl PictureBytes {
+    pub const fn new(rgba: Vec<u8>) -> Self {
+        Self(rgba)
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl fmt::Debug for PictureBytes {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} bytes", self.0.len())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Picture {
+    pub key: PictureKey,
+    pub size: Extent,
+    pub rgba: PictureBytes,
 }
 
 #[derive(Clone, Debug)]
@@ -35,6 +75,10 @@ pub enum Command {
         at: Point,
         size: FontSize,
         grid: Rc<Grid>,
+    },
+    Picture {
+        rect: Rect,
+        picture: Rc<Picture>,
     },
 }
 
@@ -204,6 +248,13 @@ impl<'frame> Canvas<'frame> {
             at,
             size,
             grid: Rc::clone(grid),
+        });
+    }
+
+    pub fn picture(&mut self, rect: Rect, picture: &Rc<Picture>) {
+        self.list.commands.push(Command::Picture {
+            rect,
+            picture: Rc::clone(picture),
         });
     }
 }

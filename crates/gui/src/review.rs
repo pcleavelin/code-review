@@ -20,6 +20,7 @@ use crate::field::Which;
 use crate::keys::Going;
 use crate::model::{LineSelection, Model, Tab};
 use crate::panels::View;
+use crate::pictures::{PictureJobs, Pictures};
 use crate::runtime::{Job, Landing, landed};
 use crate::status::{Status, Tone};
 use crate::work::{Services, WorkState};
@@ -98,6 +99,7 @@ pub(crate) struct ReviewJobs {
     submit: Option<Job<Result<Submitted, Label>>>,
     pin: Option<Job<Result<PinLanded, Label>>>,
     pub(crate) diffs: DiffJobs,
+    pub(crate) pictures: PictureJobs,
 }
 
 struct PinLanded {
@@ -106,13 +108,14 @@ struct PinLanded {
 }
 
 impl ReviewJobs {
-    pub(crate) const fn busy(&self) -> bool {
+    pub(crate) fn busy(&self) -> bool {
         self.list.is_some()
             || self.open.is_some()
             || self.talk.is_some()
             || self.submit.is_some()
             || self.pin.is_some()
             || self.diffs.busy()
+            || self.pictures.busy()
     }
 }
 
@@ -162,6 +165,7 @@ pub(crate) struct Reviewing {
     pub(crate) whole: BTreeSet<RelativePath>,
     pub(crate) unfolded: BTreeMap<RelativePath, Vec<Span>>,
     pub(crate) diffs: Diffs,
+    pub(crate) pictures: Pictures,
     stamp: Option<ReviewStamp>,
     last_poll: Instant,
 }
@@ -185,6 +189,7 @@ impl Reviewing {
             whole: BTreeSet::new(),
             unfolded: BTreeMap::new(),
             diffs: Diffs::default(),
+            pictures: Pictures::default(),
             stamp: None,
             last_poll: Instant::now(),
         }
@@ -379,6 +384,7 @@ pub(crate) enum ReviewAct {
     OpenLink(WebLink),
     CopyLink(WebLink),
     ViewCommit(Option<CommitId>),
+    NeedPicture(WebLink),
     NeedSides(SidesKey),
     ToggleLayout,
 }
@@ -793,6 +799,7 @@ impl App {
                     .say(ReviewStatus::LinkFailed(Label::new(format!("{error:?}")))),
             },
             ReviewAct::ViewCommit(commit) => self.view_commit(commit),
+            ReviewAct::NeedPicture(link) => self.need_picture(link),
             ReviewAct::NeedSides(key) => self.need_sides(key),
             ReviewAct::ToggleLayout => {
                 let diffs = &mut self.model.review.diffs;
@@ -1000,6 +1007,7 @@ impl App {
         self.poll_talk();
         self.poll_submit();
         self.poll_diffs();
+        self.poll_pictures();
         self.poll_review_disk();
     }
 

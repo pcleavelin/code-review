@@ -3,6 +3,7 @@ mod center;
 mod console;
 mod inbox;
 mod left;
+mod markdown;
 mod palette;
 mod panel_tree;
 mod references;

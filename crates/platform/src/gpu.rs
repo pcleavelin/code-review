@@ -41,8 +41,37 @@ struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @l
 ",
 );
 
+const PICTURE_SHADER: Shader = Shader(
+    r"
+struct Uniforms { screen: vec4<f32> };
+@group(0) @binding(0) var<uniform> u: Uniforms;
+@group(0) @binding(1) var tex: texture_2d<f32>;
+@group(0) @binding(2) var samp: sampler;
+
+struct VsIn { @location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>, @location(2) color: vec4<f32> };
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) color: vec4<f32> };
+
+@vertex fn vs(in: VsIn) -> VsOut {
+    var out: VsOut;
+    out.pos = vec4<f32>(in.pos.x / u.screen.x * 2.0 - 1.0, 1.0 - in.pos.y / u.screen.y * 2.0, 0.0, 1.0);
+    out.uv = in.uv;
+    out.color = in.color;
+    return out;
+}
+
+@fragment fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    return textureSample(tex, samp, in.uv) * in.color;
+}
+",
+);
+
 #[derive(Clone, Copy, Debug)]
-struct Shader(&'static str);
+pub(crate) struct Shader(&'static str);
+
+impl Shader {
+    pub(crate) const TEXT: Self = SHADER;
+    pub(crate) const PICTURE: Self = PICTURE_SHADER;
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -179,10 +208,10 @@ fn bind_layout(device: &Device) -> BindGroupLayout {
 }
 
 impl Pipeline {
-    pub(crate) fn new(device: &Device, format: TextureFormat) -> Self {
+    pub(crate) fn new(device: &Device, format: TextureFormat, source: Shader) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("ui"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(SHADER.0)),
+            source: ShaderSource::Wgsl(Cow::Borrowed(source.0)),
         });
         let bind_layout = bind_layout(device);
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -251,6 +280,19 @@ pub(crate) fn atlas_texture(device: &Device, side: Extent3d) -> Texture {
         sample_count: 1,
         dimension: TextureDimension::D2,
         format: TextureFormat::R8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+pub(crate) fn picture_texture(device: &Device, size: Extent3d) -> Texture {
+    device.create_texture(&TextureDescriptor {
+        label: Some("picture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
         view_formats: &[],
     })
