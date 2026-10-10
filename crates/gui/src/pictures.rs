@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::mem;
 use std::rc::Rc;
+use std::time::Duration;
 
 use domain::WebLink;
 use ui::{Count, Extent, Label, Picture, PictureBytes, PictureKey, Px};
@@ -16,30 +17,100 @@ pub(crate) struct Fetched {
     result: Result<domain::Picture, Label>,
 }
 
+pub(crate) struct AnimationFrame {
+    picture: Rc<Picture>,
+    shown_for: Duration,
+}
+
+pub(crate) struct Animation {
+    frames: Vec<AnimationFrame>,
+    started_at: Duration,
+    size: Extent,
+}
+
+pub(crate) struct Shown {
+    pub(crate) picture: Rc<Picture>,
+    pub(crate) next: Option<Duration>,
+}
+
+impl Animation {
+    pub(crate) const fn size(&self) -> Extent {
+        self.size
+    }
+
+    pub(crate) fn at(&self, now: Duration) -> Option<Shown> {
+        let cycle: Duration = self.frames.iter().map(|frame| frame.shown_for).sum();
+        let first = self.frames.first().map(|frame| Rc::clone(&frame.picture))?;
+        if cycle.is_zero() {
+            return Some(Shown {
+                picture: first,
+                next: None,
+            });
+        }
+        let since = now.saturating_sub(self.started_at);
+        let into =
+            Duration::from_nanos(u64::try_from(since.as_nanos() % cycle.as_nanos()).unwrap_or(0));
+        let mut ends = Duration::ZERO;
+        for frame in &self.frames {
+            ends += frame.shown_for;
+            if into < ends {
+                return Some(Shown {
+                    picture: Rc::clone(&frame.picture),
+                    next: Some(now + ends.saturating_sub(into)),
+                });
+            }
+        }
+        Some(Shown {
+            picture: first,
+            next: Some(now),
+        })
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Pictures {
-    loaded: BTreeMap<WebLink, Loading<Rc<Picture>>>,
+    loaded: BTreeMap<WebLink, Loading<Animation>>,
     last: PictureKey,
+    pub(crate) wake: Option<Duration>,
 }
 
 impl Pictures {
-    pub(crate) fn get(&self, link: &WebLink) -> Option<&Loading<Rc<Picture>>> {
+    pub(crate) fn get(&self, link: &WebLink) -> Option<&Loading<Animation>> {
         self.loaded.get(link)
     }
 
-    fn land(&mut self, fetched: Fetched) {
+    pub(crate) fn wake_at(&mut self, at: Duration) {
+        self.wake = Some(self.wake.map_or(at, |wake| wake.min(at)));
+    }
+
+    fn land(&mut self, fetched: Fetched, now: Duration) {
         let loaded = match fetched.result {
-            Ok(picture) => {
-                self.last = PictureKey::new(self.last.get().wrapping_add(1));
+            Ok(decoded) => {
                 let size = Extent::new(
-                    Px::new(i32::try_from(picture.width.get()).unwrap_or(0)),
-                    Px::new(i32::try_from(picture.height.get()).unwrap_or(0)),
+                    Px::new(i32::try_from(decoded.width.get()).unwrap_or(0)),
+                    Px::new(i32::try_from(decoded.height.get()).unwrap_or(0)),
                 );
-                Loading::Got(Rc::new(Picture {
-                    key: self.last,
+                let frames = decoded
+                    .frames
+                    .into_iter()
+                    .map(|frame| {
+                        self.last = PictureKey::new(self.last.get().wrapping_add(1));
+                        let picture = Rc::new(Picture {
+                            key: self.last,
+                            size,
+                            rgba: PictureBytes::new(frame.rgba.into_bytes()),
+                        });
+                        AnimationFrame {
+                            picture,
+                            shown_for: frame.shown_for,
+                        }
+                    })
+                    .collect();
+                Loading::Got(Animation {
+                    frames,
+                    started_at: now,
                     size,
-                    rgba: PictureBytes::new(picture.rgba.into_bytes()),
-                }))
+                })
             }
             Err(why) => Loading::Failed(why),
         };
@@ -92,7 +163,9 @@ impl App {
             let mut slot = Some(job);
             match landed(&mut slot) {
                 Landing::Waiting => still.extend(slot),
-                Landing::Landed(fetched) => self.model.review.pictures.land(fetched),
+                Landing::Landed(fetched) => {
+                    self.model.review.pictures.land(fetched, self.model.now);
+                }
                 Landing::Failed => {}
             }
         }
@@ -100,3 +173,6 @@ impl App {
         self.start_pictures();
     }
 }
+
+#[cfg(test)]
+mod tests;

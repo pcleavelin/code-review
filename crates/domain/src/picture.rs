@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PixelCount(u32);
@@ -33,8 +34,14 @@ impl fmt::Debug for Rgba {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PictureFrame {
+    pub rgba: Rgba,
+    pub shown_for: Duration,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Picture {
     pub width: PixelCount,
     pub height: PixelCount,
-    pub rgba: Rgba,
+    pub frames: Vec<PictureFrame>,
 }

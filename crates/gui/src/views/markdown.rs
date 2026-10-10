@@ -460,9 +460,15 @@ impl Writer<'_> {
                     frame.push(Action::Review(ReviewAct::OpenLink(link.clone())));
                 }
             }
-            Some(Loading::Got(picture)) => {
+            Some(Loading::Got(animation)) => {
+                let Some(shown) = animation.at(self.model.now) else {
+                    return;
+                };
+                if let Some(next) = shown.next {
+                    frame.push(Action::Review(ReviewAct::PictureWake(next)));
+                }
                 let room = frame.cell_width() * self.width;
-                let size = picture.size;
+                let size = animation.size();
                 let wide = size.width.max(PIXEL);
                 let mut width = size.width.min(room);
                 let mut height = Px::of_wide(size.height.wide() * width.wide() / wide.wide());
@@ -471,7 +477,7 @@ impl Writer<'_> {
                         Px::of_wide(width.wide() * PICTURE_TALLEST.wide() / height.wide().max(1));
                     height = PICTURE_TALLEST;
                 }
-                let shown = Rc::clone(picture);
+                let shown = shown.picture;
                 let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
                     let area = Rect::new(rect.left, rect.top, width, height);
                     canvas.picture(area, &shown);

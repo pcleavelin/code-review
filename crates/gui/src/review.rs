@@ -385,6 +385,7 @@ pub(crate) enum ReviewAct {
     CopyLink(WebLink),
     ViewCommit(Option<CommitId>),
     NeedPicture(WebLink),
+    PictureWake(Duration),
     NeedSides(SidesKey),
     ToggleLayout,
 }
@@ -800,6 +801,7 @@ impl App {
             },
             ReviewAct::ViewCommit(commit) => self.view_commit(commit),
             ReviewAct::NeedPicture(link) => self.need_picture(link),
+            ReviewAct::PictureWake(at) => self.model.review.pictures.wake_at(at),
             ReviewAct::NeedSides(key) => self.need_sides(key),
             ReviewAct::ToggleLayout => {
                 let diffs = &mut self.model.review.diffs;

@@ -282,6 +282,7 @@ impl platform::App for App {
         self.poll_sources();
         self.poll_review();
         self.model.now = input.time;
+        self.model.review.pictures.wake = None;
         self.keys(input);
         self.model.refresh_palette();
         self.ui.capture(if self.model.settings_menu.is_some() {
@@ -327,14 +328,21 @@ impl platform::App for App {
         self.model.track_navigation();
         let busy =
             self.working() || self.shot.is_some() || self.model.resting.pending(self.model.now);
+        let after = if self.model.line_grab.is_some() || self.ui.settling() {
+            ANIMATING
+        } else if busy {
+            BUSY
+        } else {
+            IDLE
+        };
+        let next_frame = self
+            .model
+            .review
+            .pictures
+            .wake
+            .map(|wake| wake.saturating_sub(self.model.now).max(ANIMATING));
         PlatformFrame {
-            redraw_after: if self.model.line_grab.is_some() || self.ui.settling() {
-                ANIMATING
-            } else if busy {
-                BUSY
-            } else {
-                IDLE
-            },
+            redraw_after: next_frame.map_or(after, |next| next.min(after)),
             exit,
             clear: BACKGROUND,
             cursor,
