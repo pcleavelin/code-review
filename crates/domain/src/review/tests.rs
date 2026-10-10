@@ -1,6 +1,7 @@
 use crate::review::{
-    ChangeKind, CommitId, DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow,
-    Hunk, LineKind, Moment, Pairing, PrNumber, RepoSlug, Review, Seen, Side, Standing,
+    ChangeKind, CodePlace, CommitId, Conversation, DiffLayout, DiffLine, DraftId, DraftOn,
+    DraftText, FileChange, FileRow, Hunk, LineKind, Moment, Pairing, PrNumber, Prose, RepoSlug,
+    Review, Seen, Side, Standing, Thread, ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -349,4 +350,36 @@ fn split_pairs_a_replaced_line_and_unified_stacks_it() {
             (Some(2), Some(2), Pairing::Same),
         ]
     );
+}
+
+fn thread_on(id: &str, file: &str, state: ThreadState) -> Thread {
+    Thread {
+        id: ThreadId::new(id).unwrap(),
+        place: Some(CodePlace {
+            file: RelativePath::new(file),
+            side: Side::New,
+            line: Line::new(3),
+        }),
+        state,
+        notes: Vec::new(),
+    }
+}
+
+#[test]
+fn a_file_draws_its_open_and_resolved_threads_but_not_outdated_ones() {
+    let conversation = Conversation {
+        description: Prose::default(),
+        threads: vec![
+            thread_on("open", "src/lib.rs", ThreadState::Open),
+            thread_on("moved", "src/lib.rs", ThreadState::Outdated),
+            thread_on("settled", "src/lib.rs", ThreadState::Resolved),
+            thread_on("elsewhere", "src/main.rs", ThreadState::Open),
+        ],
+    };
+    let file = RelativePath::new("src/lib.rs");
+    let drawn: Vec<&str> = conversation
+        .drawn_in(&file)
+        .map(|thread| thread.id.as_str())
+        .collect();
+    assert_eq!(drawn, vec!["open", "settled"]);
 }

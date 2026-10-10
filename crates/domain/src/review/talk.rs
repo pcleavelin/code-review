@@ -152,15 +152,16 @@ impl Conversation {
         self.threads.iter().filter(|thread| thread.place.is_none())
     }
 
-    pub fn in_file<'talk>(
+    pub fn drawn_in<'talk>(
         &'talk self,
         file: &'talk RelativePath,
     ) -> impl Iterator<Item = &'talk Thread> {
         self.threads.iter().filter(move |thread| {
-            thread
-                .place
-                .as_ref()
-                .is_some_and(|place| &place.file == file)
+            thread.state != ThreadState::Outdated
+                && thread
+                    .place
+                    .as_ref()
+                    .is_some_and(|place| &place.file == file)
         })
     }
 

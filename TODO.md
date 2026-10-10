@@ -5,12 +5,6 @@
 1. Submitting a review has not been run against a live forge: GitHub, GitLab and Forgejo
    listing were run against public repositories, and the request bodies are unit-tested, but
    no review has been posted. Try each on a pull request you own.
-4. An outdated thread is drawn at its original line number in the head file, as CLAUDE.md
-   says, but the line it was written on has usually changed since, so it sits on unrelated
-   code (BurntSushi/ripgrep#3529: a comment on `dir.remove("sherlock");` is drawn under the
-   `});` now at tests/misc.rs:343). The owner decides where it goes instead: at the line it
-   maps to through `git diff <its commit> <head>` (GitHub gives `original_commit_id`, GitLab
-   the position's `head_sha`) and where when that line is gone, or in the Review tab only.
 5. "What changed since I looked": the seen mark keeps the head commit it was made at, so a
    file that turned "changed since seen" could show the interdiff against that commit instead
    of the whole diff again. Trigger: re-reviewing a large pull request after a force-push.

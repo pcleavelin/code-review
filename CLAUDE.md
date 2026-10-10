@@ -96,7 +96,7 @@ rule applies.
 | **Pin** | A repository the Inbox lists: a local clone named by path, or a URL cloned (blobless) into the clones folder. Kept in the pins file: `REVIEW_PINS`, else `<config>/code-review/pins`; clones in `REVIEW_CLONES`, else `<data>/code-review/clones`. Named `owner/name` from its remote; the short `name` works when it is unique. |
 | **Address** | A pull request on the command line: `owner/name#12`, `name#12`, `name!12` (GitLab), or `12` / `#12` inside a pinned clone or when one pinned repository has it. |
 | **Standing** | Where a pull request is for this reviewer: new (never opened), updated (its head moved since it was last opened), reviewing, reviewed (every change seen, no drafts). |
-| **Thread** | A conversation on the forge: on a line of the code (open, resolved, outdated) or on the pull request itself. Read on open and on refresh, never stored; a reply is a draft that names its thread. Every note, the description and every draft is drawn as markdown: links, `#12`, `!12`, `@user` and commit hashes link to the forge, pictures are fetched once into a temporary cache and drawn in place. |
+| **Thread** | A conversation on the forge: on a line of the code (open, resolved, outdated) or on the pull request itself. An outdated one, written on a line the pull request has changed since, is listed in the Review tab only and not drawn in the code. Read on open and on refresh, never stored; a reply is a draft that names its thread. Every note, the description and every draft is drawn as markdown: links, `#12`, `!12`, `@user` and commit hashes link to the forge, pictures are fetched once into a temporary cache and drawn in place. |
 | **Commit** | One commit of the pull request (`git log base..head`). The Commits view lists them; picking one shows its own changes against its parent, unified or split; comments stay on the whole pull request's changes. |
 | **Link** | Where an entity lives on the forge: the pull request, a comment, an author, a commit, a file at a commit with the selected lines. Every one has a button that opens it in the browser and one that copies it; `io-forge` spells each forge's URLs. |
 | **Xref** | Symbol A calls or references symbol B. Xrefs to a symbol are its callers, xrefs from it its callees. |
@@ -117,8 +117,8 @@ rule applies.
   it seen; one that changes it brings it back. The mark also keeps the head commit it was made
   at, for a later "what changed since I looked".
 - **The diff is drawn on the head file, folded to the change.** The Source view shows the head
-  file with added lines tinted and removed lines, threads (outdated ones at their original
-  line) and drafts inserted where they belong; lines more than three away from a change fold
+  file with added lines tinted and removed lines, threads that are not outdated and drafts
+  inserted where they belong; lines more than three away from a change fold
   into a row that opens twenty lines at a time toward either change, or all at once, and
   "whole file" drops the folds. Every identifier on a changed line navigates like any other
   code, and a jump into a fold reveals it. A deleted file is shown from its diff alone.

@@ -215,7 +215,7 @@ pub(super) fn noted<'inset>(
     let mut threaded = Vec::new();
     for thread in conversation
         .into_iter()
-        .flat_map(|known| known.in_file(path))
+        .flat_map(|known| known.drawn_in(path))
     {
         let Some(CodePlace { side, line, .. }) = thread.place.clone() else {
             continue;

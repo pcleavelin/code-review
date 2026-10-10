@@ -646,6 +646,7 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     for (position, thread) in talk.threads.iter().enumerate() {
         if let Some(place) = &thread.place {
             let target = ids::THREAD_ROW.nth(Count::new(position));
+            let outdated = thread.state == ThreadState::Outdated;
             let runs = vec![
                 Run::new(
                     format!(
@@ -654,14 +655,18 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
                         place.line.number(),
                         side_word(place.side).as_str()
                     ),
-                    ACCENT,
+                    if outdated { WEAK } else { ACCENT },
                 ),
                 Run::new(state_word(thread.state), WEAK),
             ];
-            if frame.row(runs, target, Chosen::Plain).clicked() {
-                frame.push(Action::Review(ReviewAct::OpenPlace(place.clone())));
+            if outdated {
+                frame.text_line(runs);
+            } else {
+                if frame.row(runs, target, Chosen::Plain).clicked() {
+                    frame.push(Action::Review(ReviewAct::OpenPlace(place.clone())));
+                }
+                frame.attach_tip(target);
             }
-            frame.attach_tip(target);
         }
         thread_box(model, frame, thread);
     }

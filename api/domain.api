@@ -298,7 +298,7 @@ review::talk::pub fn started(&self) -> Option<&Moment>
 review::talk::pub struct Conversation { pub description: Prose, pub threads: Vec<Thread>, }
 review::talk::pub fn on_code(&self) -> impl Iterator<Item = &Thread>
 review::talk::pub fn on_pull(&self) -> impl Iterator<Item = &Thread>
-review::talk::pub fn in_file<'talk>( &'talk self, file: &'talk RelativePath, ) -> impl Iterator<Item = &'talk Thread>
+review::talk::pub fn drawn_in<'talk>( &'talk self, file: &'talk RelativePath, ) -> impl Iterator<Item = &'talk Thread>
 review::talk::pub fn thread(&self, id: &ThreadId) -> Option<&Thread>
 settings::pub enum Theme { #[default] Dark, Light, }
 settings::pub struct FontFamily(String);
