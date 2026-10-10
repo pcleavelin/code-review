@@ -130,6 +130,31 @@ fn only_lines_inside_a_hunk_take_comments_and_each_side_counts_its_own_lines() {
 }
 
 #[test]
+fn an_unchanged_line_has_a_counterpart_on_the_other_side_and_a_changed_one_has_none() {
+    let file = change(
+        "src/lib.rs",
+        vec![Hunk::new(
+            Line::new(9),
+            Line::new(19),
+            vec![
+                line(LineKind::Context, "a"),
+                line(LineKind::Removed, "b"),
+                line(LineKind::Added, "x"),
+                line(LineKind::Added, "y"),
+                line(LineKind::Context, "c"),
+            ],
+        )],
+    );
+    let counterpart = |side: Side, at: u32| file.counterpart(side, Line::new(at));
+    assert_eq!(counterpart(Side::New, 19), Some(Line::new(9)));
+    assert_eq!(counterpart(Side::New, 22), Some(Line::new(11)));
+    assert_eq!(counterpart(Side::Old, 11), Some(Line::new(22)));
+    assert_eq!(counterpart(Side::New, 20), None);
+    assert_eq!(counterpart(Side::Old, 10), None);
+    assert_eq!(counterpart(Side::New, 40), None);
+}
+
+#[test]
 fn a_file_marked_seen_turns_changed_when_its_diff_changes() {
     let mut review = Review::default();
     let before = replace_b_with_x();

@@ -226,6 +226,7 @@ review::diff::pub fn hunks(&self) -> &[Hunk]
 review::diff::pub fn added(&self) -> LineCount
 review::diff::pub fn removed(&self) -> LineCount
 review::diff::pub fn hash(&self) -> TextHash
+review::diff::pub fn counterpart(&self, side: Side, line: Line) -> Option<Line>
 review::diff::pub fn commentable(&self, side: Side, lines: Span) -> bool
 review::diff::pub fn old_text(&self, new: &FileText) -> FileText
 review::diff::pub fn paired(&self, old: LineCount, new: LineCount, layout: DiffLayout) -> Vec<Paired>

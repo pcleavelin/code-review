@@ -1,16 +1,20 @@
 use domain::{
-    BranchName, CodePlace, CommitId, Conversation, Decision, Draft, DraftId, DraftText, Forge,
-    ForgeKind, Host, Line, Linked, Login, Moment, NoteKind, PrNumber, PrTitle, Prose, PullRequest,
-    RelativePath, RepoSlug, Side, Span, ThreadId, ThreadState,
+    BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft, DraftId,
+    DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login, Moment,
+    NoteKind, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SourceLine,
+    Span, ThreadId, ThreadState,
 };
 use serde_json::{Value, json};
 
 use crate::convert;
 use crate::wire::{
-    self, Api, Method, Request, WireDiffRefs, WireRemote, WireResponse, WireThread, detect,
-    forge_named, parse_items, parse_remote, parse_response,
+    self, Api, Method, PendingNote, Request, WireDiffRefs, WireRemote, WireResponse, WireThread,
+    detect, forge_named, parse_items, parse_remote, parse_response,
 };
-use crate::{ForgeClient, ForgeError, Token, every_page};
+use crate::{
+    ForgeClient, ForgeError, HttpStatus, ResponseBody, Token, Unsent, every_page, send_gitlab,
+    send_in_turn,
+};
 
 const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -452,6 +456,45 @@ fn gitlab_diff_refs_are_read_from_the_merge_request() {
     );
 }
 
+fn diff_line(kind: LineKind, text: &str) -> DiffLine {
+    DiffLine {
+        kind,
+        text: SourceLine::new(text),
+    }
+}
+
+fn changes() -> Vec<FileChange> {
+    vec![
+        FileChange::new(
+            RelativePath::new("src/lib.rs"),
+            None,
+            ChangeKind::Modified,
+            vec![Hunk::new(
+                Line::new(5),
+                Line::new(8),
+                vec![
+                    diff_line(LineKind::Context, "a"),
+                    diff_line(LineKind::Context, "b"),
+                    diff_line(LineKind::Added, "c"),
+                ],
+            )],
+        ),
+        FileChange::new(
+            RelativePath::new("src/old.rs"),
+            Some(RelativePath::new("src/older.rs")),
+            ChangeKind::Renamed,
+            vec![Hunk::new(
+                Line::new(0),
+                Line::new(0),
+                vec![
+                    diff_line(LineKind::Removed, "x"),
+                    diff_line(LineKind::Context, "y"),
+                ],
+            )],
+        ),
+    ]
+}
+
 fn drafts() -> Vec<Draft> {
     vec![
         Draft {
@@ -477,7 +520,13 @@ fn drafts() -> Vec<Draft> {
 
 fn review_of(drafts: &[Draft], decision: Decision, body: Option<&str>) -> wire::WireReview {
     let body = body.map(|text| DraftText::new(text).unwrap());
-    convert::review(&expected_pull(), drafts, decision, body.as_ref())
+    convert::review(
+        &expected_pull(),
+        drafts,
+        &changes(),
+        decision,
+        body.as_ref(),
+    )
 }
 
 fn review(decision: Decision, body: Option<&str>) -> wire::WireReview {
@@ -550,73 +599,272 @@ fn refs() -> WireDiffRefs {
     }
 }
 
+const MERGE_REQUEST: &str = "https://gitlab.com/api/v4/projects/group%2Frepo/merge_requests/12";
+
+fn gitlab_position(old_path: &str, new_path: &str, lines: &Value) -> Value {
+    let mut position = json!({
+        "position_type": "text",
+        "base_sha": "b".repeat(40),
+        "start_sha": "s".repeat(40),
+        "head_sha": SHA,
+        "old_path": old_path,
+        "new_path": new_path,
+    });
+    if let (Some(object), Some(lines)) = (position.as_object_mut(), lines.as_object()) {
+        object.extend(lines.clone());
+    }
+    position
+}
+
 #[test]
-fn a_gitlab_review_posts_a_positioned_discussion_per_draft_then_the_note_then_approval() {
+fn a_gitlab_review_drafts_a_positioned_note_per_draft_and_one_for_the_summary() {
     let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
-    let requests = api.gitlab_review(12, &review(Decision::Approve, Some("lgtm")), &refs());
-    let mr = "https://gitlab.com/api/v4/projects/group%2Frepo/merge_requests/12";
-    let position = |path: &str, key: &str, line: u32| {
-        let mut position = json!({
-            "position_type": "text",
-            "base_sha": "b".repeat(40),
-            "start_sha": "s".repeat(40),
-            "head_sha": SHA,
-            "old_path": path,
-            "new_path": path,
-        });
-        position[key] = json!(line);
-        position
-    };
+    let requests = api.gitlab_pending_notes(12, &review(Decision::Approve, Some("lgtm")), &refs());
+    let draft_notes = format!("{MERGE_REQUEST}/draft_notes");
     assert_eq!(
         requests,
         vec![
             Request {
                 method: Method::Post,
-                url: format!("{mr}/discussions"),
-                body: Some(
-                    json!({"body": "rename this", "position": position("src/lib.rs", "new_line", 10)})
-                ),
+                url: draft_notes.clone(),
+                body: Some(json!({"note": "rename this", "position": gitlab_position(
+                    "src/lib.rs",
+                    "src/lib.rs",
+                    &json!({"old_line": 7, "new_line": 10}),
+                )})),
             },
             Request {
                 method: Method::Post,
-                url: format!("{mr}/discussions"),
-                body: Some(
-                    json!({"body": "why removed?", "position": position("src/old.rs", "old_line", 1)})
-                ),
+                url: draft_notes.clone(),
+                body: Some(json!({"note": "why removed?", "position": gitlab_position(
+                    "src/older.rs",
+                    "src/old.rs",
+                    &json!({"old_line": 1}),
+                )})),
             },
             Request {
                 method: Method::Post,
-                url: format!("{mr}/notes"),
-                body: Some(json!({"body": "lgtm"})),
-            },
-            Request {
-                method: Method::Post,
-                url: format!("{mr}/approve"),
-                body: None,
+                url: draft_notes,
+                body: Some(json!({"note": "lgtm"})),
             },
         ]
     );
 }
 
 #[test]
-fn a_gitlab_request_for_changes_posts_the_note_but_never_approves() {
+fn a_gitlab_draft_on_an_added_line_sends_only_the_new_line() {
     let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
-    let requests = api.gitlab_review(12, &review(Decision::RequestChanges, Some("no")), &refs());
-    let urls: Vec<&str> = requests
-        .iter()
-        .map(|request| request.url.rsplit('/').next().unwrap())
-        .collect();
-    assert_eq!(urls, vec!["discussions", "discussions", "notes"]);
+    let mut added = drafts();
+    added.truncate(1);
+    if let Some(draft) = added.first_mut() {
+        draft.line = Line::new(10);
+    }
+    let requests =
+        api.gitlab_pending_notes(12, &review_of(&added, Decision::Comment, None), &refs());
+    assert_eq!(
+        requests.first().and_then(|request| request.body.clone()),
+        Some(json!({"note": "rename this", "position": gitlab_position(
+            "src/lib.rs",
+            "src/lib.rs",
+            &json!({"new_line": 11}),
+        )}))
+    );
 }
 
 #[test]
-fn an_approve_post_without_data_still_says_post() {
+fn gitlab_publishes_the_pending_notes_at_once_and_approves_the_reviewed_head() {
     let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
-    let requests = api.gitlab_review(12, &review(Decision::Approve, None), &refs());
-    let approve = requests.last().unwrap();
-    let config = api.config(approve, Some("tok"));
+    let publish = api.gitlab_publish(12);
+    assert_eq!(
+        publish.url,
+        format!("{MERGE_REQUEST}/draft_notes/bulk_publish")
+    );
+    let config = api.config(&publish, Some("tok"));
     assert!(config.contains("request = \"POST\"\n"), "{config}");
     assert!(!config.contains("data-binary"), "{config}");
+    let approve = api.gitlab_approve(12, &review(Decision::Approve, None));
+    assert_eq!(approve.url, format!("{MERGE_REQUEST}/approve"));
+    assert_eq!(approve.body, Some(json!({"sha": SHA})));
+    let discard = api.gitlab_discard(12, PendingNote::new(77));
+    assert_eq!(discard.url, format!("{MERGE_REQUEST}/draft_notes/77"));
+    assert!(
+        api.config(&discard, Some("tok"))
+            .contains("request = \"DELETE\"\n")
+    );
+}
+
+fn answering<'asked>(
+    asked: &'asked mut Vec<Request>,
+    fails: impl Fn(&Request) -> bool + 'asked,
+) -> impl FnMut(&Request) -> Result<ResponseBody, ForgeError> + 'asked {
+    move |request| {
+        asked.push(request.clone());
+        if fails(request) {
+            return Err(ForgeError::Http {
+                status: HttpStatus::new(500),
+                body: ResponseBody::new("boom"),
+            });
+        }
+        Ok(ResponseBody::new(&json!({"id": asked.len()}).to_string()))
+    }
+}
+
+#[test]
+fn a_gitlab_review_that_fails_before_publishing_discards_its_drafted_notes_and_sends_nothing() {
+    let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
+    let mut asked = Vec::new();
+    let error = send_gitlab(
+        &api,
+        PrNumber::new(12).unwrap(),
+        &review(Decision::Approve, Some("lgtm")),
+        &refs(),
+        answering(&mut asked, |request| {
+            request.body.as_ref().and_then(|body| body.get("note")) == Some(&json!("lgtm"))
+        }),
+    )
+    .unwrap_err();
+    assert!(error.sent().is_empty(), "{error}");
+    let tail: Vec<(Method, String)> = asked
+        .iter()
+        .skip(3)
+        .map(|request| (request.method, request.url.clone()))
+        .collect();
+    assert_eq!(
+        tail,
+        vec![
+            (Method::Delete, format!("{MERGE_REQUEST}/draft_notes/1")),
+            (Method::Delete, format!("{MERGE_REQUEST}/draft_notes/2")),
+        ]
+    );
+}
+
+#[test]
+fn a_gitlab_approval_refused_after_publishing_says_every_draft_was_sent() {
+    let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
+    let mut asked = Vec::new();
+    let error = send_gitlab(
+        &api,
+        PrNumber::new(12).unwrap(),
+        &review(Decision::Approve, None),
+        &refs(),
+        answering(&mut asked, |request| request.url.ends_with("/approve")),
+    )
+    .unwrap_err();
+    assert_eq!(error.sent(), &[DraftId::new(1), DraftId::new(2)]);
+    assert!(matches!(
+        error,
+        ForgeError::Unfinished {
+            unsent: Unsent::Approval,
+            ..
+        }
+    ));
+    let endpoints: Vec<&str> = asked
+        .iter()
+        .map(|request| request.url.rsplit('/').next().unwrap())
+        .collect();
+    assert_eq!(
+        endpoints,
+        vec!["draft_notes", "draft_notes", "bulk_publish", "approve"]
+    );
+}
+
+#[test]
+fn pending_notes_that_cannot_be_removed_are_named_in_the_error() {
+    let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
+    let mut asked = Vec::new();
+    let error = send_gitlab(
+        &api,
+        PrNumber::new(12).unwrap(),
+        &review(Decision::Comment, None),
+        &refs(),
+        answering(&mut asked, |request| {
+            request.url.ends_with("/bulk_publish") || request.method == Method::Delete
+        }),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&error, ForgeError::PendingLeft { pending, .. } if pending.get() == 2),
+        "{error}"
+    );
+    assert!(error.sent().is_empty());
+}
+
+#[test]
+fn a_gitlab_request_for_changes_publishes_but_never_approves() {
+    let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
+    let mut asked = Vec::new();
+    send_gitlab(
+        &api,
+        PrNumber::new(12).unwrap(),
+        &review(Decision::RequestChanges, Some("no")),
+        &refs(),
+        answering(&mut asked, |_| false),
+    )
+    .unwrap();
+    let endpoints: Vec<&str> = asked
+        .iter()
+        .map(|request| request.url.rsplit('/').next().unwrap())
+        .collect();
+    assert_eq!(
+        endpoints,
+        vec!["draft_notes", "draft_notes", "draft_notes", "bulk_publish"]
+    );
+}
+
+#[test]
+fn a_github_reply_that_fails_after_the_review_names_the_drafts_already_sent() {
+    let api = Api::new(ForgeKind::GitHub, "github.com", "owner/repo");
+    let review = review_of(&drafts_with_replies(), Decision::Comment, None);
+    let deliveries = api.github_deliveries(12, &review);
+    let mut asked = Vec::new();
+    let error = send_in_turn(
+        &deliveries,
+        answering(&mut asked, |request| request.url.contains("/issues/")),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.sent(),
+        &[DraftId::new(1), DraftId::new(2), DraftId::new(3)]
+    );
+    assert!(matches!(
+        error,
+        ForgeError::Unfinished {
+            unsent: Unsent::Drafts,
+            ..
+        }
+    ));
+    let mut asked_once = Vec::new();
+    let first = send_in_turn(
+        &deliveries,
+        answering(&mut asked_once, |request| request.url.ends_with("/reviews")),
+    )
+    .unwrap_err();
+    assert!(matches!(first, ForgeError::Http { .. }), "{first}");
+    assert_eq!(asked_once.len(), 1);
+}
+
+#[test]
+fn a_github_reply_that_fails_after_a_summary_only_review_says_the_review_went_through() {
+    let api = Api::new(ForgeKind::GitHub, "github.com", "owner/repo");
+    let replies: Vec<Draft> = drafts_with_replies().split_off(2);
+    let review = review_of(&replies, Decision::Comment, Some("ok"));
+    let mut asked = Vec::new();
+    let error = send_in_turn(
+        &api.github_deliveries(12, &review),
+        answering(&mut asked, |request| request.url.ends_with("/replies")),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            ForgeError::Unfinished {
+                unsent: Unsent::Drafts,
+                ..
+            }
+        ),
+        "{error}"
+    );
+    assert!(error.sent().is_empty());
 }
 
 fn client(token: Option<&str>) -> ForgeClient {
@@ -639,7 +887,13 @@ fn the_client_never_prints_its_token() {
 #[test]
 fn submitting_without_a_token_names_the_variables_to_set_before_any_request() {
     let error = client(None)
-        .submit(&expected_pull(), &drafts(), Decision::Comment, None)
+        .submit(
+            &expected_pull(),
+            &drafts(),
+            &changes(),
+            Decision::Comment,
+            None,
+        )
         .unwrap_err();
     assert!(matches!(error, ForgeError::NoToken(ForgeKind::GitHub)));
     let message = error.to_string();
@@ -1082,28 +1336,25 @@ fn a_github_submit_of_only_replies_posts_no_empty_review_unless_it_decides() {
 }
 
 #[test]
-fn a_gitlab_reply_is_a_note_on_its_discussion() {
+fn a_gitlab_reply_is_a_draft_note_on_its_discussion() {
     let api = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
-    let requests = api.gitlab_review(
+    let requests = api.gitlab_pending_notes(
         12,
         &review_of(&drafts_with_replies(), Decision::Comment, None),
         &refs(),
     );
-    let mr = "https://gitlab.com/api/v4/projects/group%2Frepo/merge_requests/12";
-    let urls: Vec<&str> = requests
+    let replies: Vec<Option<Value>> = requests
         .iter()
-        .map(|request| request.url.as_str())
+        .skip(2)
+        .map(|request| request.body.clone())
         .collect();
     assert_eq!(
-        urls,
+        replies,
         vec![
-            format!("{mr}/discussions"),
-            format!("{mr}/discussions"),
-            format!("{mr}/discussions/1001/notes"),
-            format!("{mr}/discussions/issue-501/notes"),
+            Some(json!({"note": "done", "in_reply_to_discussion_id": "1001"})),
+            Some(json!({"note": "will do", "in_reply_to_discussion_id": "issue-501"})),
         ]
     );
-    assert_eq!(requests[2].body, Some(json!({"body": "done"})));
 }
 
 #[test]

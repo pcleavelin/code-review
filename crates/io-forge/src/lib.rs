@@ -6,14 +6,16 @@ use std::env;
 use std::fmt;
 
 use domain::{
-    Conversation, Decision, Draft, DraftText, Forge, ForgeKind, Host, Linked, PrNumber,
-    PullRequest, RefName, RepoSlug, WebLink,
+    Conversation, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeKind, Host, Linked,
+    PrNumber, PullRequest, RefName, RepoSlug, WebLink,
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
 use serde_json::Value;
 
-use crate::wire::{Api, EnvVar, Request, WireResponse};
+use crate::wire::{
+    Api, Delivery, EnvVar, PendingNote, Request, WireDiffRefs, WireResponse, WireReview,
+};
 
 #[derive(Clone, PartialEq, Eq)]
 struct Token(String);
@@ -101,6 +103,12 @@ pub struct Submitted {
     pub comments: CommentCount,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unsent {
+    Drafts,
+    Approval,
+}
+
 #[derive(Debug)]
 pub enum ForgeError {
     UnknownHost(Host),
@@ -113,6 +121,31 @@ pub enum ForgeError {
         body: ResponseBody,
     },
     Malformed(ResponseBody),
+    Unfinished {
+        sent: Vec<DraftId>,
+        unsent: Unsent,
+        cause: Box<ForgeError>,
+    },
+    PendingLeft {
+        pending: CommentCount,
+        cause: Box<ForgeError>,
+    },
+}
+
+impl ForgeError {
+    pub fn sent(&self) -> &[DraftId] {
+        match self {
+            Self::Unfinished { sent, .. } => sent,
+            Self::UnknownHost(_)
+            | Self::UnreadableUrl(_)
+            | Self::NoToken(_)
+            | Self::Process(_)
+            | Self::Unreachable(_)
+            | Self::Http { .. }
+            | Self::Malformed(_)
+            | Self::PendingLeft { .. } => &[],
+        }
+    }
 }
 
 impl fmt::Display for ForgeError {
@@ -164,6 +197,27 @@ impl fmt::Display for ForgeError {
             Self::Malformed(body) => write!(
                 formatter,
                 "the forge answered with something that is not the expected JSON: {body}"
+            ),
+            Self::PendingLeft { pending, cause } => write!(
+                formatter,
+                "{cause}. Nothing was published, but {pending} pending notes could not be removed from the merge request and would go out with the next submit: delete them in the forge's web page first"
+            ),
+            Self::Unfinished {
+                sent,
+                unsent: Unsent::Drafts,
+                cause,
+            } => write!(
+                formatter,
+                "the forge took the review with {} of the drafts, then answered: {cause}. The drafts it took are no longer drafts; submit again, without a summary or decision, to send the others",
+                sent.len()
+            ),
+            Self::Unfinished {
+                unsent: Unsent::Approval,
+                cause,
+                ..
+            } => write!(
+                formatter,
+                "the forge took every draft and the summary, then refused the approval: {cause}. Approve again, without a summary"
             ),
         }
     }
@@ -408,6 +462,7 @@ impl ForgeClient {
         &self,
         pull: &PullRequest,
         drafts: &[Draft],
+        changes: &[FileChange],
         decision: Decision,
         body: Option<&DraftText>,
     ) -> Result<Submitted, ForgeError> {
@@ -417,28 +472,103 @@ impl ForgeClient {
         }
         let api = self.api();
         let number = pull.number.get();
-        let review = convert::review(pull, drafts, decision, body);
-        let requests = match kind {
-            ForgeKind::GitHub => api
-                .github_review(number, &review)
-                .into_iter()
-                .chain(api.github_replies(number, &review))
-                .collect(),
-            ForgeKind::Forgejo => vec![api.forgejo_review(number, &review)],
+        let review = convert::review(pull, drafts, changes, decision, body);
+        match kind {
+            ForgeKind::GitHub => {
+                send_in_turn(&api.github_deliveries(number, &review), |request| {
+                    self.call(&api, request)
+                })?;
+            }
+            ForgeKind::Forgejo => {
+                self.call(&api, &api.forgejo_review(number, &review))?;
+            }
             ForgeKind::GitLab => {
                 let merge_request = self.call(&api, &api.pull(number))?;
                 let refs = Api::parse_diff_refs(merge_request.as_str())
                     .ok_or(ForgeError::Malformed(merge_request))?;
-                api.gitlab_review(number, &review, &refs)
+                send_gitlab(&api, pull.number, &review, &refs, |request| {
+                    self.call(&api, request)
+                })?;
             }
-        };
-        for request in &requests {
-            self.call(&api, request)?;
         }
         Ok(Submitted {
             comments: CommentCount::new(drafts.len()),
         })
     }
+}
+
+fn send_in_turn(
+    deliveries: &[Delivery],
+    mut call: impl FnMut(&Request) -> Result<ResponseBody, ForgeError>,
+) -> Result<(), ForgeError> {
+    let mut sent: Vec<DraftId> = Vec::new();
+    for (index, delivery) in deliveries.iter().enumerate() {
+        if let Err(cause) = call(&delivery.request) {
+            return Err(if index == 0 {
+                cause
+            } else {
+                ForgeError::Unfinished {
+                    sent,
+                    unsent: Unsent::Drafts,
+                    cause: Box::new(cause),
+                }
+            });
+        }
+        sent.extend(delivery.drafts.iter().copied());
+    }
+    Ok(())
+}
+
+fn send_gitlab(
+    api: &Api,
+    pull: PrNumber,
+    review: &WireReview,
+    refs: &WireDiffRefs,
+    mut call: impl FnMut(&Request) -> Result<ResponseBody, ForgeError>,
+) -> Result<(), ForgeError> {
+    let number = pull.get();
+    let notes = api.gitlab_pending_notes(number, review, refs);
+    let mut pending: Vec<PendingNote> = Vec::new();
+    let mut post_and_publish = || -> Result<(), ForgeError> {
+        for note in &notes {
+            let answer = call(note)?;
+            pending.push(
+                Api::parse_pending_note(answer.as_str()).ok_or(ForgeError::Malformed(answer))?,
+            );
+        }
+        if !notes.is_empty() {
+            call(&api.gitlab_publish(number))?;
+        }
+        Ok(())
+    };
+    if let Err(cause) = post_and_publish() {
+        let left = pending
+            .into_iter()
+            .filter(|note| call(&api.gitlab_discard(number, *note)).is_err())
+            .count();
+        return Err(if left == 0 {
+            cause
+        } else {
+            ForgeError::PendingLeft {
+                pending: CommentCount::new(left),
+                cause: Box::new(cause),
+            }
+        });
+    }
+    if review.decision == Decision::Approve
+        && let Err(cause) = call(&api.gitlab_approve(number, review))
+    {
+        return Err(ForgeError::Unfinished {
+            sent: review
+                .comments
+                .iter()
+                .map(|comment| comment.draft)
+                .collect(),
+            unsent: Unsent::Approval,
+            cause: Box::new(cause),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

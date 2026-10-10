@@ -240,6 +240,17 @@ impl FileChange {
         TextHash::of_bytes(path.chain(body))
     }
 
+    pub fn counterpart(&self, side: Side, line: Line) -> Option<Line> {
+        self.hunks
+            .iter()
+            .flat_map(Hunk::numbered)
+            .find_map(|numbered| match side {
+                Side::New => (numbered.new == Some(line)).then_some(numbered.old),
+                Side::Old => (numbered.old == Some(line)).then_some(numbered.new),
+            })
+            .flatten()
+    }
+
     pub fn commentable(&self, side: Side, lines: Span) -> bool {
         self.hunks.iter().any(|hunk| {
             let on: Vec<Line> = hunk

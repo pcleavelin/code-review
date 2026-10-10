@@ -259,10 +259,29 @@ impl Repo {
                 now: pull.head_commit,
             });
         }
-        let submitted = forge.submit(&pull, opened.review.drafts(), decision, body)?;
-        opened.review.clear_drafts();
-        self.save(opened)?;
-        Ok(submitted)
+        let submitted = forge.submit(
+            &pull,
+            opened.review.drafts(),
+            &opened.changes,
+            decision,
+            body,
+        );
+        match submitted {
+            Ok(submitted) => {
+                opened.review.clear_drafts();
+                self.save(opened)?;
+                Ok(submitted)
+            }
+            Err(error) => {
+                for draft in error.sent() {
+                    drop(opened.review.remove_draft(*draft));
+                }
+                if !error.sent().is_empty() {
+                    self.save(opened)?;
+                }
+                Err(error.into())
+            }
+        }
     }
 }
 

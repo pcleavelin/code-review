@@ -5,10 +5,6 @@
 1. Submitting a review has not been run against a live forge: GitHub, GitLab and Forgejo
    listing were run against public repositories, and the request bodies are unit-tested, but
    no review has been posted. Try each on a pull request you own.
-3. GitLab: a draft sends only the line of its own side, and GitLab wants both for an unchanged
-   (context) line, so a draft on a context line comes back as HTTP 400. A renamed file's
-   old-side draft names the new path. The review is several requests (one per draft, then the
-   note, then approve); a failure part-way leaves the earlier ones posted.
 4. An outdated thread is drawn at its original line number in the head file, as CLAUDE.md
    says, but the line it was written on has usually changed since, so it sits on unrelated
    code (BurntSushi/ripgrep#3529: a comment on `dir.remove("sherlock");` is drawn under the

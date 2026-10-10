@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use domain::{Decision, ForgeKind, Linked, NoteKind, Side, Span, ThreadState};
+use domain::{Decision, DraftId, ForgeKind, Linked, NoteKind, Side, Span, ThreadState};
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
 
@@ -158,6 +158,7 @@ pub(crate) fn curl_arguments() -> Vec<String> {
 pub(crate) enum Method {
     Get,
     Post,
+    Delete,
 }
 
 impl Method {
@@ -165,6 +166,7 @@ impl Method {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Delete => "DELETE",
         }
     }
 }
@@ -192,6 +194,20 @@ impl Request {
             body,
         }
     }
+
+    fn delete(url: String) -> Self {
+        Self {
+            method: Method::Delete,
+            url,
+            body: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Delivery {
+    pub(crate) request: Request,
+    pub(crate) drafts: Vec<DraftId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -768,15 +784,25 @@ pub(crate) struct WireDiffRefs {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WireComment {
+    pub(crate) draft: DraftId,
     pub(crate) path: String,
+    pub(crate) old_path: String,
     pub(crate) side: Side,
     pub(crate) start: Option<u32>,
     pub(crate) line: u32,
+    pub(crate) counterpart: Option<u32>,
     pub(crate) body: String,
     pub(crate) reply: Option<String>,
 }
 
 impl WireComment {
+    fn lines(&self) -> (Option<u32>, Option<u32>) {
+        match self.side {
+            Side::Old => (Some(self.line), self.counterpart),
+            Side::New => (self.counterpart, Some(self.line)),
+        }
+    }
+
     fn spanned_body(&self) -> String {
         match self.start {
             Some(start) => format!("(lines {start}-{})\n\n{}", self.line, self.body),
@@ -1004,6 +1030,29 @@ impl Api {
             .collect()
     }
 
+    pub(crate) fn github_deliveries(&self, number: u64, review: &WireReview) -> Vec<Delivery> {
+        let (replies, in_review): (Vec<&WireComment>, Vec<&WireComment>) = review
+            .comments
+            .iter()
+            .partition(|comment| comment.reply.is_some());
+        let review_delivery = self.github_review(number, review).map(|request| Delivery {
+            request,
+            drafts: in_review.iter().map(|comment| comment.draft).collect(),
+        });
+        let reply_deliveries = self
+            .github_replies(number, review)
+            .into_iter()
+            .zip(replies)
+            .map(|(request, comment)| Delivery {
+                request,
+                drafts: vec![comment.draft],
+            });
+        review_delivery
+            .into_iter()
+            .chain(reply_deliveries)
+            .collect()
+    }
+
     pub(crate) fn forgejo_review(&self, number: u64, review: &WireReview) -> Request {
         let event = match review.decision {
             Decision::Comment => "COMMENT",
@@ -1033,21 +1082,25 @@ impl Api {
         )
     }
 
-    pub(crate) fn gitlab_review(
+    fn merge_request(&self, number: u64) -> String {
+        format!("{}/{number}", self.pulls_url())
+    }
+
+    pub(crate) fn gitlab_pending_notes(
         &self,
         number: u64,
         review: &WireReview,
         refs: &WireDiffRefs,
     ) -> Vec<Request> {
-        let merge_request = format!("{}/{number}", self.pulls_url());
+        let draft_notes = format!("{}/draft_notes", self.merge_request(number));
         let mut requests: Vec<Request> = review
             .comments
             .iter()
             .map(|comment| {
                 if let Some(thread) = &comment.reply {
                     return Request::post(
-                        format!("{merge_request}/discussions/{thread}/notes"),
-                        Some(json!({"body": comment.body})),
+                        draft_notes.clone(),
+                        Some(json!({"note": comment.body, "in_reply_to_discussion_id": thread})),
                     );
                 }
                 let mut position = Map::new();
@@ -1055,28 +1108,64 @@ impl Api {
                 position.insert("base_sha".to_owned(), json!(refs.base));
                 position.insert("start_sha".to_owned(), json!(refs.start));
                 position.insert("head_sha".to_owned(), json!(refs.head));
-                position.insert("old_path".to_owned(), json!(comment.path));
+                position.insert("old_path".to_owned(), json!(comment.old_path));
                 position.insert("new_path".to_owned(), json!(comment.path));
-                let line_key = match comment.side {
-                    Side::Old => "old_line",
-                    Side::New => "new_line",
-                };
-                position.insert(line_key.to_owned(), json!(comment.line));
+                let (old_line, new_line) = comment.lines();
+                if let Some(line) = old_line {
+                    position.insert("old_line".to_owned(), json!(line));
+                }
+                if let Some(line) = new_line {
+                    position.insert("new_line".to_owned(), json!(line));
+                }
                 Request::post(
-                    format!("{merge_request}/discussions"),
-                    Some(json!({"body": comment.spanned_body(), "position": position})),
+                    draft_notes.clone(),
+                    Some(json!({"note": comment.spanned_body(), "position": position})),
                 )
             })
             .collect();
         if let Some(body) = &review.body {
-            requests.push(Request::post(
-                format!("{merge_request}/notes"),
-                Some(json!({"body": body})),
-            ));
-        }
-        if review.decision == Decision::Approve {
-            requests.push(Request::post(format!("{merge_request}/approve"), None));
+            requests.push(Request::post(draft_notes, Some(json!({"note": body}))));
         }
         requests
+    }
+
+    pub(crate) fn gitlab_publish(&self, number: u64) -> Request {
+        Request::post(
+            format!("{}/draft_notes/bulk_publish", self.merge_request(number)),
+            None,
+        )
+    }
+
+    pub(crate) fn gitlab_discard(&self, number: u64, note: PendingNote) -> Request {
+        Request::delete(format!(
+            "{}/draft_notes/{}",
+            self.merge_request(number),
+            note.id()
+        ))
+    }
+
+    pub(crate) fn gitlab_approve(&self, number: u64, review: &WireReview) -> Request {
+        Request::post(
+            format!("{}/approve", self.merge_request(number)),
+            Some(json!({"sha": review.commit})),
+        )
+    }
+
+    pub(crate) fn parse_pending_note(text: &str) -> Option<PendingNote> {
+        let value: Value = serde_json::from_str(text).ok()?;
+        value.pointer(ID)?.as_u64().map(PendingNote::new)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PendingNote(u64);
+
+impl PendingNote {
+    pub(crate) const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    const fn id(self) -> u64 {
+        self.0
     }
 }

@@ -1,6 +1,7 @@
 use domain::{
-    BranchName, CodePlace, CommitId, Conversation, Decision, Draft, DraftText, Line, Login, Moment,
-    Note, PrNumber, PrTitle, Prose, PullRequest, RelativePath, Thread, ThreadId, WebLink,
+    BranchName, CodePlace, CommitId, Conversation, Decision, Draft, DraftText, FileChange, Line,
+    Login, Moment, Note, PrNumber, PrTitle, Prose, PullRequest, RelativePath, Thread, ThreadId,
+    WebLink,
 };
 
 use crate::wire::{WireComment, WireNote, WirePlace, WirePull, WireReview, WireThread};
@@ -18,12 +19,22 @@ pub(crate) fn pull(wire: &WirePull) -> Option<PullRequest> {
     })
 }
 
-fn comment(draft: &Draft) -> WireComment {
+fn comment(draft: &Draft, changes: &[FileChange]) -> WireComment {
+    let change = changes.iter().find(|change| change.path() == &draft.file);
     WireComment {
+        draft: draft.id,
         path: draft.file.as_str().to_owned(),
+        old_path: change
+            .and_then(FileChange::old_path)
+            .unwrap_or(&draft.file)
+            .as_str()
+            .to_owned(),
         side: draft.side,
         start: draft.start.map(Line::number),
         line: draft.line.number(),
+        counterpart: change
+            .and_then(|change| change.counterpart(draft.side, draft.line))
+            .map(Line::number),
         body: draft.text.as_str().to_owned(),
         reply: draft
             .reply
@@ -35,6 +46,7 @@ fn comment(draft: &Draft) -> WireComment {
 pub(crate) fn review(
     pull: &PullRequest,
     drafts: &[Draft],
+    changes: &[FileChange],
     decision: Decision,
     body: Option<&DraftText>,
 ) -> WireReview {
@@ -42,7 +54,7 @@ pub(crate) fn review(
         commit: pull.head_commit.as_str().to_owned(),
         body: body.map(|text| text.as_str().to_owned()),
         decision,
-        comments: drafts.iter().map(comment).collect(),
+        comments: drafts.iter().map(|draft| comment(draft, changes)).collect(),
     }
 }
 
