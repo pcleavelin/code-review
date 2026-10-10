@@ -844,6 +844,7 @@ impl Ui {
         {
             self.held = None;
         }
+        let pressed = input.pointer.pressed.contains(Button::Left);
         let steady = |id: Id| {
             self.previous
                 .get(&id)
@@ -860,13 +861,14 @@ impl Ui {
                     .previous
                     .get(&held.id)
                     .is_some_and(|placement| placement.rect.intersect(held.rect) == held.rect);
-                if in_place {
-                    self.held = self.hot.and_then(steady);
-                } else {
+                if !in_place {
                     self.hot = None;
+                } else if pressed {
+                    self.held = self.hot.and_then(steady);
                 }
             }
-            None => self.held = self.hot.and_then(steady),
+            None if pressed => self.held = self.hot.and_then(steady),
+            None => {}
         }
     }
 

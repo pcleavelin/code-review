@@ -133,10 +133,12 @@ rule applies.
   hunk undone, so the split view (and a commit's view, which reads the commit's file once)
   highlights both sides with the same parsers the index uses, and folds, selects and comments
   like the unified view.
-- **Nothing moves out from under the pointer.** A button the pointer rests on keeps its place
-  and size until the pointer leaves it; whatever its click changes moves around it, and what
-  slides under a vanished button takes no click until the pointer leaves. Rapid clicks on one
-  spot always hit the same button. `crates/ui` holds every `.steady()` element this way.
+- **Nothing moves out from under the pointer.** A button once clicked keeps its place and
+  size until the pointer leaves it or the wheel turns; whatever its click changes moves around
+  it, and what slides under a vanished button takes no click until the pointer leaves. A
+  button the pointer only rests on holds nothing, so the wheel scrolls under it. Rapid clicks
+  on one spot always hit the same button. `crates/ui` holds every `.steady()` element this
+  way.
 - **An action shows its result.** A control whose result is drawn in another view switches to
   it and scrolls the result into sight; a field that holds the keyboard off screen fails a
   script run.

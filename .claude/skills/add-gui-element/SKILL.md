@@ -7,9 +7,10 @@ description: Add or change a view, panel, button, row, field or gesture in the r
 
 Two rules hold for every element, and both are checked:
 
-- **Nothing moves out from under the pointer.** A button the pointer rests on keeps its place
-  and its size until the pointer leaves it, whatever its click changes; what has to move
-  moves after. Rapid clicks on one spot hit the same button every time, and a button that
+- **Nothing moves out from under the pointer.** A button once clicked keeps its place and its
+  size until the pointer leaves it or the wheel turns, whatever its click changes; what has
+  to move moves after. Resting the pointer on a button holds nothing, so the wheel still
+  scrolls under it. Rapid clicks on one spot hit the same button every time, and a button that
   vanishes under the pointer does not hand the next click to whatever slid into its place.
   `crates/ui` does this for every element laid out `.steady()` (the button widgets in
   `widgets.rs` are): it keeps the element's size, slides its row, and scrolls its scroll

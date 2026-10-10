@@ -1007,13 +1007,15 @@ fn toolbar(ui: &mut Ui, frame: &Input, label: &str, buttons: &[&str]) {
 }
 
 #[test]
-fn a_button_under_the_pointer_stays_put_while_the_label_before_it_grows() {
+fn a_clicked_button_stays_put_while_the_label_before_it_grows() {
     let mut ui = Ui::default();
     let mut frame = input(400, 100);
     frame.pointer.mouse = Point::new(px(20), px(5));
     toolbar(&mut ui, &frame, "a", &["next", "prev"]);
     let before = ui.placement(Id::new("next")).unwrap().rect;
+    frame.pointer.pressed.insert(Button::Left);
     toolbar(&mut ui, &frame, "a", &["next", "prev"]);
+    frame.pointer.pressed = Buttons::NONE;
     toolbar(&mut ui, &frame, "abcdef", &["next", "prev"]);
     assert_eq!(ui.placement(Id::new("next")).unwrap().rect, before);
     frame.pointer.mouse = Point::new(px(300), px(50));
@@ -1023,7 +1025,18 @@ fn a_button_under_the_pointer_stays_put_while_the_label_before_it_grows() {
 }
 
 #[test]
-fn a_button_under_the_pointer_keeps_its_width_when_its_text_shrinks() {
+fn a_button_the_pointer_only_rests_on_moves_with_the_label_before_it() {
+    let mut ui = Ui::default();
+    let mut frame = input(400, 100);
+    frame.pointer.mouse = Point::new(px(20), px(5));
+    toolbar(&mut ui, &frame, "a", &["next", "prev"]);
+    toolbar(&mut ui, &frame, "a", &["next", "prev"]);
+    toolbar(&mut ui, &frame, "abcdef", &["next", "prev"]);
+    assert_eq!(ui.placement(Id::new("next")).unwrap().rect.left, px(48));
+}
+
+#[test]
+fn a_clicked_button_keeps_its_width_when_its_text_shrinks() {
     let mut ui = Ui::default();
     let mut frame = input(400, 100);
     frame.pointer.mouse = Point::new(px(20), px(5));
@@ -1046,7 +1059,9 @@ fn a_button_under_the_pointer_keeps_its_width_when_its_text_shrinks() {
         held.end(&mut Cells);
     };
     shown(&mut ui, &frame, "mark seen");
+    frame.pointer.pressed.insert(Button::Left);
     shown(&mut ui, &frame, "mark seen");
+    frame.pointer.pressed = Buttons::NONE;
     let after = ui.placement(Id::new("after")).unwrap().rect;
     shown(&mut ui, &frame, "seen");
     assert_eq!(ui.placement(Id::new("after")).unwrap().rect, after);
@@ -1058,7 +1073,9 @@ fn what_slides_under_a_vanished_button_takes_no_click_until_the_pointer_leaves()
     let mut frame = input(400, 100);
     frame.pointer.mouse = Point::new(px(4), px(5));
     toolbar(&mut ui, &frame, "", &["remove", "other"]);
+    frame.pointer.pressed.insert(Button::Left);
     toolbar(&mut ui, &frame, "", &["remove", "other"]);
+    frame.pointer.pressed = Buttons::NONE;
     toolbar(&mut ui, &frame, "", &["other"]);
     frame.pointer.pressed.insert(Button::Left);
     ui.begin(&frame);
@@ -1126,13 +1143,15 @@ fn listing(ui: &mut Ui, frame: &Input, offset: &mut Point, above: usize) {
 }
 
 #[test]
-fn rows_appearing_above_a_button_under_the_pointer_scroll_it_back_and_the_scroll_is_kept() {
+fn rows_appearing_above_a_clicked_button_scroll_it_back_and_the_scroll_is_kept() {
     let mut ui = Ui::default();
     let mut frame = input(400, 100);
     frame.pointer.mouse = Point::new(px(4), px(25));
     let mut offset = Point::default();
     listing(&mut ui, &frame, &mut offset, 2);
+    frame.pointer.pressed.insert(Button::Left);
     listing(&mut ui, &frame, &mut offset, 2);
+    frame.pointer.pressed = Buttons::NONE;
     let before = ui.placement(Id::new("more")).unwrap().rect;
     listing(&mut ui, &frame, &mut offset, 4);
     assert_eq!(ui.placement(Id::new("more")).unwrap().rect, before);
@@ -1140,4 +1159,29 @@ fn rows_appearing_above_a_button_under_the_pointer_scroll_it_back_and_the_scroll
     listing(&mut ui, &frame, &mut offset, 4);
     assert_eq!(offset, Point::new(px(0), px(20)));
     assert_eq!(ui.placement(Id::new("more")).unwrap().rect, before);
+}
+
+#[test]
+fn the_wheel_scrolls_a_column_while_the_pointer_rests_on_a_button_clicked_or_not() {
+    let mut ui = Ui::default();
+    let mut frame = input(400, 100);
+    frame.pointer.mouse = Point::new(px(4), px(25));
+    let mut offset = Point::default();
+    listing(&mut ui, &frame, &mut offset, 2);
+    listing(&mut ui, &frame, &mut offset, 2);
+    frame.pointer.wheel = Vector::new(Coordinate::ZERO, Coordinate::new(-10.0));
+    listing(&mut ui, &frame, &mut offset, 2);
+    frame.pointer.wheel = Vector::ZERO;
+    listing(&mut ui, &frame, &mut offset, 2);
+    assert_eq!(offset, Point::new(px(0), px(10)));
+    frame.pointer.mouse = Point::new(px(4), px(15));
+    listing(&mut ui, &frame, &mut offset, 2);
+    frame.pointer.pressed.insert(Button::Left);
+    listing(&mut ui, &frame, &mut offset, 2);
+    frame.pointer.pressed = Buttons::NONE;
+    frame.pointer.wheel = Vector::new(Coordinate::ZERO, Coordinate::new(-10.0));
+    listing(&mut ui, &frame, &mut offset, 2);
+    frame.pointer.wheel = Vector::ZERO;
+    listing(&mut ui, &frame, &mut offset, 2);
+    assert_eq!(offset, Point::new(px(0), px(20)));
 }
