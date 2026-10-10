@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open }
+        $m! { gui: open, deleted }
     };
 }
 
@@ -107,4 +107,63 @@ fn last_rectangle(stderr: &str, prefix: &str) -> Option<(i32, i32, i32, i32)> {
             .ok()
     };
     Some((field("x")?, field("y")?, field("w")?, field("h")?))
+}
+
+pub(crate) fn deleted() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/1
+idle
+wait 2
+rect draft-removed@1
+rect draft-removed@300
+dump
+shot {shots}/top.png
+click-id draft-removed@2
+wait 1
+text near the top
+wait 2
+click-id draft-add
+wait 2
+scroll source 100000
+wait 3
+rect draft-removed@1
+rect draft-removed@400
+click-id draft-removed@398
+wait 1
+click-id draft-removed@400 shift
+wait 1
+text keep these
+wait 2
+shot {shots}/editing.png
+click-id draft-add
+wait 2
+dump
+shot {shots}/bottom.png
+scroll source 0
+wait 3
+rect draft-box/1
+rect draft-box/2
+shot {shots}/drafted.png
+click-id tab@Review
+wait 2
+click-id review-draft/1
+wait 3
+rect draft-box/2
+shot {shots}/jumped.png
+quit
+",
+        shows: &[
+            "DUMP tab=Source focus=None file=None gone=Some(\"old.txt\")",
+            "DUMP rect draft-removed@1 = Some(",
+            "DUMP rect draft-removed@300 = None",
+            "DUMP rect draft-removed@1 = None",
+            "DUMP rect draft-removed@400 = Some(",
+            "DUMP draft 1 old.txt:2-2 Old reply=None \"near the top\"",
+            "DUMP draft 2 old.txt:398-400 Old reply=None \"keep these\"",
+            "DUMP rect draft-box/1 = Some(",
+            "DUMP rect draft-box/2 = None",
+            "DUMP rect draft-box/2 = Some(",
+        ],
+    }
 }

@@ -19,6 +19,7 @@ use crate::diffs::{DiffJobs, Diffs, SidesKey};
 use crate::field::Which;
 use crate::keys::Going;
 use crate::model::{LineSelection, Model, Tab};
+use crate::nav::Aim;
 use crate::panels::View;
 use crate::pictures::{PictureJobs, Pictures};
 use crate::runtime::{Job, Landing, landed};
@@ -604,7 +605,7 @@ impl Model {
         let line = self.review.place_line(place, self.head_text(&place.file));
         match self.index.find_file(&place.file) {
             Some(file) => self.open_line(file, line),
-            None => self.open_gone(place.file.clone()),
+            None => self.show_gone(place.file.clone(), place.line, Aim::Line),
         }
     }
 
@@ -684,7 +685,7 @@ impl Model {
         let line = self.review.place_line(&place, self.head_text(&place.file));
         match self.index.find_file(&place.file) {
             Some(file) => self.show_editor(file, line),
-            None => self.open_gone(place.file),
+            None => self.show_gone(place.file, place.line, Aim::Editor),
         }
     }
 

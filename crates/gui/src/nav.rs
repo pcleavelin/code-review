@@ -315,6 +315,19 @@ impl Model {
         self.nav.show(Tab::Source);
     }
 
+    pub(crate) fn show_gone(&mut self, path: RelativePath, old: Line, aim: Aim) {
+        if self.nav.gone.as_ref() != Some(&path) {
+            self.open_gone(path);
+        }
+        let ticket = self.nav.ticket();
+        self.nav.scroll_to = Some(LineRequest {
+            line: old,
+            ticket,
+            aim,
+        });
+        self.nav.show(Tab::Source);
+    }
+
     pub(crate) fn clear_lines(&mut self) {
         self.nav.lines = None;
         self.line_grab = None;

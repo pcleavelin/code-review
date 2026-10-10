@@ -16,7 +16,7 @@ use crate::theme::{
 };
 use crate::widgets::{Frame, Padding, Scroller};
 
-use super::center::{self, Inset, Noted};
+use super::center::{self, Inset, Noted, Viewed};
 
 const CONTEXT: Count = Count::new(3);
 
@@ -568,7 +568,20 @@ fn draw(
             }
             Piece::Inset(number) => {
                 if let Some(anchor) = insets.get(number.get()) {
-                    center::inset(model, frame, &anchor.inset, drawn.path, band.width);
+                    center::inset(
+                        model,
+                        frame,
+                        &anchor.inset,
+                        drawn.path,
+                        band.width,
+                        Viewed {
+                            top: placed.top,
+                            band: center::Band {
+                                offset: band.from,
+                                bottom: band.until,
+                            },
+                        },
+                    );
                 }
                 drawn_to += placed.height;
             }
