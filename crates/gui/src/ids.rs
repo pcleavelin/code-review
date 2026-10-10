@@ -1,0 +1,496 @@
+use ui::{Count, Id, Label};
+
+use crate::keys::{self, Chord};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Element(&'static str);
+
+impl Element {
+    const fn new(name: &'static str) -> Self {
+        Self(name)
+    }
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Words(&'static str);
+
+impl Words {
+    const fn new(text: &'static str) -> Self {
+        Self(text)
+    }
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Tip {
+    pub(crate) words: Words,
+    pub(crate) chord: Option<Chord>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Target {
+    id: Id,
+    tip: Tip,
+}
+
+impl Target {
+    pub(crate) const fn id(self) -> Id {
+        self.id
+    }
+
+    pub(crate) const fn tip(self) -> Tip {
+        self.tip
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Control {
+    element: Element,
+    tip: Tip,
+}
+
+impl Control {
+    const fn new(element: Element, words: Words) -> Self {
+        Self {
+            element,
+            tip: Tip { words, chord: None },
+        }
+    }
+
+    const fn keyed(mut self, chord: Chord) -> Self {
+        self.tip.chord = Some(chord);
+        self
+    }
+
+    pub(crate) fn id(self) -> Id {
+        Id::from_name(self.element.as_str())
+    }
+
+    const fn aim(self, id: Id) -> Target {
+        Target { id, tip: self.tip }
+    }
+
+    pub(crate) fn target(self) -> Target {
+        self.aim(self.id())
+    }
+
+    pub(crate) fn nth(self, number: Count) -> Target {
+        self.aim(self.id().nth(number.get()))
+    }
+
+    pub(crate) fn with(self, suffix: &Label) -> Target {
+        self.aim(self.id().with(suffix.as_str()))
+    }
+
+    pub(crate) const fn element(self) -> Element {
+        self.element
+    }
+}
+
+pub(crate) const SEARCH_FIELD: Control = Control::new(
+    Element::new("field@search"),
+    Words::new("search every file of the tree for a regex; enter runs it"),
+);
+pub(crate) const FILTER_FIELD: Control = Control::new(
+    Element::new("field@symbols"),
+    Words::new("filter the symbols by name or file"),
+);
+pub(crate) const LINE_FIELD: Control = Control::new(
+    Element::new("field@goto-line"),
+    Words::new("jump the Source view to a line number"),
+);
+pub(crate) const COMMAND_FIELD: Control = Control::new(
+    Element::new("cmd"),
+    Words::new("run a CLI command; it acts on the same reviews"),
+);
+pub(crate) const BACK: Control = Control::new(
+    Element::new("back"),
+    Words::new("go back to the previous place"),
+)
+.keyed(keys::GO_BACK);
+pub(crate) const FORWARD: Control =
+    Control::new(Element::new("forward"), Words::new("go forward again")).keyed(keys::GO_FORWARD);
+pub(crate) const TAB: Control = Control::new(
+    Element::new("tab"),
+    Words::new("show this view; drag the tab onto another panel to move it"),
+);
+pub(crate) const DIVIDER: Control = Control::new(
+    Element::new("divider"),
+    Words::new("drag to resize the panels on either side"),
+);
+pub(crate) const SPLIT_RIGHT: Control = Control::new(
+    Element::new("split-right"),
+    Words::new("split this panel, the new half to the right"),
+);
+pub(crate) const SPLIT_DOWN: Control = Control::new(
+    Element::new("split-down"),
+    Words::new("split this panel, the new half below"),
+);
+pub(crate) const CLOSE_PANEL: Control = Control::new(
+    Element::new("close-panel"),
+    Words::new("close this panel; its neighbour takes its place"),
+);
+pub(crate) const CLOSE_TAB: Control =
+    Control::new(Element::new("close-tab"), Words::new("close this view"));
+pub(crate) const PICK: Control = Control::new(
+    Element::new("pick"),
+    Words::new("choose a view for this panel"),
+);
+pub(crate) const VIEW_ROW: Control =
+    Control::new(Element::new("view"), Words::new("show this view here"));
+pub(crate) const VIEW_FIELD: Control = Control::new(
+    Element::new("field@views"),
+    Words::new("type to find a view"),
+);
+pub(crate) const SYMBOL_ROW: Control = Control::new(
+    Element::new("sym"),
+    Words::new("show this symbol in the Source view"),
+);
+pub(crate) const SYMBOL_FILE_ROW: Control =
+    Control::new(Element::new("symfile"), Words::new("open this file"));
+pub(crate) const DIRECTORY_ROW: Control = Control::new(
+    Element::new("dir"),
+    Words::new("open or close this directory"),
+);
+pub(crate) const FILE_ROW: Control = Control::new(
+    Element::new("file"),
+    Words::new("open this file; a changed one opens at its first change"),
+);
+pub(crate) const CALLER_ROW: Control =
+    Control::new(Element::new("xto"), Words::new("go to this caller"));
+pub(crate) const CALLEE_ROW: Control =
+    Control::new(Element::new("xfrom"), Words::new("go to this callee"));
+pub(crate) const REFERENCE_ROW: Control =
+    Control::new(Element::new("xref"), Words::new("go to this reference"));
+pub(crate) const REFERENCE_FILE_ROW: Control =
+    Control::new(Element::new("xreffile"), Words::new("open this file"));
+pub(crate) const PEEK_GO: Control = Control::new(
+    Element::new("peek-go"),
+    Words::new("go to the definition shown here"),
+);
+pub(crate) const PEEK_CLOSE: Control = Control::new(
+    Element::new("peek-x"),
+    Words::new("close the peeked definition"),
+);
+pub(crate) const LINES: Control = Control::new(
+    Element::new("lines"),
+    Words::new(
+        "click a line to select it, drag to select several; double-click or ctrl+click a name to go to its definition, alt+click to peek it",
+    ),
+);
+pub(crate) const HIT_ROW: Control = Control::new(Element::new("hit"), Words::new("go to this hit"));
+pub(crate) const HIT_FILE_ROW: Control =
+    Control::new(Element::new("hitfile"), Words::new("open this file"));
+pub(crate) const INBOX_FIELD: Control = Control::new(
+    Element::new("field@inbox"),
+    Words::new("filter by any words of the title, repository, author, branch or #number"),
+);
+pub(crate) const INBOX_STATE: Control = Control::new(
+    Element::new("inbox-state"),
+    Words::new("show only the pull requests in this state"),
+);
+pub(crate) const PULL_ROW: Control = Control::new(
+    Element::new("pull"),
+    Words::new("open this pull request: fetch it, check out its head and index it"),
+);
+pub(crate) const PULLS_REFRESH: Control = Control::new(
+    Element::new("pulls-refresh"),
+    Words::new("ask every pinned repository's forge again for its open pull requests"),
+);
+pub(crate) const PIN_FIELD: Control = Control::new(
+    Element::new("field@pin"),
+    Words::new("a local clone's path, or a repository URL to clone; enter pins it"),
+);
+pub(crate) const PIN_ADD: Control = Control::new(
+    Element::new("pin"),
+    Words::new("pin the repository typed beside it"),
+);
+pub(crate) const UNPIN: Control = Control::new(
+    Element::new("unpin"),
+    Words::new("unpin this repository; its reviews stay on disk"),
+);
+pub(crate) const CHANGE_ROW: Control = Control::new(
+    Element::new("change"),
+    Words::new("show this changed file at its first change"),
+);
+pub(crate) const SEEN: Control = Control::new(
+    Element::new("seen"),
+    Words::new(
+        "mark the file seen, or unseen again; it turns unseen by itself when its diff changes",
+    ),
+)
+.keyed(keys::TOGGLE_SEEN);
+pub(crate) const NEXT_UNSEEN: Control = Control::new(
+    Element::new("next-unseen"),
+    Words::new("show the next changed file not seen yet"),
+)
+.keyed(keys::NEXT_UNSEEN);
+pub(crate) const NEXT_HUNK: Control = Control::new(
+    Element::new("next-hunk"),
+    Words::new("go to the next change in this file, then the next file"),
+)
+.keyed(keys::NEXT_HUNK);
+pub(crate) const PREVIOUS_HUNK: Control = Control::new(
+    Element::new("previous-hunk"),
+    Words::new("go to the previous change in this file"),
+)
+.keyed(keys::PREVIOUS_HUNK);
+pub(crate) const WHOLE_FILE: Control = Control::new(
+    Element::new("whole-file"),
+    Words::new("show the whole file, or only the changes and the lines around them"),
+);
+pub(crate) const FOLD: Control = Control::new(
+    Element::new("fold"),
+    Words::new("show these unchanged lines"),
+);
+pub(crate) const DRAFT_HERE: Control = Control::new(
+    Element::new("draft-here"),
+    Words::new("comment on the selected line"),
+)
+.keyed(keys::COMMENT);
+pub(crate) const DRAFT_REMOVED: Control = Control::new(
+    Element::new("draft-removed"),
+    Words::new("comment on this removed line"),
+);
+pub(crate) const DRAFT_FIELD: Control = Control::new(
+    Element::new("field@draft"),
+    Words::new("the comment; ctrl+enter adds it, escape cancels"),
+);
+pub(crate) const DRAFT_ADD: Control = Control::new(
+    Element::new("draft-add"),
+    Words::new("keep this comment as a draft; it is sent with the review"),
+);
+pub(crate) const DRAFT_CANCEL: Control = Control::new(
+    Element::new("draft-cancel"),
+    Words::new("throw this comment away"),
+);
+pub(crate) const DRAFT_REMOVE: Control = Control::new(
+    Element::new("draft-remove"),
+    Words::new("remove this draft before it is sent"),
+);
+pub(crate) const REPLY: Control = Control::new(
+    Element::new("reply"),
+    Words::new("answer this thread; the answer is a draft until the review is sent"),
+);
+pub(crate) const THREAD_ROW: Control = Control::new(
+    Element::new("thread"),
+    Words::new("show this thread where it is in the code"),
+);
+pub(crate) const TALK_REFRESH: Control = Control::new(
+    Element::new("talk-refresh"),
+    Words::new("read the description and the discussion again from the forge"),
+);
+pub(crate) const SUMMARY_FIELD: Control = Control::new(
+    Element::new("field@summary"),
+    Words::new("what the review says as a whole, or an answer to the conversation"),
+);
+pub(crate) const SUBMIT_COMMENT: Control = Control::new(
+    Element::new("submit-comment"),
+    Words::new("send the drafts and the summary as a review that only comments"),
+);
+pub(crate) const SUBMIT_APPROVE: Control = Control::new(
+    Element::new("submit-approve"),
+    Words::new("send the drafts and the summary and approve"),
+);
+pub(crate) const SUBMIT_CHANGES: Control = Control::new(
+    Element::new("submit-changes"),
+    Words::new("send the drafts and the summary and request changes"),
+);
+pub(crate) const REVIEW_DRAFT: Control = Control::new(
+    Element::new("review-draft"),
+    Words::new("show this draft where it is in the code"),
+);
+pub(crate) const PALETTE_FIELD: Control = Control::new(
+    Element::new("field@palette"),
+    Words::new("type to find a pull request, changed file, symbol, file, view or action"),
+)
+.keyed(keys::PALETTE);
+pub(crate) const PALETTE_ROW: Control =
+    Control::new(Element::new("palette"), Words::new("go there, or run it"));
+pub(crate) const SETTINGS_OPEN: Control = Control::new(
+    Element::new("settings-open"),
+    Words::new("the theme, the font and its size"),
+)
+.keyed(keys::SETTINGS);
+pub(crate) const SETTINGS_CLOSE: Control = Control::new(
+    Element::new("settings-close"),
+    Words::new("close the settings"),
+);
+pub(crate) const SETTINGS_THEME: Control =
+    Control::new(Element::new("settings-theme"), Words::new("use this theme"));
+pub(crate) const SETTINGS_SMALLER: Control = Control::new(
+    Element::new("settings-smaller"),
+    Words::new("a smaller font"),
+);
+pub(crate) const SETTINGS_LARGER: Control =
+    Control::new(Element::new("settings-larger"), Words::new("a larger font"));
+pub(crate) const SETTINGS_FONT: Control =
+    Control::new(Element::new("settings-font"), Words::new("use this font"));
+pub(crate) const ELEMENT_TIP: Control = Control::new(
+    Element::new("element-tip"),
+    Words::new("what the button under the pointer does"),
+);
+
+#[cfg(test)]
+pub(crate) const CONTROLS: &[Control] = &[
+    SEARCH_FIELD,
+    FILTER_FIELD,
+    LINE_FIELD,
+    COMMAND_FIELD,
+    BACK,
+    FORWARD,
+    TAB,
+    DIVIDER,
+    SPLIT_RIGHT,
+    SPLIT_DOWN,
+    CLOSE_PANEL,
+    CLOSE_TAB,
+    PICK,
+    VIEW_ROW,
+    VIEW_FIELD,
+    SYMBOL_ROW,
+    SYMBOL_FILE_ROW,
+    DIRECTORY_ROW,
+    FILE_ROW,
+    CALLER_ROW,
+    CALLEE_ROW,
+    REFERENCE_ROW,
+    REFERENCE_FILE_ROW,
+    PEEK_GO,
+    PEEK_CLOSE,
+    LINES,
+    HIT_ROW,
+    HIT_FILE_ROW,
+    INBOX_FIELD,
+    INBOX_STATE,
+    PULL_ROW,
+    PULLS_REFRESH,
+    PIN_FIELD,
+    PIN_ADD,
+    UNPIN,
+    CHANGE_ROW,
+    SEEN,
+    NEXT_UNSEEN,
+    NEXT_HUNK,
+    PREVIOUS_HUNK,
+    WHOLE_FILE,
+    FOLD,
+    DRAFT_HERE,
+    DRAFT_REMOVED,
+    DRAFT_FIELD,
+    DRAFT_ADD,
+    DRAFT_CANCEL,
+    DRAFT_REMOVE,
+    REPLY,
+    THREAD_ROW,
+    TALK_REFRESH,
+    SUMMARY_FIELD,
+    SUBMIT_COMMENT,
+    SUBMIT_APPROVE,
+    SUBMIT_CHANGES,
+    REVIEW_DRAFT,
+    PALETTE_FIELD,
+    PALETTE_ROW,
+    SETTINGS_OPEN,
+    SETTINGS_CLOSE,
+    SETTINGS_THEME,
+    SETTINGS_SMALLER,
+    SETTINGS_LARGER,
+    SETTINGS_FONT,
+    ELEMENT_TIP,
+];
+
+pub(crate) fn inbox() -> Id {
+    Id::new("inbox")
+}
+
+pub(crate) fn thread_box() -> Id {
+    Id::new("thread-box")
+}
+
+pub(crate) fn body() -> Id {
+    Id::new("body")
+}
+
+pub(crate) fn pair() -> Id {
+    Id::new("pair")
+}
+
+pub(crate) fn panel() -> Id {
+    Id::new("panel")
+}
+
+pub(crate) fn symbols() -> Id {
+    Id::new("symbols")
+}
+
+pub(crate) fn files() -> Id {
+    Id::new("files")
+}
+
+pub(crate) fn references() -> Id {
+    Id::new("references")
+}
+
+pub(crate) fn peek() -> Id {
+    Id::new("peek")
+}
+
+pub(crate) fn peek_code() -> Id {
+    Id::new("peekcode")
+}
+
+pub(crate) fn peek_outside() -> Id {
+    Id::new("peekout")
+}
+
+pub(crate) fn console() -> Id {
+    Id::new("console")
+}
+
+pub(crate) fn source() -> Id {
+    Id::new("source")
+}
+
+pub(crate) fn search() -> Id {
+    Id::new("search")
+}
+
+pub(crate) fn changes() -> Id {
+    Id::new("changes")
+}
+
+pub(crate) fn review() -> Id {
+    Id::new("review")
+}
+
+pub(crate) fn tooltip_code() -> Id {
+    Id::new("tip-code")
+}
+
+pub(crate) fn picker() -> Id {
+    Id::new("picker")
+}
+
+pub(crate) fn palette_box() -> Id {
+    Id::new("palette-box")
+}
+
+pub(crate) fn settings_box() -> Id {
+    Id::new("settings-box")
+}
+
+pub(crate) fn draft_box() -> Id {
+    Id::new("draft-box")
+}
+
+pub(crate) fn removed() -> Id {
+    Id::new("removed")
+}

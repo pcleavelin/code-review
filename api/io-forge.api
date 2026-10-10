@@ -1,0 +1,20 @@
+pub struct CommentCount(usize);
+pub const fn new(count: usize) -> Self
+pub const fn get(self) -> usize
+pub struct HttpStatus(u16);
+pub const fn new(code: u16) -> Self
+pub const fn get(self) -> u16
+pub const fn success(self) -> bool
+pub struct ResponseBody(String);
+pub fn new(text: &str) -> Self
+pub fn as_str(&self) -> &str
+pub struct Submitted { pub comments: CommentCount, }
+pub enum ForgeError { UnknownHost(Host), UnreadableUrl(RemoteUrl), NoToken(ForgeKind), Process(ProcessError), Unreachable(Captured), Http { status: HttpStatus, body: ResponseBody, }, Malformed(ResponseBody), }
+pub struct ForgeClient { forge: Forge, token: Option<Token>, }
+pub fn connect(url: &RemoteUrl) -> Result<Self, ForgeError>
+pub fn forge(&self) -> &Forge
+pub fn head_ref(&self, number: PrNumber) -> RefName
+pub fn open_pulls(&self) -> Result<Vec<PullRequest>, ForgeError>
+pub fn pull(&self, number: PrNumber) -> Result<PullRequest, ForgeError>
+pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, ForgeError>
+pub fn submit( &self, pull: &PullRequest, drafts: &[Draft], decision: Decision, body: Option<&DraftText>, ) -> Result<Submitted, ForgeError>

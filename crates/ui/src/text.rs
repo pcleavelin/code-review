@@ -1,0 +1,226 @@
+use std::mem;
+
+use crate::color::Color;
+use crate::geometry::{Count, FontSize};
+use crate::icon::Icon;
+use crate::input::Glyph;
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub struct Label(String);
+
+impl Label {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn spelled(&self) -> String {
+        self.0
+            .chars()
+            .map(|character| {
+                Icon::of(Glyph::new(character)).map_or_else(
+                    || String::from(character),
+                    |icon| format!("[{}]", icon.name()),
+                )
+            })
+            .collect()
+    }
+
+    pub fn columns(&self) -> usize {
+        self.0
+            .chars()
+            .map(|character| Glyph::new(character).columns())
+            .sum()
+    }
+
+    pub(crate) fn longest_word(&self) -> usize {
+        self.0
+            .split([' ', '\n'])
+            .map(|word| {
+                word.chars()
+                    .map(|character| Glyph::new(character).columns())
+                    .sum()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    pub fn wrap(&self, columns: usize) -> Vec<Self> {
+        let columns = columns.max(1);
+        let mut out = Vec::new();
+        for paragraph in self.0.split('\n') {
+            let mut line = String::new();
+            let mut length = 0;
+            for word in paragraph.split(' ') {
+                let word_length: usize = word
+                    .chars()
+                    .map(|character| Glyph::new(character).columns())
+                    .sum();
+                if length > 0 && length + 1 + word_length > columns {
+                    out.push(Self(mem::take(&mut line)));
+                    length = 0;
+                }
+                if length > 0 {
+                    line.push(' ');
+                    length += 1;
+                }
+                if word_length > columns {
+                    for character in word.chars() {
+                        if length >= columns {
+                            out.push(Self(mem::take(&mut line)));
+                            length = 0;
+                        }
+                        line.push(character);
+                        length += Glyph::new(character).columns();
+                    }
+                } else {
+                    line.push_str(word);
+                    length += word_length;
+                }
+            }
+            out.push(Self(line));
+        }
+        out
+    }
+}
+
+impl From<&str> for Label {
+    fn from(text: &str) -> Self {
+        Self(text.to_owned())
+    }
+}
+
+impl From<String> for Label {
+    fn from(text: String) -> Self {
+        Self(text)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Run {
+    pub text: Label,
+    pub color: Color,
+}
+
+impl Run {
+    pub fn new(text: impl Into<Label>, color: Color) -> Self {
+        Self {
+            text: text.into(),
+            color,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Wrap {
+    None,
+    Words,
+    Clip,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Text {
+    pub runs: Vec<Run>,
+    pub size: FontSize,
+    pub wrap: Wrap,
+}
+
+impl Text {
+    pub(crate) fn columns(&self) -> Count {
+        Count::new(self.runs.iter().map(|run| run.text.columns()).sum())
+    }
+
+    pub(crate) fn first_glyph_columns(&self) -> Count {
+        Count::new(
+            self.runs
+                .iter()
+                .find_map(|run| run.text.as_str().chars().next())
+                .map_or(0, |character| Glyph::new(character).columns()),
+        )
+    }
+
+    pub(crate) fn clipped(runs: Vec<Run>, columns: Count) -> Vec<Run> {
+        let columns = columns.get();
+        let whole: String = runs.iter().map(|run| run.text.as_str()).collect();
+        if Label::new(whole.trim_end_matches(' ')).columns() <= columns {
+            return runs;
+        }
+        let room = columns.saturating_sub(1);
+        let mut used = 0;
+        let mut out = Vec::new();
+        for run in runs {
+            let mut kept = String::new();
+            let mut cut = false;
+            for character in run.text.as_str().chars() {
+                let width = Glyph::new(character).columns();
+                if used + width > room {
+                    cut = true;
+                    break;
+                }
+                used += width;
+                kept.push(character);
+            }
+            if cut && columns > 0 {
+                kept.push('\u{2026}');
+            }
+            out.push(Run::new(kept, run.color));
+            if cut {
+                break;
+            }
+        }
+        out
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Cell {
+    pub glyph: Glyph,
+    pub color: Color,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Grid {
+    columns: Count,
+    rows: Count,
+    cells: Vec<Option<Cell>>,
+}
+
+impl Grid {
+    pub fn new(columns: Count, rows: Count) -> Self {
+        Self {
+            columns,
+            rows,
+            cells: vec![None; columns.get() * rows.get()],
+        }
+    }
+
+    pub const fn columns(&self) -> Count {
+        self.columns
+    }
+
+    pub const fn rows(&self) -> Count {
+        self.rows
+    }
+
+    pub fn set(&mut self, column: Count, row: Count, cell: Cell) {
+        if column < self.columns
+            && row < self.rows
+            && let Some(slot) = self
+                .cells
+                .get_mut(row.get() * self.columns.get() + column.get())
+        {
+            *slot = Some(cell);
+        }
+    }
+
+    pub fn row(&self, row: Count) -> impl Iterator<Item = Option<Cell>> + '_ {
+        self.cells
+            .iter()
+            .skip(row.get() * self.columns.get())
+            .take(self.columns.get())
+            .copied()
+    }
+}

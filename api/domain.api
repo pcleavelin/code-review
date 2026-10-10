@@ -1,0 +1,362 @@
+id::pub struct Position(usize);
+id::pub trait Key: Copy
+id::pub struct Entry<K, V> { pub id: K, pub item: V, }
+id::pub struct IdList<K, V> { items: Vec<V>, key: PhantomData<K>, }
+id::pub fn new() -> Self
+id::pub fn push(&mut self, item: V) -> K
+id::pub fn get(&self, id: K) -> Option<&V>
+id::pub fn get_mut(&mut self, id: K) -> Option<&mut V>
+id::pub fn is_empty(&self) -> bool
+id::pub fn iter(&self) -> impl Iterator<Item = &V>
+id::pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut V>
+id::pub fn ids(&self) -> impl Iterator<Item = K> + use<K, V>
+id::pub fn entries(&self) -> impl Iterator<Item = Entry<K, &V>>
+index::pub struct Root(PathBuf);
+index::pub fn new(path: &Path) -> Self
+index::pub fn as_path(&self) -> &Path
+index::pub fn join(&self, path: &RelativePath) -> PathBuf
+index::pub struct SymbolQuery { name: SymbolName, file: Option<Scope>, owner: Option<Scope>, }
+index::pub fn name(&self) -> &SymbolName
+index::pub struct TreeEntry { pub symbol: SymbolId, pub depth: Depth, }
+index::pub struct PendingBatch { pub language: Language, pub files: Vec<FileId>, }
+index::pub struct Index { root: Root, files: IdList<FileId, SourceFile>, }
+index::pub fn new(root: Root) -> Self
+index::pub fn root(&self) -> &Root
+index::pub fn push(&mut self, file: SourceFile) -> FileId
+index::pub fn file(&self, file: FileId) -> Option<&SourceFile>
+index::pub fn file_mut(&mut self, file: FileId) -> Option<&mut SourceFile>
+index::pub fn replace(&mut self, file: FileId, source: SourceFile) -> Option<SourceFile>
+index::pub fn files(&self) -> impl Iterator<Item = &SourceFile>
+index::pub fn files_mut(&mut self) -> impl Iterator<Item = &mut SourceFile>
+index::pub fn file_entries(&self) -> impl Iterator<Item = Entry<FileId, &SourceFile>>
+index::pub fn symbol_ids(&self) -> impl Iterator<Item = SymbolId>
+index::pub fn find_file(&self, path: &RelativePath) -> Option<FileId>
+index::pub fn symbol(&self, symbol: SymbolId) -> Option<&Symbol>
+index::pub fn symbol_mut(&mut self, symbol: SymbolId) -> Option<&mut Symbol>
+index::pub fn symbol_key(&self, symbol: SymbolId) -> Option<SymbolKey>
+index::pub fn by_key(&self, key: &SymbolKey) -> Option<SymbolId>
+index::pub fn by_line(&self, path: &RelativePath, line: Line) -> Option<SymbolId>
+index::pub fn symbol_at(&self, file: FileId, line: Line) -> Option<SymbolId>
+index::pub fn find_symbols(&self, query: &SymbolQuery) -> Vec<SymbolId>
+index::pub fn roots(&self) -> Vec<SymbolId>
+index::pub fn call_tree(&self, root: SymbolId, deepest: Depth) -> Vec<TreeEntry>
+index::pub fn call_site(&self, file: FileId, line: Line, name: &SymbolName) -> bool
+index::pub fn connect(&mut self, edges: &[Edge])
+index::pub fn symbols_only(&self) -> Self
+index::pub fn take_edges(&mut self, linked: &Self)
+index::pub fn pending(&self) -> Vec<PendingBatch>
+index::pub fn give_up(&mut self, language: Language)
+index::file::pub enum HighlightClass { Plain, Keyword, String, Comment, Function, Type, Constant, Property, }
+index::file::pub const fn is_quoted(self) -> bool
+index::file::pub struct Highlight { pub start: ByteOffset, pub end: ByteOffset, pub class: HighlightClass, }
+index::file::pub enum Backend { TreeSitter, Server, }
+index::file::pub enum Readiness { Ready, Pending, }
+index::file::pub struct Imports(BTreeMap<String, String>);
+index::file::pub fn new() -> Self
+index::file::pub fn insert(&mut self, name: &str, module: &str)
+index::file::pub fn get(&self, name: &str) -> Option<&str>
+index::file::pub fn is_empty(&self) -> bool
+index::file::pub fn count(&self) -> usize
+index::file::pub fn iter(&self) -> impl Iterator<Item = (&str, &str)>
+index::file::pub struct SourceFile { path: RelativePath, text: FileText, highlights: Vec<Vec<Highlight>>, symbols: IdList<SymbolIndex, Symbol>, imports: Imports, hash: TextHash, backend: Backend, readiness: Readiness, }
+index::file::pub fn new( path: RelativePath, text: FileText, highlights: Vec<Vec<Highlight>>, symbols: Vec<Symbol>, imports: Imports, hash: TextHash, backend: Backend, ) -> Self
+index::file::pub fn path(&self) -> &RelativePath
+index::file::pub fn text(&self) -> &FileText
+index::file::pub fn highlights(&self) -> &[Vec<Highlight>]
+index::file::pub fn highlights_on(&self, line: Line) -> &[Highlight]
+index::file::pub fn symbols(&self) -> impl Iterator<Item = &Symbol>
+index::file::pub fn symbol_entries(&self) -> impl Iterator<Item = Entry<SymbolIndex, &Symbol>>
+index::file::pub fn symbol(&self, symbol: SymbolIndex) -> Option<&Symbol>
+index::file::pub fn symbol_mut(&mut self, symbol: SymbolIndex) -> Option<&mut Symbol>
+index::file::pub fn symbols_mut(&mut self) -> impl Iterator<Item = &mut Symbol>
+index::file::pub fn imports(&self) -> &Imports
+index::file::pub fn hash(&self) -> TextHash
+index::file::pub fn backend(&self) -> Backend
+index::file::pub fn readiness(&self) -> Readiness
+index::file::pub fn is_pending(&self) -> bool
+index::file::pub fn language(&self) -> Option<Language>
+index::file::pub fn set_text(&mut self, text: FileText)
+index::file::pub fn set_symbols(&mut self, symbols: Vec<Symbol>)
+index::file::pub fn set_backend(&mut self, backend: Backend)
+index::file::pub fn set_readiness(&mut self, readiness: Readiness)
+index::file::pub fn without_text(&self) -> Self
+index::file::pub fn innermost(&self, span: Span) -> Option<SymbolIndex>
+index::file::pub fn first_named(&self, name: &SymbolName) -> Option<SymbolIndex>
+index::file::pub fn name_class(&self, symbol: &Symbol) -> HighlightClass
+index::file::pub fn call_site(&self, line: Line, name: &SymbolName) -> bool
+index::language::pub struct Extension(&'static str);
+index::language::pub const fn as_str(self) -> &'static str
+index::language::pub struct Program(&'static str);
+index::language::pub const fn as_str(self) -> &'static str
+index::language::pub struct Argument(&'static str);
+index::language::pub const fn as_str(self) -> &'static str
+index::language::pub enum Language { Rust, Odin, Clang, Python, Javascript, }
+index::language::pub const fn extensions(self) -> &'static [Extension]
+index::language::pub const fn program(self) -> Program
+index::language::pub const fn arguments(self) -> &'static [Argument]
+index::language::pub fn of(path: &RelativePath) -> Option<Self>
+index::prune::pub enum Cut { Test, Accessor, Trivial, }
+index::prune::pub enum Stop { Mapped, Shared, OtherPackage, }
+index::prune::pub enum Verdict { Kept, Cut(Cut), Stopped(Stop), Cycle, }
+index::prune::pub struct Planned { pub entry: TreeEntry, pub verdict: Verdict, }
+index::prune::pub struct PrunedTree { pub entries: Vec<TreeEntry>, pub cut: BTreeMap<SymbolId, Cut>, pub stopped: BTreeMap<SymbolId, Stop>, }
+index::prune::pub fn in_tests(&self, symbol: SymbolId) -> bool
+index::prune::pub fn unplaced_callees( &self, path: &[SymbolId], placed: &BTreeSet<SymbolId>, ) -> Vec<SymbolId>
+index::prune::pub fn plan_callees( &self, path: &[SymbolId], placed: &BTreeSet<SymbolId>, mapped: &impl Fn(SymbolId) -> bool, ) -> Vec<Planned>
+index::prune::pub fn planned_tree( &self, root: SymbolId, deepest: Depth, mapped: impl Fn(SymbolId) -> bool, ) -> Vec<Planned>
+index::prune::pub fn pruned_tree( &self, root: SymbolId, deepest: Depth, mapped: impl Fn(SymbolId) -> bool, ) -> PrunedTree
+index::symbol::pub struct FileId(Position);
+index::symbol::pub struct SymbolIndex(Position);
+index::symbol::pub const fn number(self) -> usize
+index::symbol::pub const fn number(self) -> usize
+index::symbol::pub struct SymbolId { file: FileId, symbol: SymbolIndex, }
+index::symbol::pub const fn file(self) -> FileId
+index::symbol::pub const fn symbol(self) -> SymbolIndex
+index::symbol::pub struct Depth(u32);
+index::symbol::pub const fn new(value: u32) -> Self
+index::symbol::pub const fn value(self) -> u32
+index::symbol::pub const fn deeper(self) -> Self
+index::symbol::pub struct SymbolName(String);
+index::symbol::pub fn new(name: &str) -> Self
+index::symbol::pub fn as_str(&self) -> &str
+index::symbol::pub struct SymbolKind(String);
+index::symbol::pub fn new(kind: &str) -> Self
+index::symbol::pub fn as_str(&self) -> &str
+index::symbol::pub fn contains(&self, word: &str) -> bool
+index::symbol::pub struct TypeName(String);
+index::symbol::pub fn new(name: &str) -> Self
+index::symbol::pub fn as_str(&self) -> &str
+index::symbol::pub struct Scope(String);
+index::symbol::pub fn new(name: &str) -> Self
+index::symbol::pub fn as_str(&self) -> &str
+index::symbol::pub enum Qualifier { Plain, SelfReference, Named(Scope), }
+index::symbol::pub struct Call { pub name: SymbolName, pub qualifier: Qualifier, }
+index::symbol::pub struct Location { pub file: RelativePath, pub line: Line, }
+index::symbol::pub struct SymbolKey { pub file: RelativePath, pub name: SymbolName, }
+index::symbol::pub struct Edge { pub from: SymbolId, pub to: SymbolId, }
+index::symbol::pub struct Symbol { name: SymbolName, kind: SymbolKind, span: Span, depth: Depth, owner: Option<TypeName>, calls: Vec<Call>, targets: Vec<Location>, references: Vec<Location>, callees: Vec<SymbolId>, callers: Vec<SymbolId>, }
+index::symbol::pub fn new( name: SymbolName, kind: SymbolKind, span: Span, depth: Depth, owner: Option<TypeName>, calls: Vec<Call>, ) -> Self
+index::symbol::pub fn name(&self) -> &SymbolName
+index::symbol::pub fn kind(&self) -> &SymbolKind
+index::symbol::pub fn span(&self) -> Span
+index::symbol::pub fn depth(&self) -> Depth
+index::symbol::pub fn owner(&self) -> Option<&TypeName>
+index::symbol::pub fn calls(&self) -> &[Call]
+index::symbol::pub fn targets(&self) -> &[Location]
+index::symbol::pub fn references(&self) -> &[Location]
+index::symbol::pub fn callees(&self) -> &[SymbolId]
+index::symbol::pub fn callers(&self) -> &[SymbolId]
+index::symbol::pub fn set_targets(&mut self, targets: Vec<Location>)
+index::symbol::pub fn set_references(&mut self, references: Vec<Location>)
+index::symbol::pub fn set_callees(&mut self, callees: Vec<SymbolId>)
+index::symbol::pub fn set_callers(&mut self, callers: Vec<SymbolId>)
+layout::pub enum SplitDirection { #[default] Right, Down, }
+layout::pub struct Share(u16);
+layout::pub const WHOLE: Self = Self(1000);
+layout::pub fn permille(value: u16) -> Option<Self>
+layout::pub const fn get(self) -> u16
+layout::pub struct ViewKey(String);
+layout::pub fn new(name: &str) -> Option<Self>
+layout::pub fn as_str(&self) -> &str
+layout::pub struct LayoutPanel { views: Vec<ViewKey>, shown: Option<ViewKey>, }
+layout::pub fn new(views: Vec<ViewKey>, shown: Option<ViewKey>) -> Self
+layout::pub fn views(&self) -> &[ViewKey]
+layout::pub const fn shown(&self) -> Option<&ViewKey>
+layout::pub struct LayoutSplit { direction: SplitDirection, share: Share, first: Box<LayoutTree>, second: Box<LayoutTree>, }
+layout::pub fn new( direction: SplitDirection, share: Share, first: LayoutTree, second: LayoutTree, ) -> Self
+layout::pub const fn direction(&self) -> SplitDirection
+layout::pub const fn share(&self) -> Share
+layout::pub fn first(&self) -> &LayoutTree
+layout::pub fn second(&self) -> &LayoutTree
+layout::pub enum LayoutTree { Split(LayoutSplit), Panel(LayoutPanel), }
+review::pub struct Spelling(&'static str);
+review::pub const fn as_str(self) -> &'static str
+review::pub enum ForgeKind { GitHub, GitLab, Forgejo, }
+review::pub const fn name(self) -> Spelling
+review::pub struct Host(String);
+review::pub fn new(name: &str) -> Option<Self>
+review::pub fn as_str(&self) -> &str
+review::pub struct RepoSlug(String);
+review::pub fn new(path: &str) -> Option<Self>
+review::pub fn as_str(&self) -> &str
+review::pub struct Forge { kind: ForgeKind, host: Host, slug: RepoSlug, }
+review::pub const fn new(kind: ForgeKind, host: Host, slug: RepoSlug) -> Self
+review::pub const fn kind(&self) -> ForgeKind
+review::pub const fn host(&self) -> &Host
+review::pub const fn slug(&self) -> &RepoSlug
+review::pub struct PrNumber(u64);
+review::pub fn new(number: u64) -> Option<Self>
+review::pub fn parse(text: &str) -> Option<Self>
+review::pub const fn get(self) -> u64
+review::pub struct CommitId(String);
+review::pub fn new(text: &str) -> Option<Self>
+review::pub fn as_str(&self) -> &str
+review::pub fn short(&self) -> &str
+review::pub struct PullRequest { pub number: PrNumber, pub title: PrTitle, pub author: Login, pub base: BranchName, pub head: BranchName, pub head_commit: CommitId, pub description: Prose, pub updated: Moment, }
+review::pub enum Decision { Comment, Approve, RequestChanges, }
+review::pub const fn name(self) -> Spelling
+review::diff::pub enum LineKind { Context, Added, Removed, }
+review::diff::pub const fn marker(self) -> Spelling
+review::diff::pub struct DiffLine { pub kind: LineKind, pub text: SourceLine, }
+review::diff::pub struct Hunk { old_start: Line, new_start: Line, lines: Vec<DiffLine>, }
+review::diff::pub struct NumberedLine<'diff> { pub kind: LineKind, pub text: &'diff SourceLine, pub old: Option<Line>, pub new: Option<Line>, }
+review::diff::pub const fn new(old_start: Line, new_start: Line, lines: Vec<DiffLine>) -> Self
+review::diff::pub fn lines(&self) -> &[DiffLine]
+review::diff::pub const fn old_start(&self) -> Line
+review::diff::pub const fn new_start(&self) -> Line
+review::diff::pub fn numbered(&self) -> impl Iterator<Item = NumberedLine<'_>>
+review::diff::pub enum ChangeKind { Added, Deleted, Modified, Renamed, }
+review::diff::pub enum FileRow { Head { line: Line, kind: LineKind }, Removed { old: Line, text: SourceLine }, }
+review::diff::pub struct FileChange { path: RelativePath, old_path: Option<RelativePath>, kind: ChangeKind, hunks: Vec<Hunk>, }
+review::diff::pub const fn new( path: RelativePath, old_path: Option<RelativePath>, kind: ChangeKind, hunks: Vec<Hunk>, ) -> Self
+review::diff::pub const fn path(&self) -> &RelativePath
+review::diff::pub const fn old_path(&self) -> Option<&RelativePath>
+review::diff::pub const fn kind(&self) -> ChangeKind
+review::diff::pub fn hunks(&self) -> &[Hunk]
+review::diff::pub fn added(&self) -> LineCount
+review::diff::pub fn removed(&self) -> LineCount
+review::diff::pub fn hash(&self) -> TextHash
+review::diff::pub fn commentable(&self, side: Side, line: Line) -> bool
+review::diff::pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow>
+review::state::pub enum Side { Old, New, }
+review::state::pub const fn name(self) -> Spelling
+review::state::pub struct DraftId(u32);
+review::state::pub const fn new(value: u32) -> Self
+review::state::pub const fn get(self) -> u32
+review::state::pub struct DraftText(String);
+review::state::pub fn new(text: &str) -> Option<Self>
+review::state::pub fn as_str(&self) -> &str
+review::state::pub struct Draft { pub id: DraftId, pub file: RelativePath, pub side: Side, pub line: Line, pub text: DraftText, pub reply: Option<ThreadId>, }
+review::state::pub struct DraftOn { pub file: RelativePath, pub side: Side, pub line: Line, pub reply: Option<ThreadId>, }
+review::state::pub enum Standing { New, Updated, Reviewing, Reviewed, }
+review::state::pub struct Mark { pub hash: TextHash, pub commit: CommitId, }
+review::state::pub enum Seen { Unseen, Changed, Seen, }
+review::state::pub struct FileCount(usize);
+review::state::pub const fn new(count: usize) -> Self
+review::state::pub const fn get(self) -> usize
+review::state::pub struct Progress { seen: FileCount, total: FileCount, }
+review::state::pub const fn seen(self) -> FileCount
+review::state::pub const fn total(self) -> FileCount
+review::state::pub const fn done(self) -> bool
+review::state::pub enum DraftError { NoSuchDraft(DraftId), }
+review::state::pub struct Review { marks: BTreeMap<RelativePath, Mark>, drafts: Vec<Draft>, looked: Option<CommitId>, }
+review::state::pub fn new( marks: BTreeMap<RelativePath, Mark>, drafts: Vec<Draft>, looked: Option<CommitId>, ) -> Self
+review::state::pub const fn looked(&self) -> Option<&CommitId>
+review::state::pub fn look(&mut self, head: CommitId)
+review::state::pub fn standing(&self, head: &CommitId, progress: Progress) -> Standing
+review::state::pub const fn marks(&self) -> &BTreeMap<RelativePath, Mark>
+review::state::pub fn drafts(&self) -> &[Draft]
+review::state::pub fn seen(&self, change: &FileChange) -> Seen
+review::state::pub fn mark(&mut self, change: &FileChange, commit: CommitId)
+review::state::pub fn unmark(&mut self, path: &RelativePath) -> bool
+review::state::pub fn toggle(&mut self, change: &FileChange, commit: CommitId) -> Seen
+review::state::pub fn progress(&self, changes: &[FileChange]) -> Progress
+review::state::pub fn next_unseen<'changes>( &self, changes: &'changes [FileChange], after: Option<&RelativePath>, ) -> Option<&'changes FileChange>
+review::state::pub fn add_draft(&mut self, on: DraftOn, text: DraftText) -> DraftId
+review::state::pub fn remove_draft(&mut self, id: DraftId) -> Result<Draft, DraftError>
+review::state::pub fn clear_drafts(&mut self)
+review::state::pub fn drafts_at<'review>( &'review self, file: &'review RelativePath, ) -> impl Iterator<Item = &'review Draft>
+review::talk::pub struct Moment(String);
+review::talk::pub fn new(text: &str) -> Self
+review::talk::pub fn as_str(&self) -> &str
+review::talk::pub fn day(&self) -> &str
+review::talk::pub fn minute(&self) -> String
+review::talk::pub struct Prose(String);
+review::talk::pub fn new(text: &str) -> Self
+review::talk::pub fn as_str(&self) -> &str
+review::talk::pub fn is_empty(&self) -> bool
+review::talk::pub struct ThreadId(String);
+review::talk::pub fn new(text: &str) -> Option<Self>
+review::talk::pub fn as_str(&self) -> &str
+review::talk::pub enum NoteKind { Comment, Approved, ChangesRequested, }
+review::talk::pub struct Note { pub author: Login, pub body: Prose, pub when: Moment, pub kind: NoteKind, }
+review::talk::pub struct CodePlace { pub file: RelativePath, pub side: Side, pub line: Line, }
+review::talk::pub enum ThreadState { Open, Resolved, Outdated, }
+review::talk::pub struct Thread { pub id: ThreadId, pub place: Option<CodePlace>, pub state: ThreadState, pub notes: Vec<Note>, }
+review::talk::pub fn started(&self) -> Option<&Moment>
+review::talk::pub struct Conversation { pub description: Prose, pub threads: Vec<Thread>, }
+review::talk::pub fn on_code(&self) -> impl Iterator<Item = &Thread>
+review::talk::pub fn on_pull(&self) -> impl Iterator<Item = &Thread>
+review::talk::pub fn in_file<'talk>( &'talk self, file: &'talk RelativePath, ) -> impl Iterator<Item = &'talk Thread>
+review::talk::pub fn thread(&self, id: &ThreadId) -> Option<&Thread>
+settings::pub enum Theme { #[default] Dark, Light, }
+settings::pub struct FontFamily(String);
+settings::pub fn new(name: &str) -> Option<Self>
+settings::pub fn as_str(&self) -> &str
+settings::pub struct BaseFontSize(u16);
+settings::pub const SMALLEST: Self = Self(8);
+settings::pub const LARGEST: Self = Self(32);
+settings::pub fn new(size: u16) -> Option<Self>
+settings::pub const fn get(self) -> u16
+settings::pub fn larger(self) -> Self
+settings::pub fn smaller(self) -> Self
+settings::pub struct Settings { theme: Theme, font: Option<FontFamily>, size: BaseFontSize, }
+settings::pub const fn theme(&self) -> Theme
+settings::pub const fn font(&self) -> Option<&FontFamily>
+settings::pub const fn size(&self) -> BaseFontSize
+settings::pub const fn with_theme(mut self, theme: Theme) -> Self
+settings::pub fn with_font(mut self, font: Option<FontFamily>) -> Self
+settings::pub const fn with_size(mut self, size: BaseFontSize) -> Self
+text::pub struct Line(u32);
+text::pub const fn new(value: u32) -> Self
+text::pub const fn value(self) -> u32
+text::pub const fn number(self) -> u32
+text::pub fn next(self) -> Option<Self>
+text::pub fn previous(self) -> Option<Self>
+text::pub fn shifted(self, offset: LineOffset) -> Option<Self>
+text::pub fn offset_from(self, base: Self) -> Option<LineOffset>
+text::pub fn distance(self, other: Self) -> LineCount
+text::pub struct LineCount(u32);
+text::pub const fn new(value: u32) -> Self
+text::pub const fn value(self) -> u32
+text::pub const fn is_zero(self) -> bool
+text::pub fn last(self) -> Option<Line>
+text::pub struct LineOffset(i32);
+text::pub const fn new(value: i32) -> Self
+text::pub const fn value(self) -> i32
+text::pub const fn is_zero(self) -> bool
+text::pub struct Span { start: Line, end: Line, }
+text::pub fn new(start: Line, end: Line) -> Option<Self>
+text::pub const fn line(line: Line) -> Self
+text::pub const fn start(self) -> Line
+text::pub const fn end(self) -> Line
+text::pub fn contains(self, line: Line) -> bool
+text::pub fn encloses(self, inner: Self) -> bool
+text::pub fn overlaps(self, other: Self) -> bool
+text::pub fn lines(self) -> impl Iterator<Item = Line>
+text::pub fn count(self) -> LineCount
+text::pub struct Column(u32);
+text::pub const fn new(value: u32) -> Self
+text::pub const fn value(self) -> u32
+text::pub struct ByteOffset(u32);
+text::pub const fn new(value: u32) -> Self
+text::pub const fn value(self) -> u32
+text::pub struct TextHash(u64);
+text::pub const fn new(value: u64) -> Self
+text::pub const fn value(self) -> u64
+text::pub fn of(bytes: &[u8]) -> Self
+text::pub fn of_bytes(bytes: impl IntoIterator<Item = u8>) -> Self
+text::pub fn of_lines(lines: &[SourceLine]) -> Self
+text::pub struct SourceLine(String);
+text::pub fn new(text: &str) -> Self
+text::pub fn as_str(&self) -> &str
+text::pub fn trimmed(&self) -> &str
+text::pub struct FileText { lines: Vec<SourceLine>, whole: TextHash, }
+text::pub fn line(&self, line: Line) -> Option<&SourceLine>
+text::pub fn lines(&self, span: Span) -> Option<&[SourceLine]>
+text::pub fn all(&self) -> &[SourceLine]
+text::pub fn hash(&self, span: Span) -> Option<TextHash>
+text::pub fn count(&self) -> LineCount
+text::pub fn span(&self) -> Option<Span>
+text::pub fn whole_hash(&self) -> TextHash
+text::pub struct Revision(String);
+text::pub fn new(revision: &str) -> Self
+text::pub fn as_str(&self) -> &str
+text::pub struct RelativePath(String);
+text::pub fn new(path: &str) -> Self
+text::pub fn as_str(&self) -> &str
+text::pub fn stem(&self) -> &str
+text::pub fn package(&self) -> &str
+text::pub fn directory(&self) -> Option<&str>
+text::pub fn extension(&self) -> Option<&str>
+text::pub fn ends_with(&self, suffix: &str) -> bool

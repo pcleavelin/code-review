@@ -1,0 +1,19 @@
+pub enum VcsKind { Jj, Git, }
+pub struct Remote(String);
+pub fn new(name: &str) -> Self
+pub fn as_str(&self) -> &str
+pub struct RemoteUrl(String);
+pub fn new(text: &str) -> Self
+pub fn as_str(&self) -> &str
+pub struct Fetched { pub base: CommitId, pub head: CommitId, }
+pub enum VcsError { NoRepository, UnreadableRoot(io::Error), UnreadableMarker { path: PathBuf, error: io::Error, }, Process(ProcessError), Failure { program: Program, status: ExitStatus, stderr: Captured, }, NoCommit(RefName), }
+pub struct Vcs { kind: VcsKind, root: Root, marker: PathBuf, }
+pub fn detect(root: &Root) -> Result<Self, VcsError>
+pub fn shared_directory(&self) -> Result<PathBuf, VcsError>
+pub fn kind(&self) -> VcsKind
+pub fn clone_from(url: &RemoteUrl, into: &Path) -> Result<Root, VcsError>
+pub fn remote_url(&self, remote: &Remote) -> Result<RemoteUrl, VcsError>
+pub fn fetch( &self, remote: &Remote, number: PrNumber, head: &RefName, base: &BranchName, ) -> Result<Fetched, VcsError>
+pub fn fetched(&self, number: PrNumber) -> Result<Fetched, VcsError>
+pub fn diff(&self, base: &CommitId, head: &CommitId) -> Result<Vec<FileChange>, VcsError>
+pub fn check_out(&self, tree: &Path, commit: &CommitId) -> Result<(), VcsError>

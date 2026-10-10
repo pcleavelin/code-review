@@ -1,0 +1,16 @@
+[package]
+name = "session"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+domain = { path = "../domain" }
+io-vcs = { path = "../io-vcs" }
+io-forge = { path = "../io-forge" }
+io-review = { path = "../io-review" }
+io-config = { path = "../io-config" }
+io-process = { path = "../io-process" }
+
+[lints]
+workspace = true

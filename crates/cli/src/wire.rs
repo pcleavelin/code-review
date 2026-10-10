@@ -1,0 +1,527 @@
+use std::fmt;
+use std::iter;
+use std::mem;
+
+use clap::{Args, CommandFactory, Parser};
+use domain::{
+    ChangeKind, Conversation, Decision, Draft, FileChange, LineKind, NoteKind, PrNumber, Progress,
+    Review, Seen, Side, Standing, Thread, ThreadState,
+};
+use session::{Entry, Opened, Pinned, PullAddress, RepoName};
+
+use crate::failure::Failure;
+use crate::output::{Output, write_line};
+
+const PROGRAM: &str = "review";
+
+#[derive(Parser, Debug)]
+#[command(
+    name = PROGRAM,
+    disable_help_flag = true,
+    override_usage = "review                             open the inbox window\n       review <command> [args]            text mode (the same commands work in the window's Console)\n\n<pr> is [repository#]number, e.g. hexyl#296 or 296 inside a clone or with one repository pinned"
+)]
+pub(crate) enum Command {
+    #[command(about = "                                 the pinned repositories")]
+    Pins,
+    #[command(
+        about = "<path or URL>                    pin a clone, or clone a repository and pin it"
+    )]
+    Pin(PinArguments),
+    #[command(about = "<repository>                     unpin a repository; its reviews stay")]
+    Unpin(RepoArguments),
+    #[command(
+        about = "[filter]                         every open pull request of the pinned repositories, newest first"
+    )]
+    Prs(FilterArguments),
+    #[command(
+        about = "<pr>                             fetch the pull request, check out its head and list its changed files"
+    )]
+    Open(PrArguments),
+    #[command(about = "<pr>                             the description and every comment thread")]
+    Discussion(PrArguments),
+    #[command(
+        about = "<pr>                             changed files, each seen, unseen, or changed since it was seen"
+    )]
+    Changes(PrArguments),
+    #[command(
+        about = "<pr> [file]                      the diff of one changed file, or of all of them, with line numbers"
+    )]
+    Diff(DiffArguments),
+    #[command(about = "<pr>                             the diff of the first file not seen yet")]
+    Next(PrArguments),
+    #[command(
+        about = "<pr> <file>... | --all           mark changed files seen; a file turns unseen again when its diff changes"
+    )]
+    Seen(FilesArguments),
+    #[command(about = "<pr> <file>... | --all           mark changed files unseen")]
+    Unseen(FilesArguments),
+    #[command(
+        about = "<pr> <file> <line> <text> [--old] [--reply <thread>]  draft a comment on a line of the diff (1-based)"
+    )]
+    Comment(CommentArguments),
+    #[command(about = "<pr>                             the draft comments not submitted yet")]
+    Drafts(PrArguments),
+    #[command(about = "<pr> <id>                        remove a draft comment")]
+    Uncomment(UncommentArguments),
+    #[command(
+        about = "<pr> [summary] [--approve|--request-changes]  send the drafts to the forge as one review"
+    )]
+    Submit(SubmitArguments),
+}
+
+fn parse_pr(text: &str) -> Result<PullAddress, String> {
+    text.parse::<PullAddress>()
+        .map_err(|()| format!("'{text}' is not a pull request: write [repository#]number"))
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct PinArguments {
+    pub(crate) target: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct RepoArguments {
+    pub(crate) repository: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct FilterArguments {
+    pub(crate) filter: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct PrArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct DiffArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) file: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct FilesArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    #[arg(required_unless_present = "all")]
+    pub(crate) files: Vec<String>,
+    #[arg(long, conflicts_with = "files")]
+    pub(crate) all: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CommentArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) file: String,
+    #[arg(value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) line: u32,
+    pub(crate) text: String,
+    #[arg(long)]
+    pub(crate) old: bool,
+    #[arg(long, value_name = "THREAD")]
+    pub(crate) reply: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct UncommentArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) id: u32,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct SubmitArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) summary: Option<String>,
+    #[arg(long, conflicts_with = "request_changes")]
+    pub(crate) approve: bool,
+    #[arg(long)]
+    pub(crate) request_changes: bool,
+}
+
+pub(crate) fn parse<'a>(arguments: impl Iterator<Item = &'a str>) -> Result<Command, clap::Error> {
+    Command::try_parse_from(iter::once(PROGRAM).chain(arguments))
+}
+
+pub(crate) fn help() -> Output {
+    Output::of(Command::command().render_help().to_string())
+}
+
+pub(crate) fn render_error(error: &clap::Error) -> Output {
+    Output::of(error.render().to_string())
+}
+
+pub(crate) fn words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for character in line.chars() {
+        match character {
+            '"' => quoted = !quoted,
+            space if space.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    words.push(mem::take(&mut current));
+                }
+            }
+            other => current.push(other),
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+const fn seen_mark(seen: Seen) -> &'static str {
+    match seen {
+        Seen::Seen => "[x]",
+        Seen::Unseen => "[ ]",
+        Seen::Changed => "[~]",
+    }
+}
+
+const fn kind_word(kind: ChangeKind) -> &'static str {
+    match kind {
+        ChangeKind::Added => "added",
+        ChangeKind::Deleted => "deleted",
+        ChangeKind::Modified => "modified",
+        ChangeKind::Renamed => "renamed",
+    }
+}
+
+const fn side_word(side: Side) -> &'static str {
+    match side {
+        Side::Old => "old",
+        Side::New => "new",
+    }
+}
+
+pub(crate) fn entry_text(entry: &Entry) -> String {
+    let pull = &entry.pull;
+    format!(
+        "{} #{} {} {} {} {} {}",
+        entry.repo,
+        pull.number,
+        pull.title,
+        pull.author,
+        pull.head,
+        pull.base,
+        standing_word(entry.standing)
+    )
+}
+
+pub(crate) const fn standing_word(standing: Standing) -> &'static str {
+    match standing {
+        Standing::New => "new",
+        Standing::Updated => "updated",
+        Standing::Reviewing => "reviewing",
+        Standing::Reviewed => "reviewed",
+    }
+}
+
+fn local(entry: &Entry) -> String {
+    let progress = entry
+        .progress
+        .map_or_else(String::new, |progress: Progress| {
+            format!(", {progress} seen")
+        });
+    let drafts = match entry.drafts.len() {
+        0 => String::new(),
+        1 => ", 1 draft".to_owned(),
+        many => format!(", {many} drafts"),
+    };
+    format!("{}{progress}{drafts}", standing_word(entry.standing))
+}
+
+pub(crate) fn inbox(output: &mut Output, entries: &[Entry], broken: &[(String, String)]) {
+    for (place, why) in broken {
+        write_line!(output, "! {place}: {why}");
+    }
+    if entries.is_empty() {
+        write_line!(output, "no open pull requests");
+    }
+    for entry in entries {
+        let pull = &entry.pull;
+        write_line!(
+            output,
+            "{}#{:<5} {}  ({}, {})  {} <- {}  [{}]",
+            entry.repo,
+            pull.number,
+            pull.title,
+            pull.author,
+            pull.updated.day(),
+            pull.base,
+            pull.head,
+            local(entry)
+        );
+    }
+}
+
+pub(crate) fn pins(output: &mut Output, here: Option<&RepoName>, pinned: &[Pinned]) {
+    if let Some(here) = here {
+        write_line!(output, "{here}  (the current directory, not pinned)");
+    }
+    if pinned.is_empty() {
+        write_line!(
+            output,
+            "nothing pinned: 'review pin <path or URL>' pins a repository"
+        );
+    }
+    for pin in pinned {
+        match pin {
+            Pinned::Ready(repo) => {
+                write_line!(
+                    output,
+                    "{}  {}",
+                    repo.name(),
+                    repo.root().as_path().display()
+                );
+            }
+            Pinned::Broken { root, why } => {
+                write_line!(output, "! {}  {}", root.as_path().display(), why.as_str());
+            }
+        }
+    }
+}
+
+pub(crate) fn pinned(output: &mut Output, name: &RepoName) {
+    write_line!(output, "pinned {name}");
+}
+
+pub(crate) fn unpinned(output: &mut Output, name: &RepoName) {
+    write_line!(
+        output,
+        "unpinned {name}; its reviews stay in its git directory"
+    );
+}
+
+const fn note_word(kind: NoteKind) -> &'static str {
+    match kind {
+        NoteKind::Comment => "",
+        NoteKind::Approved => " approved",
+        NoteKind::ChangesRequested => " requested changes",
+    }
+}
+
+const fn thread_word(state: ThreadState) -> &'static str {
+    match state {
+        ThreadState::Open => "",
+        ThreadState::Resolved => " (resolved)",
+        ThreadState::Outdated => " (outdated)",
+    }
+}
+
+fn thread(output: &mut Output, thread: &Thread) {
+    let place = thread.place.as_ref().map_or_else(String::new, |place| {
+        format!(
+            " on {}:{}{}",
+            place.file,
+            place.line.number(),
+            match place.side {
+                Side::Old => " (old)",
+                Side::New => "",
+            }
+        )
+    });
+    write_line!(
+        output,
+        "thread {}{place}{}",
+        thread.id,
+        thread_word(thread.state)
+    );
+    for note in &thread.notes {
+        write_line!(
+            output,
+            "  {} {}{}:",
+            note.when,
+            note.author,
+            note_word(note.kind)
+        );
+        for line in note.body.as_str().lines() {
+            write_line!(output, "    {line}");
+        }
+    }
+}
+
+pub(crate) fn discussion(output: &mut Output, conversation: &Conversation) {
+    if conversation.description.is_empty() {
+        write_line!(output, "(no description)");
+    }
+    for line in conversation.description.as_str().lines() {
+        write_line!(output, "{line}");
+    }
+    for each in &conversation.threads {
+        write_line!(output, "");
+        thread(output, each);
+    }
+}
+
+pub(crate) fn opened(output: &mut Output, opened: &Opened) {
+    write_line!(
+        output,
+        "#{} {}..{}  checked out at {}",
+        opened.number,
+        opened.base,
+        opened.head,
+        opened.tree.display()
+    );
+    changes(output, opened);
+}
+
+pub(crate) fn changes(output: &mut Output, opened: &Opened) {
+    for change in &opened.changes {
+        let from = change
+            .old_path()
+            .map_or_else(String::new, |old| format!(" (from {old})"));
+        write_line!(
+            output,
+            "{} {:>5} {:>5}  {}{from}",
+            seen_mark(opened.seen(change)),
+            format!("+{}", change.added()),
+            format!("-{}", change.removed()),
+            change.path()
+        );
+    }
+    write_line!(
+        output,
+        "{} seen; [x] seen, [~] changed since seen, [ ] unseen",
+        opened.review.progress(&opened.changes)
+    );
+}
+
+fn number(line: Option<domain::Line>) -> String {
+    line.map_or_else(String::new, |line| line.number().to_string())
+}
+
+const fn marker(kind: LineKind) -> char {
+    match kind {
+        LineKind::Context => ' ',
+        LineKind::Added => '+',
+        LineKind::Removed => '-',
+    }
+}
+
+pub(crate) fn diff(output: &mut Output, change: &FileChange, seen: Seen, review: &Review) {
+    write_line!(
+        output,
+        "{} {} ({}, +{} -{})",
+        seen_mark(seen),
+        change.path(),
+        kind_word(change.kind()),
+        change.added(),
+        change.removed()
+    );
+    if change.hunks().is_empty() {
+        write_line!(output, "      no text changes");
+    }
+    for hunk in change.hunks() {
+        write_line!(output, "  @@");
+        for line in hunk.numbered() {
+            write_line!(
+                output,
+                "{:>5} {:>5} {}{}",
+                number(line.old),
+                number(line.new),
+                marker(line.kind),
+                line.text
+            );
+            let drafted = review
+                .drafts_at(change.path())
+                .filter(|draft| match draft.side {
+                    Side::New => line.new == Some(draft.line),
+                    Side::Old => line.kind == LineKind::Removed && line.old == Some(draft.line),
+                });
+            for draft in drafted {
+                write_line!(output, "            >> draft {}: {}", draft.id, draft.text);
+            }
+        }
+    }
+}
+
+pub(crate) fn all_seen(output: &mut Output, opened: &Opened) {
+    write_line!(
+        output,
+        "every changed file is seen ({})",
+        opened.review.progress(&opened.changes)
+    );
+}
+
+pub(crate) fn marked(output: &mut Output, change: &FileChange, seen: Seen) {
+    write_line!(output, "{} {}", seen_mark(seen), change.path());
+}
+
+pub(crate) fn draft(output: &mut Output, draft: &Draft) {
+    let reply = draft
+        .reply
+        .as_ref()
+        .map_or_else(String::new, |thread| format!(" answering {thread}"));
+    write_line!(
+        output,
+        "draft {}  {}:{} ({}){reply}  {}",
+        draft.id,
+        draft.file,
+        draft.line.number(),
+        side_word(draft.side),
+        draft.text
+    );
+}
+
+pub(crate) fn drafts(output: &mut Output, review: &Review) {
+    if review.drafts().is_empty() {
+        write_line!(output, "no draft comments");
+    }
+    for each in review.drafts() {
+        draft(output, each);
+    }
+}
+
+pub(crate) fn removed(output: &mut Output, removed: &Draft) {
+    write_line!(output, "removed draft {}", removed.id);
+}
+
+pub(crate) fn submitted(
+    output: &mut Output,
+    number: PrNumber,
+    decision: Decision,
+    comments: usize,
+) {
+    let what = match decision {
+        Decision::Comment => "commented on",
+        Decision::Approve => "approved",
+        Decision::RequestChanges => "requested changes on",
+    };
+    write_line!(
+        output,
+        "{what} #{number} with {comments} inline comment{}",
+        if comments == 1 { "" } else { "s" }
+    );
+}
+
+impl fmt::Display for Failure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Session(error) => write!(formatter, "{error}"),
+            Self::NotChanged { number, file } => write!(
+                formatter,
+                "{file} is not changed by #{number}; 'changes <pr>' lists the files it changes"
+            ),
+            Self::NotInDiff { file, side, line } => write!(
+                formatter,
+                "line {} of {file} ({} side) is not in the diff; a comment goes on a line 'diff' shows with a number on that side",
+                line.number(),
+                side_word(*side)
+            ),
+            Self::EmptyComment => formatter.write_str("the comment is empty"),
+            Self::NoThread(thread) => write!(
+                formatter,
+                "'{thread}' is not a thread id; 'discussion <pr>' lists them"
+            ),
+            Self::Draft(error) => write!(formatter, "{error}"),
+        }
+    }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+strum = { version = "0.28", features = ["derive"] }
+domain = { path = "../domain" }
+index = { path = "../index" }
+session = { path = "../session" }
+io-review = { path = "../io-review" }
+io-config = { path = "../io-config" }
+io-fonts = { path = "../io-fonts" }
+io-lsp = { path = "../io-lsp" }
+cli = { path = "../cli" }
+ui = { path = "../ui" }
+platform = { path = "../platform" }
+regex = "1"
+
+[lints]
+workspace = true

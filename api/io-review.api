@@ -1,0 +1,12 @@
+convert::pub struct ParseReason(String);
+convert::pub fn as_str(&self) -> &str
+pub struct Saved;
+pub struct ReviewStamp(SystemTime);
+pub enum ReviewError { NoRepository(VcsError), Unreadable { file: PathBuf, error: io::Error, }, Unparsable { file: PathBuf, reason: ParseReason, }, CreateDirectory { directory: PathBuf, error: io::Error, }, Write { file: PathBuf, error: io::Error, }, }
+pub struct ReviewStore { directory: PathBuf, }
+pub fn new(root: &Root) -> Result<Self, ReviewError>
+pub fn at(directory: PathBuf) -> Self
+pub fn tree(&self, number: PrNumber) -> PathBuf
+pub fn load(&self, number: PrNumber) -> Result<Review, ReviewError>
+pub fn save(&self, number: PrNumber, review: &Review) -> Result<Saved, ReviewError>
+pub fn stamp(&self, number: PrNumber) -> Option<ReviewStamp>

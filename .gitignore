@@ -1,0 +1,4 @@
+target/
+.review-cache
+result
+.cursor/skills/verify-codemap/artifacts/
