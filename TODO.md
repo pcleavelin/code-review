@@ -39,10 +39,6 @@
 
 ## Inherited from codemap
 
-1. Navigation (`files`, `symbols`, `show`, `search`, `callers`, `callees`, `refs`, `tree`,
-   `roots`) was not carried over to the CLI; the agent reads a pull request's code through
-   `diff` and the tree's path. Port them over `session`'s tree when an agent reviewing through
-   the CLI needs them.
 2. The call graph view was not carried over. Trigger: a pull request whose change is only
    understood by following calls across files.
 3. No GUI scenario harness (`tests/gui.rs`) and no `cargo xtask parity` comparison: both
