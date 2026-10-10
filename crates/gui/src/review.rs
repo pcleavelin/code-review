@@ -15,7 +15,7 @@ use session::{Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName};
 use ui::{Count, Label, Typed};
 
 use crate::app::App;
-use crate::diffs::{DiffJobs, Diffs, SidesKey};
+use crate::diffs::{DiffJobs, Diffs, Loading, SidesKey};
 use crate::field::Which;
 use crate::keys::Going;
 use crate::model::{LineSelection, Model, Tab};
@@ -24,6 +24,7 @@ use crate::panels::View;
 use crate::pictures::{PictureJobs, Pictures};
 use crate::runtime::{Job, Landing, landed};
 use crate::status::{Status, Tone};
+use crate::text::{Counted, Noun};
 use crate::work::{Services, WorkState};
 
 const CONTEXT: Line = Line::new(3);
@@ -308,6 +309,19 @@ impl Reviewing {
     }
 }
 
+pub(crate) struct CopiedLines {
+    pub(crate) text: Label,
+    pub(crate) lines: Count,
+}
+
+fn line_labels(text: &FileText, span: Span) -> Vec<Label> {
+    text.lines(span)
+        .into_iter()
+        .flatten()
+        .map(|line| Label::new(line.as_str()))
+        .collect()
+}
+
 pub(crate) fn merged(mut spans: Vec<Span>) -> Vec<Span> {
     spans.sort();
     let mut out: Vec<Span> = Vec::new();
@@ -377,6 +391,7 @@ pub(crate) enum ReviewAct {
     Reveal(RelativePath, Line),
     StartDraft(DraftOn),
     StartDraftHere,
+    CopyLines,
     SaveDraft,
     CancelDraft,
     RemoveDraft(DraftId),
@@ -420,6 +435,8 @@ pub(crate) enum ReviewStatus {
     LinkCopied(WebLink),
     LinkFailed(Label),
     CommitComment,
+    LinesCopied(Count),
+    NothingToCopy,
 }
 
 impl ReviewStatus {
@@ -436,10 +453,12 @@ impl ReviewStatus {
             | Self::Submitted { .. }
             | Self::LinkOpened(_)
             | Self::LinkCopied(_)
+            | Self::LinesCopied(_)
             | Self::Reloaded => Tone::Done,
             Self::NotOpened
             | Self::NotAChange
             | Self::SelectALine
+            | Self::NothingToCopy
             | Self::NotInDiff
             | Self::EmptyDraft
             | Self::LastChange
@@ -510,6 +529,8 @@ impl fmt::Display for ReviewStatus {
             Self::CommitComment => formatter.write_str(
                 "comments go on the whole pull request's changes: pick 'all changes' first",
             ),
+            Self::LinesCopied(count) => write!(formatter, "copied {}", Counted::new(*count, Noun::Line)),
+            Self::NothingToCopy => formatter.write_str("select lines to copy first"),
             Self::LinkCopied(link) => write!(formatter, "copied {link}"),
             Self::LinkFailed(why) => {
                 write!(formatter, "the browser did not start: {}", why.as_str())
@@ -716,6 +737,53 @@ impl Model {
         })
     }
 
+    pub(crate) fn copied_lines(&self) -> Option<CopiedLines> {
+        let file = self.shown_path()?;
+        let head = self.head_text(&file);
+        let key = SidesKey {
+            commit: self.review.diffs.commit().cloned(),
+            path: file.clone(),
+        };
+        let sides = match self.review.diffs.sides.get(&key) {
+            Some(Loading::Got(sides)) => Some(sides),
+            Some(Loading::Asking | Loading::Failed(_)) | None => None,
+        };
+        let picked = self
+            .review
+            .picked
+            .as_ref()
+            .filter(|picked| picked.file == file)
+            .map(RemovedPick::lines);
+        let lines: Vec<Label> = match (picked, sides) {
+            (Some(span), Some(sides)) => line_labels(sides.old.text(), span),
+            (Some(span), None) => self
+                .review
+                .rows(&file, head)
+                .into_iter()
+                .filter_map(|row| match row {
+                    FileRow::Removed { old, text } if span.contains(old) => {
+                        Some(Label::new(text.as_str()))
+                    }
+                    FileRow::Removed { .. } | FileRow::Head { .. } => None,
+                })
+                .collect(),
+            (None, _) => {
+                let selection = self.nav.lines()?;
+                let span = Span::new(selection.low(), selection.high())?;
+                let new = sides.map(|sides| sides.new.text()).or(head)?;
+                line_labels(new, span)
+            }
+        };
+        (!lines.is_empty()).then(|| CopiedLines {
+            lines: Count::new(lines.len()),
+            text: Label::new(lines.iter().fold(String::new(), |mut text, line| {
+                text.push_str(line.as_str());
+                text.push('\n');
+                text
+            })),
+        })
+    }
+
     pub(crate) fn starts_comment(&self, typed: &Typed) -> bool {
         !typed.as_str().trim().is_empty()
             && self.nav.tab() == Tab::Source
@@ -809,6 +877,13 @@ impl App {
                     DiffLayout::Split => DiffLayout::Unified,
                 };
             }
+            ReviewAct::CopyLines => match self.model.copied_lines() {
+                Some(copied) => {
+                    self.clipboard = ClipboardRequest::Copy(copied.text);
+                    self.model.say(ReviewStatus::LinesCopied(copied.lines));
+                }
+                None => self.model.say(ReviewStatus::NothingToCopy),
+            },
             ReviewAct::CopyLink(link) => {
                 self.clipboard = ClipboardRequest::Copy(Label::new(link.as_str()));
                 self.model.say(ReviewStatus::LinkCopied(link));

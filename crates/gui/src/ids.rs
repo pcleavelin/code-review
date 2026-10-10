@@ -303,6 +303,11 @@ pub(crate) const DRAFT_HERE: Control = Control::new(
     Words::new("comment on the selected line"),
 )
 .keyed(keys::COMMENT);
+pub(crate) const COPY_LINES: Control = Control::new(
+    Element::new("copy-lines"),
+    Words::new("copy the selected lines as the file has them"),
+)
+.keyed(keys::COPY_LINES);
 pub(crate) const DRAFT_REMOVED: Control = Control::new(
     Element::new("draft-removed"),
     Words::new("comment on this removed line"),
@@ -443,6 +448,7 @@ pub(crate) const CONTROLS: &[Control] = &[
     FOLD_UP,
     FOLD_DOWN,
     DRAFT_HERE,
+    COPY_LINES,
     DRAFT_REMOVED,
     DRAFT_FIELD,
     DRAFT_ADD,

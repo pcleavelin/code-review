@@ -277,6 +277,11 @@ pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &Relat
             frame.push(Action::Review(ReviewAct::ViewCommit(None)));
         }
         frame.attach_tip(all);
+        let copy = ids::COPY_LINES.target();
+        if frame.small_button("copy", copy).clicked() {
+            frame.push(Action::Review(ReviewAct::CopyLines));
+        }
+        frame.attach_tip(copy);
         return;
     }
     let seen = model.review.seen(change);
@@ -303,6 +308,7 @@ pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &Relat
             ids::DRAFT_HERE.target(),
             ReviewAct::StartDraftHere,
         ),
+        ("copy", ids::COPY_LINES.target(), ReviewAct::CopyLines),
     ] {
         if frame.small_button(label, target).clicked() {
             frame.push(Action::Review(act));

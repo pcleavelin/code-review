@@ -212,7 +212,11 @@ impl App {
         if keys::going(input, Going::Forward, typing) {
             actions.push(Action::Forward);
         }
-        actions.extend(keys::review_keys(input).into_iter().map(Action::Review));
+        actions.extend(
+            keys::review_keys(input, typing)
+                .into_iter()
+                .map(Action::Review),
+        );
         if typing.is_none() && self.model.starts_comment(typed) {
             actions.push(Action::Review(ReviewAct::StartDraftHere));
         }

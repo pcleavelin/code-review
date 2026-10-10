@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split }
+        $m! { gui: open, deleted, split, copy }
     };
 }
 
@@ -217,6 +217,58 @@ quit
             "DUMP across table off=",
             "DUMP tab=Source focus=Some(\"area\") file=Some(\"src/shapes.rs\")",
             "peek=Some(Sym(SymRef",
+        ],
+    }
+}
+
+pub(crate) fn copy() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/2
+idle
+wait 3
+click-id copy-lines
+wait 2
+click-id cmd
+key v ctrl
+wait 2
+dump
+shot {shots}/head.png
+key u ctrl
+click-id draft-removed@10
+wait 2
+key c ctrl
+wait 2
+click-id cmd
+key v ctrl
+wait 2
+dump
+key u ctrl
+text kept
+key a ctrl
+key c ctrl
+key u ctrl
+key v ctrl
+wait 2
+dump
+click-id layout
+idle
+wait 3
+rect table/6
+drag <<DUMP rect table/6|500,40>> <<DUMP rect table/6|500,72>>
+wait 2
+click-id copy-lines
+wait 2
+dump
+shot {shots}/split.png
+quit
+",
+        shows: &[
+            "status=\"copied 1 line\"",
+            "text=\"    add(area(value), add(value, value)) + add(area(1), area(2))",
+            "text=\"    add(value, value) \"",
+            "DUMP field Command caret=4 first=0 rows=1 text=\"kept\"",
+            "status=\"copied 3 lines\"",
         ],
     }
 }

@@ -44,7 +44,6 @@
    the CLI needs them.
 2. The call graph view was not carried over. Trigger: a pull request whose change is only
    understood by following calls across files.
-4. No copy out of the Source view; ctrl+c/x/v work in text fields only.
 5. Hover requests have no cancellation; one for a word the pointer has left is still
    answered first.
 6. The file browser should sort by type: directories first, then files grouped by extension.
