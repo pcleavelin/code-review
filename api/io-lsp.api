@@ -9,6 +9,7 @@ answer::pub const fn value(self) -> u64
 answer::pub enum RangeEnd { LineStart, Inside, }
 answer::pub struct Outline { pub name: SymbolName, pub kind: OutlineKind, pub selection: Position, pub end: Line, pub range_end: RangeEnd, pub children: Vec<Outline>, }
 answer::pub enum Reply<T> { Given(T), Unanswered, }
+answer::pub enum HoverReply { Given(Option<HoverText>), Cancelled, }
 answer::pub struct CallItem(Value);
 answer::pub fn new(item: Value) -> Self
 answer::pub struct Fragment(String);
@@ -29,6 +30,6 @@ session::pub fn call_items(&mut self, positions: &[DocumentPosition]) -> Vec<Rep
 session::pub fn outgoing_targets(&mut self, items: &[CallItem]) -> Vec<Reply<Vec<Location>>>
 session::pub fn references(&mut self, position: &DocumentPosition) -> Vec<Location>
 session::pub fn incoming_callers(&mut self, position: &DocumentPosition) -> Vec<Location>
-session::pub fn hover(&mut self, position: &DocumentPosition) -> Option<HoverText>
+session::pub fn hover( &mut self, position: &DocumentPosition, cancelled: impl FnMut() -> bool, ) -> HoverReply
 session::pub fn definition(&mut self, position: &DocumentPosition) -> Option<Definition>
 session::pub fn shutdown(mut self)

@@ -6,7 +6,7 @@ use std::time::Duration;
 use domain::{
     Column, FileId, Language, Line, Location, SourceLine, SymbolId, SymbolQuery, TextHash,
 };
-use io_lsp::{Character, DocumentPosition, HoverText};
+use io_lsp::{Character, DocumentPosition, HoverReply, HoverText};
 use ui::{Count, Grid, Label};
 
 use crate::model::Model;
@@ -29,10 +29,10 @@ enum Hovered {
     Answered(Option<HoverText>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Flight {
     Idle,
-    Waiting,
+    Waiting(Probe),
 }
 
 #[derive(Clone, Debug)]
@@ -107,7 +107,7 @@ impl Queries {
                 now
             }
         };
-        if now.saturating_sub(since) >= Self::DELAY && self.flight == Flight::Idle {
+        if now.saturating_sub(since) >= Self::DELAY && !self.in_flight(probe) {
             if self.hovers.len() > Self::MOST_HOVERS.get() {
                 self.hovers.clear();
             }
@@ -123,12 +123,26 @@ impl Queries {
             Some(wanted) if wanted.probe == *probe => wanted.since,
             _ => now,
         };
-        now.saturating_sub(since) >= Self::DELAY && self.flight == Flight::Idle
+        now.saturating_sub(since) >= Self::DELAY && !self.in_flight(probe)
     }
 
-    pub(crate) fn hover_sent(&mut self) {
+    pub(crate) const fn waiting(&self) -> Option<&Probe> {
+        match &self.flight {
+            Flight::Idle => None,
+            Flight::Waiting(probe) => Some(probe),
+        }
+    }
+
+    fn in_flight(&self, probe: &Probe) -> bool {
+        match &self.flight {
+            Flight::Idle => false,
+            Flight::Waiting(waiting) => waiting == probe,
+        }
+    }
+
+    pub(crate) fn hover_sent(&mut self, probe: &Probe) {
         self.asked += Count::new(1);
-        self.flight = Flight::Waiting;
+        self.flight = Flight::Waiting(probe.clone());
     }
 
     pub(crate) fn definition_sent(&mut self, wanted: WantedDefinition) {
@@ -145,10 +159,19 @@ impl Queries {
         self.asked = Count::new(self.asked.get().saturating_sub(1));
     }
 
-    pub(crate) fn hover_answered(&mut self, probe: Probe, text: Option<HoverText>) {
+    pub(crate) fn hover_answered(&mut self, probe: Probe, reply: HoverReply) {
         self.answered();
-        self.flight = Flight::Idle;
-        self.hovers.insert(probe, Hovered::Answered(text));
+        if self.flight == Flight::Waiting(probe.clone()) {
+            self.flight = Flight::Idle;
+        }
+        match reply {
+            HoverReply::Given(text) => {
+                self.hovers.insert(probe, Hovered::Answered(text));
+            }
+            HoverReply::Cancelled => {
+                self.hovers.remove(&probe);
+            }
+        }
     }
 
     pub(crate) fn references_answered(&mut self) {
@@ -173,6 +196,7 @@ impl Queries {
 
     pub(crate) fn server_gone(&mut self) {
         self.hovers.clear();
+        self.flight = Flight::Idle;
         self.asked = Count::ZERO;
         self.want_definition = None;
     }
@@ -346,5 +370,72 @@ impl Model {
                     .find(|candidate| candidate.file() == file)
             })
             .or_else(|| candidates.first().copied())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use domain::RelativePath;
+
+    use super::*;
+
+    fn probe(line: u32) -> Probe {
+        Probe {
+            position: DocumentPosition {
+                file: RelativePath::new("src/lib.rs"),
+                line: Line::new(line),
+                character: Character::new(4),
+            },
+            hash: TextHash::new(7),
+        }
+    }
+
+    fn after(millis: u64) -> Duration {
+        Duration::from_millis(millis)
+    }
+
+    #[test]
+    fn a_word_the_pointer_moves_to_is_asked_while_the_last_one_still_waits() {
+        let (left, now) = (probe(1), probe(2));
+        let mut queries = Queries::default();
+        assert!(matches!(
+            queries.hover_step(&left, after(0)),
+            HoverStep::Wait
+        ));
+        assert!(matches!(
+            queries.hover_step(&left, after(200)),
+            HoverStep::Ask
+        ));
+        queries.hover_sent(&left);
+        assert!(matches!(
+            queries.hover_step(&now, after(250)),
+            HoverStep::Wait
+        ));
+        assert!(queries.asks_now(&now, after(450)));
+        assert!(matches!(
+            queries.hover_step(&now, after(450)),
+            HoverStep::Ask
+        ));
+        queries.hover_sent(&now);
+        assert!(!queries.asks_now(&now, after(900)));
+    }
+
+    #[test]
+    fn a_cancelled_hover_is_forgotten_and_an_answered_one_kept() {
+        let (left, now) = (probe(1), probe(2));
+        let mut queries = Queries::default();
+        queries.hover_step(&left, after(0));
+        queries.hover_step(&left, after(200));
+        queries.hover_sent(&left);
+        queries.hover_step(&now, after(250));
+        queries.hover_step(&now, after(450));
+        queries.hover_sent(&now);
+        queries.hover_answered(left.clone(), HoverReply::Cancelled);
+        assert!(!queries.hovers.contains_key(&left));
+        assert!(!queries.asks_now(&now, after(1000)));
+        queries.hover_answered(now.clone(), HoverReply::Given(None));
+        assert_eq!(queries.hovers.get(&now), Some(&Hovered::Answered(None)));
+        assert_eq!(queries.asked(), Count::ZERO);
+        assert!(queries.asks_now(&now, after(1000)));
     }
 }

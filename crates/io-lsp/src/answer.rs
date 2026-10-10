@@ -67,6 +67,12 @@ pub enum Reply<T> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HoverReply {
+    Given(Option<HoverText>),
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallItem(Value);
 
 impl CallItem {

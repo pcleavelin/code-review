@@ -249,7 +249,7 @@ impl App {
             ui: &self.ui,
             services: &self.services,
         };
-        let parts: [&dyn Dump; 9] = [
+        let parts: [&dyn Dump; 10] = [
             &model.nav,
             &model.review,
             &model.scrolls,
@@ -257,6 +257,7 @@ impl App {
             &model.status,
             &model.fields,
             &model.work,
+            &model.queries,
             &model.palette,
             &model.settings_menu,
         ];

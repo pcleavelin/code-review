@@ -11,12 +11,13 @@ use io_process::{Argument, Process, ProcessError, Program};
 use serde_json::Value;
 
 use crate::answer::{
-    CallItem, Definition, DocumentPosition, HoverText, Outline, Reply, StartError,
+    CallItem, Definition, DocumentPosition, HoverReply, HoverText, Outline, Reply, StartError,
 };
 use crate::convert::{self, Uri};
 use crate::wire::{self, LocationShape, Notice, Outgoing, ProgressKind};
 
 const ANSWER_WAIT: Duration = Duration::from_secs(120);
+const CANCEL_POLL: Duration = Duration::from_millis(10);
 const READY_POLL: Duration = Duration::from_millis(200);
 const QUIET_AFTER: Duration = Duration::from_millis(500);
 const SILENT_START: Duration = Duration::from_secs(3);
@@ -72,6 +73,7 @@ enum ServerStatus {
 pub(crate) enum WhyUnanswered {
     Gone,
     Refused,
+    Cancelled,
 }
 
 #[derive(Debug)]
@@ -180,17 +182,32 @@ impl LspSession {
     }
 
     fn request(&mut self, outgoing: Outgoing) -> Result<Value, WhyUnanswered> {
+        self.request_unless(outgoing, || false)
+    }
+
+    fn request_unless(
+        &mut self,
+        outgoing: Outgoing,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> Result<Value, WhyUnanswered> {
         let id = self.issue(outgoing);
+        let asked = Instant::now();
         loop {
-            let message = self
-                .messages
-                .recv_timeout(ANSWER_WAIT)
-                .ok()
-                .ok_or(WhyUnanswered::Gone)?;
-            if wire::answer_id(&message) == Some(id.value()) {
-                return wire::outcome(message).ok().ok_or(WhyUnanswered::Refused);
+            match self.messages.recv_timeout(CANCEL_POLL) {
+                Ok(message) if wire::answer_id(&message) == Some(id.value()) => {
+                    return wire::outcome(message).ok().ok_or(WhyUnanswered::Refused);
+                }
+                Ok(message) => self.handle(&message),
+                Err(RecvTimeoutError::Disconnected) => return Err(WhyUnanswered::Gone),
+                Err(RecvTimeoutError::Timeout) if asked.elapsed() > ANSWER_WAIT => {
+                    return Err(WhyUnanswered::Gone);
+                }
+                Err(RecvTimeoutError::Timeout) => {}
             }
-            self.handle(&message);
+            if cancelled() {
+                self.notify(Outgoing::cancel(id.value()));
+                return Err(WhyUnanswered::Cancelled);
+            }
         }
     }
 
@@ -377,15 +394,21 @@ impl LspSession {
         callers
     }
 
-    pub fn hover(&mut self, position: &DocumentPosition) -> Option<HoverText> {
-        let answer = self
-            .request(Outgoing::hover(
-                self.uri(&position.file).as_str(),
-                position.line.value(),
-                position.character.value(),
-            ))
-            .ok()?;
-        HoverText::from_parts(&wire::hover_parts(&answer))
+    pub fn hover(
+        &mut self,
+        position: &DocumentPosition,
+        cancelled: impl FnMut() -> bool,
+    ) -> HoverReply {
+        let outgoing = Outgoing::hover(
+            self.uri(&position.file).as_str(),
+            position.line.value(),
+            position.character.value(),
+        );
+        match self.request_unless(outgoing, cancelled) {
+            Ok(answer) => HoverReply::Given(HoverText::from_parts(&wire::hover_parts(&answer))),
+            Err(WhyUnanswered::Cancelled) => HoverReply::Cancelled,
+            Err(WhyUnanswered::Gone | WhyUnanswered::Refused) => HoverReply::Given(None),
+        }
     }
 
     pub fn definition(&mut self, position: &DocumentPosition) -> Option<Definition> {

@@ -49,8 +49,6 @@
    depended on codemap's scenario tables, which were removed with the tours. Port
    `tests/common/gui.rs` and `parity.rs` before the GUI changes again.
 4. No copy out of the Source view; ctrl+c/x/v work in text fields only.
-5. Hover requests have no cancellation; one for a word the pointer has left is still
-   answered first.
 6. The file browser should sort by type: directories first, then files grouped by extension.
 
 ## Deferred
