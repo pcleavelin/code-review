@@ -22,8 +22,10 @@
 6. The Inbox shows open pull requests only and filters by words and standing; there is no
    "review requested from me" or "mine", which need the forge user. Trigger: an inbox too long
    to scan.
-7. Opening a pull request runs `index::build` on its tree in the background but the window
-   starts with a blocking `index::build` of the working copy (codemap's TODO 5 still holds).
+7. The window starts with an empty index and builds one only for an opened pull request's
+   tree, in the background; it never indexes the working copy, though CLAUDE.md (Indexing)
+   says it does until a pull request is opened. The owner decides which is meant: index the
+   working copy in the background at start, or drop that sentence from CLAUDE.md.
 9. A deleted file's view is not virtualised: every removed line is laid out each frame.
 
 10. Pictures are fetched without the forge's token, so a private repository's attachments
