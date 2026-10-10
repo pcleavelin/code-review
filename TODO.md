@@ -46,7 +46,6 @@
    understood by following calls across files.
 5. Hover requests have no cancellation; one for a word the pointer has left is still
    answered first.
-6. The file browser should sort by type: directories first, then files grouped by extension.
 
 ## Deferred
 
