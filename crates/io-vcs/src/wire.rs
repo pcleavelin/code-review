@@ -334,3 +334,50 @@ pub(crate) fn parse_diff(text: &str) -> Vec<WireFile> {
     }
     files
 }
+
+pub(crate) const LINGUIST_GENERATED: &str = "linguist-generated";
+pub(crate) const GITLAB_GENERATED: &str = "gitlab-generated";
+pub(crate) const SET: &str = "set";
+pub(crate) const TRUE: &str = "true";
+pub(crate) const UNSET: &str = "unset";
+pub(crate) const FALSE: &str = "false";
+
+pub(crate) fn check_attributes(commit: &str) -> CommandLine {
+    git(&[
+        "check-attr",
+        "-z",
+        "--stdin",
+        &format!("--source={commit}"),
+        LINGUIST_GENERATED,
+        GITLAB_GENERATED,
+    ])
+}
+
+pub(crate) fn attribute_paths(paths: &[&str]) -> Vec<u8> {
+    paths.iter().fold(Vec::new(), |mut input, path| {
+        input.extend_from_slice(path.as_bytes());
+        input.push(0);
+        input
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireAttribute {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) value: String,
+}
+
+pub(crate) fn parse_attributes(text: &str) -> Vec<WireAttribute> {
+    let mut fields = text.split('\0');
+    let mut attributes = Vec::new();
+    while let (Some(path), Some(name), Some(value)) = (fields.next(), fields.next(), fields.next())
+    {
+        attributes.push(WireAttribute {
+            path: path.to_owned(),
+            name: name.to_owned(),
+            value: value.to_owned(),
+        });
+    }
+    attributes
+}

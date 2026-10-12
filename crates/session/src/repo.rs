@@ -1,9 +1,10 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 
 use domain::{
     Commit, CommitId, Conversation, Decision, Draft, DraftText, FileChange, FileText, Forge, Mark,
-    PrNumber, Progress, PullRequest, RelativePath, Review, Root, Seen, Standing,
+    PrNumber, Progress, Provenance, PullRequest, RelativePath, Review, Root, Seen, Standing,
 };
 use io_forge::{ForgeClient, ForgeError, Submitted, TokenSource};
 use io_review::ReviewStore;
@@ -75,6 +76,7 @@ pub struct Opened {
     pub commits: Vec<Commit>,
     pub review: Review,
     pub tree: PathBuf,
+    pub generated: BTreeSet<RelativePath>,
 }
 
 impl Opened {
@@ -232,9 +234,23 @@ impl Repo {
             .vcs
             .fetched(number)
             .map_err(|error| SessionError::NotOpened(number, error))?;
+        let changes = self.vcs.diff(&fetched.base, &fetched.head)?;
+        let paths: Vec<RelativePath> = changes.iter().map(|change| change.path().clone()).collect();
+        let marked = self.vcs.provenances(&fetched.head, &paths)?;
+        let generated = paths
+            .into_iter()
+            .filter(|path| {
+                marked
+                    .get(path)
+                    .copied()
+                    .unwrap_or(Provenance::Undeclared)
+                    .generated(path)
+            })
+            .collect();
         Ok(Opened {
             number,
-            changes: self.vcs.diff(&fetched.base, &fetched.head)?,
+            changes,
+            generated,
             commits: self.vcs.commits(&fetched.base, &fetched.head)?,
             base: fetched.base,
             head: fetched.head,

@@ -177,7 +177,7 @@ pub(crate) struct Reviewing {
     pub(crate) submitting: Submitting,
     pub(crate) whole: BTreeSet<RelativePath>,
     pub(crate) unfolded: BTreeMap<RelativePath, Vec<Span>>,
-    collapsed: BTreeSet<RelativePath>,
+    toggled: BTreeSet<RelativePath>,
     pub(crate) diffs: Diffs,
     pub(crate) pictures: Pictures,
     pub(crate) logins: Logins,
@@ -203,7 +203,7 @@ impl Reviewing {
             submitting: Submitting::Idle,
             whole: BTreeSet::new(),
             unfolded: BTreeMap::new(),
-            collapsed: BTreeSet::new(),
+            toggled: BTreeSet::new(),
             diffs: Diffs::default(),
             pictures: Pictures::default(),
             logins: Logins::default(),
@@ -249,13 +249,18 @@ impl Reviewing {
             .flat_map(move |opened| opened.review.drafts_at(path))
     }
 
+    pub(crate) fn generated(&self, path: &RelativePath) -> bool {
+        self.opened()
+            .is_some_and(|opened| opened.generated.contains(path))
+    }
+
     pub(crate) fn collapsed(&self, path: &RelativePath) -> bool {
-        self.collapsed.contains(path)
+        self.generated(path) != self.toggled.contains(path)
     }
 
     fn toggle_collapsed(&mut self, path: RelativePath) {
-        if !self.collapsed.remove(&path) {
-            self.collapsed.insert(path);
+        if !self.toggled.remove(&path) {
+            self.toggled.insert(path);
         }
     }
 
@@ -872,7 +877,9 @@ impl App {
             }
             ReviewAct::ToggleCollapsed(path) => self.model.review.toggle_collapsed(path),
             ReviewAct::Uncollapse(path) => {
-                self.model.review.collapsed.remove(&path);
+                if self.model.review.collapsed(&path) {
+                    self.model.review.toggle_collapsed(path);
+                }
             }
             ReviewAct::ScrolledTo(path) => self.model.scrolled_to_file(&path),
             ReviewAct::Unfold(path, span) => {
@@ -1272,7 +1279,7 @@ impl App {
         review.draft = None;
         review.whole.clear();
         review.unfolded.clear();
-        review.collapsed.clear();
+        review.toggled.clear();
         review.diffs.forget();
         review.open = Some(OpenReview {
             web: repo.web(),
@@ -1308,7 +1315,7 @@ impl App {
             review.draft = None;
             review.whole.clear();
             review.unfolded.clear();
-            review.collapsed.clear();
+            review.toggled.clear();
             review.diffs.forget();
             review.open = None;
             self.model.set_tab(Tab::Inbox);

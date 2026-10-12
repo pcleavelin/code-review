@@ -14,7 +14,7 @@ pub use access::{
 };
 pub use diff::{
     ChangeKind, DiffLayout, DiffLine, FileChange, FileRow, Hunk, LineKind, NumberedLine, Paired,
-    Pairing, Removal, RemovedLine,
+    Pairing, Provenance, Removal, RemovedLine,
 };
 pub use link::{Linked, WebLink};
 pub use state::{

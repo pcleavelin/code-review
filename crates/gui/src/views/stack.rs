@@ -359,6 +359,9 @@ fn file_header(model: &Model, frame: &mut Frame<'_>, section: &Section<'_>) {
         format!("  {}", review::kind_word(change.kind()).as_str()),
         WEAK,
     ));
+    if model.review.generated(path) {
+        runs.push(Run::new("  generated", WEAK));
+    }
     runs.push(Run::new(format!("  +{}", change.added()), GREEN));
     runs.push(Run::new(format!(" -{}", change.removed()), RED));
     let drafts = model.review.drafts_in(path).count();

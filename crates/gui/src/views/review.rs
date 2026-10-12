@@ -216,6 +216,9 @@ pub(super) fn changes_window(model: &Model, frame: &mut Frame<'_>) {
         if let Some(old) = change.old_path() {
             runs.push(Run::new(format!("  from {old}"), WEAK));
         }
+        if opened.generated.contains(path) {
+            runs.push(Run::new("  generated", WEAK));
+        }
         let drafts = opened.review.drafts_at(path).count();
         let mut badges = Vec::new();
         if drafts > 0 {

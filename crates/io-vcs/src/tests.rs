@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use domain::{BranchName, ChangeKind, CommitId, Line, PrNumber, RefName, RelativePath, Root};
+use domain::{
+    BranchName, ChangeKind, CommitId, Line, PrNumber, Provenance, RefName, RelativePath, Root,
+};
 use io_process::{Argument, Process, Program};
 
 use crate::{Remote, RemoteUrl, Vcs, VcsError, VcsKind};
@@ -370,4 +372,41 @@ fn a_file_change_between_two_commits_is_that_file_only_and_none_when_it_is_the_s
     );
     assert!(vcs.has_commit(&first));
     assert!(!vcs.has_commit(&CommitId::new("0123456789abcdef0123456789abcdef01234567").unwrap()));
+}
+
+#[test]
+fn attributes_at_the_commit_mark_files_generated_or_handwritten_whatever_the_working_copy_says() {
+    if !available("git") {
+        return;
+    }
+    let repo = Scratch::new("attributes");
+    repo.run("git", &["init", "-q", "-b", "main"]);
+    repo.put(
+        ".gitattributes",
+        "gen/** linguist-generated\nCargo.lock -linguist-generated\n*.bin binary\nmr.rs gitlab-generated\n",
+    );
+    for file in ["gen/a.rs", "Cargo.lock", "logo.bin", "mr.rs", "src/main.rs"] {
+        repo.put(file, "x\n");
+    }
+    commit_all(&repo, "marked");
+    repo.put(".gitattributes", "src/** linguist-generated\n");
+    let vcs = Vcs::detect(&repo.root()).unwrap();
+    let head = Process::run(
+        &Program::new("git"),
+        &[Argument::new("rev-parse"), Argument::new("HEAD")],
+        &repo.0,
+    )
+    .unwrap();
+    let head = CommitId::new(head.stdout.text().trim()).unwrap();
+    let paths: Vec<RelativePath> = ["gen/a.rs", "Cargo.lock", "logo.bin", "mr.rs", "src/main.rs"]
+        .into_iter()
+        .map(RelativePath::new)
+        .collect();
+    let marked = vcs.provenances(&head, &paths).unwrap();
+    let said = |path: &str| marked.get(&RelativePath::new(path)).copied();
+    assert_eq!(said("gen/a.rs"), Some(Provenance::Generated));
+    assert_eq!(said("Cargo.lock"), Some(Provenance::Handwritten));
+    assert_eq!(said("logo.bin"), Some(Provenance::Undeclared));
+    assert_eq!(said("mr.rs"), Some(Provenance::Generated));
+    assert_eq!(said("src/main.rs"), Some(Provenance::Undeclared));
 }

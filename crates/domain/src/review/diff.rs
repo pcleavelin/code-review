@@ -420,3 +420,43 @@ impl FileChange {
         rows
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Provenance {
+    Generated,
+    Handwritten,
+    Undeclared,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileName(&'static str);
+
+const GENERATED_NAMES: [FileName; 14] = [
+    FileName("Cargo.lock"),
+    FileName("package-lock.json"),
+    FileName("npm-shrinkwrap.json"),
+    FileName("pnpm-lock.yaml"),
+    FileName("bun.lock"),
+    FileName("composer.lock"),
+    FileName("Pipfile.lock"),
+    FileName("poetry.lock"),
+    FileName("pdm.lock"),
+    FileName("uv.lock"),
+    FileName("flake.lock"),
+    FileName("deno.lock"),
+    FileName("Package.resolved"),
+    FileName("Gopkg.lock"),
+];
+
+impl Provenance {
+    pub fn generated(self, path: &RelativePath) -> bool {
+        match self {
+            Self::Generated => true,
+            Self::Handwritten => false,
+            Self::Undeclared => {
+                let name = path.as_str().rsplit('/').next().unwrap_or_default();
+                GENERATED_NAMES.iter().any(|known| known.0 == name)
+            }
+        }
+    }
+}

@@ -36,7 +36,7 @@ repo::pub struct RepoName(String);
 repo::pub fn new(text: &str) -> Self
 repo::pub fn as_str(&self) -> &str
 repo::pub fn answers_to(&self, asked: &Self) -> bool
-repo::pub struct Opened { pub number: PrNumber, pub base: CommitId, pub head: CommitId, pub changes: Vec<FileChange>, pub commits: Vec<Commit>, pub review: Review, pub tree: PathBuf, }
+repo::pub struct Opened { pub number: PrNumber, pub base: CommitId, pub head: CommitId, pub changes: Vec<FileChange>, pub commits: Vec<Commit>, pub review: Review, pub tree: PathBuf, pub generated: BTreeSet<RelativePath>, }
 repo::pub fn change(&self, path: &RelativePath) -> Option<&FileChange>
 repo::pub fn seen(&self, change: &FileChange) -> Seen
 repo::pub struct Entry { pub repo: RepoName, pub pull: PullRequest, pub progress: Option<Progress>, pub drafts: Vec<Draft>, pub standing: Standing, }

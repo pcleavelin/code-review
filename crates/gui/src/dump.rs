@@ -175,12 +175,17 @@ impl Dump for Reviewing {
         }
         for change in &opened.changes {
             lines.line(format_args!(
-                "change {} {:?} +{} -{} {:?}",
+                "change {} {:?} +{} -{} {:?}{}",
                 change.path(),
                 change.kind(),
                 change.added(),
                 change.removed(),
-                opened.seen(change)
+                opened.seen(change),
+                if opened.generated.contains(change.path()) {
+                    " generated"
+                } else {
+                    ""
+                }
             ));
         }
         for draft in opened.review.drafts() {

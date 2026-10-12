@@ -433,6 +433,10 @@ click-id change/0
 idle
 wait 3
 rect file-header@notes.md
+rect file-header@old.txt
+click-id collapse@notes.md
+wait 3
+rect file-header@old.txt
 rect draft-removed@old.txt:1
 click-id collapse@old.txt
 wait 3
@@ -451,6 +455,9 @@ quit
             "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 96,",
             "DUMP rect draft-removed@old.txt:1 = Some(",
             "DUMP change notes.md Modified +1 -1 Seen",
+            "DUMP change notes.md Modified +1 -1 Unseen generated",
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 126,",
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 190,",
         ],
     }
 }

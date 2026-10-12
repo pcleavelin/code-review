@@ -1,7 +1,7 @@
 use crate::review::{
     ChangeKind, CodePlace, CommitId, Conversation, DiffLayout, DiffLine, DraftId, DraftOn,
-    DraftText, FileChange, FileRow, Hunk, LineKind, Moment, Pairing, PrNumber, Prose, RepoSlug,
-    Review, Seen, Side, Standing, Thread, ThreadId, ThreadState,
+    DraftText, FileChange, FileRow, Hunk, LineKind, Moment, Pairing, PrNumber, Prose, Provenance,
+    RepoSlug, Review, Seen, Side, Standing, Thread, ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -435,4 +435,14 @@ fn a_file_draws_its_open_and_resolved_threads_but_not_outdated_ones() {
         .map(|thread| thread.id.as_str())
         .collect();
     assert_eq!(drawn, vec!["open", "settled"]);
+}
+
+#[test]
+fn a_lock_file_is_generated_unless_its_attributes_say_it_is_handwritten() {
+    let generated = |marking: Provenance, path: &str| marking.generated(&RelativePath::new(path));
+    assert!(generated(Provenance::Undeclared, "tools/Cargo.lock"));
+    assert!(!generated(Provenance::Undeclared, "docs/Cargo.lock.md"));
+    assert!(!generated(Provenance::Undeclared, "src/lib.rs"));
+    assert!(!generated(Provenance::Handwritten, "Cargo.lock"));
+    assert!(generated(Provenance::Generated, "src/lib.rs"));
 }
