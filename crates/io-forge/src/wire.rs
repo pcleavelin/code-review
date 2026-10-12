@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use domain::{Decision, DraftId, ForgeKind, Linked, NoteKind, Side, Span, ThreadState};
+use domain::{Decision, DraftId, ForgeKind, Linked, Side, Span, ThreadState};
 use io_process::Captured;
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
@@ -341,6 +341,7 @@ const CREATED: &str = "/created_at";
 const SUBMITTED: &str = "/submitted_at";
 const UPDATED: &str = "/updated_at";
 const ID: &str = "/id";
+const REVIEW_ID: &str = "/pull_request_review_id";
 
 fn text_at(value: &Value, pointer: &str) -> Option<String> {
     value.pointer(pointer)?.as_str().map(str::to_owned)
@@ -423,11 +424,11 @@ impl ReviewState {
             .find(|state| state.name() == text)
     }
 
-    const fn kind(state: Option<Self>) -> NoteKind {
+    const fn decision(state: Option<Self>) -> Decision {
         match state {
-            Some(Self::Approved) => NoteKind::Approved,
-            Some(Self::ChangesRequested | Self::RequestChanges) => NoteKind::ChangesRequested,
-            Some(Self::Pending) | None => NoteKind::Comment,
+            Some(Self::Approved) => Decision::Approve,
+            Some(Self::ChangesRequested | Self::RequestChanges) => Decision::RequestChanges,
+            Some(Self::Pending) | None => Decision::Comment,
         }
     }
 }
@@ -456,7 +457,6 @@ pub(crate) struct WireNote {
     pub(crate) author: String,
     pub(crate) body: String,
     pub(crate) when: String,
-    pub(crate) kind: NoteKind,
     pub(crate) link: Option<String>,
 }
 
@@ -473,11 +473,19 @@ pub(crate) struct WireThread {
     pub(crate) place: Option<WirePlace>,
     pub(crate) state: ThreadState,
     pub(crate) notes: Vec<WireNote>,
+    pub(crate) submission: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireSubmission {
+    pub(crate) id: String,
+    pub(crate) decision: Decision,
+    pub(crate) note: WireNote,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WireReviews {
-    pub(crate) threads: Vec<WireThread>,
+    pub(crate) submissions: Vec<WireSubmission>,
     pub(crate) with_comments: Vec<u64>,
 }
 
@@ -487,14 +495,14 @@ pub(crate) struct WireCodeComment {
     pub(crate) place: WirePlace,
     pub(crate) resolved: bool,
     pub(crate) note: WireNote,
+    pub(crate) submission: Option<u64>,
 }
 
-fn note(value: &Value, author: &str, when: &str, kind: NoteKind) -> WireNote {
+fn note(value: &Value, author: &str, when: &str) -> WireNote {
     WireNote {
         author: text_at(value, author).unwrap_or_default(),
         body: text_at(value, BODY).unwrap_or_default(),
         when: text_at(value, when).unwrap_or_default(),
-        kind,
         link: text_at(value, "/html_url").or_else(|| {
             value
                 .pointer(ID)
@@ -675,6 +683,7 @@ fn on_pull(id: String, note: WireNote) -> WireThread {
         place: None,
         state: ThreadState::Open,
         notes: vec![note],
+        submission: None,
     }
 }
 
@@ -688,7 +697,7 @@ pub(crate) fn parse_issue_comments(items: &[Value]) -> Option<Vec<WireThread>> {
         .map(|comment| {
             Some(on_pull(
                 ThreadPrefix::Issue.id(comment.pointer(ID)?.as_u64()?),
-                note(comment, USER, CREATED, NoteKind::Comment),
+                note(comment, USER, CREATED),
             ))
         })
         .collect()
@@ -705,15 +714,20 @@ pub(crate) fn parse_reviews(items: &[Value]) -> Option<WireReviews> {
         if review.pointer("/comments_count").and_then(Value::as_u64) != Some(0) {
             reviews.with_comments.push(id);
         }
-        let kind = ReviewState::kind(state);
-        let note = note(review, USER, SUBMITTED, kind);
-        if kind != NoteKind::Comment || !note.body.trim().is_empty() {
-            reviews
-                .threads
-                .push(on_pull(ThreadPrefix::Review.id(id), note));
-        }
+        reviews.submissions.push(WireSubmission {
+            id: ThreadPrefix::Review.id(id),
+            decision: ReviewState::decision(state),
+            note: note(review, USER, SUBMITTED),
+        });
     }
     Some(reviews)
+}
+
+fn submission_of(comment: &Value) -> Option<String> {
+    comment
+        .pointer(REVIEW_ID)
+        .and_then(Value::as_u64)
+        .map(|review| ThreadPrefix::Review.id(review))
 }
 
 pub(crate) fn parse_github_code_threads(items: &[Value]) -> Option<Vec<WireThread>> {
@@ -746,13 +760,14 @@ pub(crate) fn parse_github_code_threads(items: &[Value]) -> Option<Vec<WireThrea
                     ThreadState::Outdated
                 },
                 notes: Vec::new(),
+                submission: submission_of(comment),
             });
             threads.len() - 1
         };
         threads
             .get_mut(index)?
             .notes
-            .push(note(comment, USER, CREATED, NoteKind::Comment));
+            .push(note(comment, USER, CREATED));
         thread_of.insert(id, index);
     }
     Some(threads)
@@ -804,8 +819,9 @@ pub(crate) fn parse_discussions(items: &[Value], head_commit: &str) -> Option<Ve
             },
             notes: notes
                 .iter()
-                .map(|note_value| note(note_value, AUTHOR, CREATED, NoteKind::Comment))
+                .map(|note_value| note(note_value, AUTHOR, CREATED))
                 .collect(),
+            submission: None,
         });
     }
     Some(threads)
@@ -832,7 +848,8 @@ pub(crate) fn parse_forgejo_comments(items: &[Value]) -> Option<Vec<WireCodeComm
                 resolved: comment
                     .pointer("/resolver")
                     .is_some_and(|resolver| !resolver.is_null()),
-                note: note(comment, USER, CREATED, NoteKind::Comment),
+                note: note(comment, USER, CREATED),
+                submission: comment.pointer(REVIEW_ID).and_then(Value::as_u64),
             })
         })
         .collect()
@@ -866,6 +883,9 @@ pub(crate) fn forgejo_threads(mut comments: Vec<WireCodeComment>) -> Vec<WireThr
                 place: Some(comment.place),
                 state,
                 notes: vec![comment.note],
+                submission: comment
+                    .submission
+                    .map(|review| ThreadPrefix::Review.id(review)),
             });
         }
     }

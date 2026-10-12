@@ -76,6 +76,36 @@ pub(crate) const DESCRIPTION: &str = "Squares the inputs before adding them.
 |---|---:|---|
 | 3 | 9 | the square grows faster than the sum once the input passes two, which is the point of this change; measured on the shapes benchmark, see https://example.com/bench |";
 
+const ISSUE_COMMENTS: &str = r#"[
+    {"id": 501, "user": {"login": "carol"}, "body": "Can this land before the release?",
+     "created_at": "2026-01-02T09:00:00Z"}
+]"#;
+
+const REVIEWS: &str = r#"[
+    {"id": 20, "user": {"login": "dave"}, "body": "Two things before this goes in.",
+     "state": "REQUEST_CHANGES", "comments_count": 2, "submitted_at": "2026-01-02T10:00:00Z",
+     "html_url": "https://forge.test/owner/repo/pull/1#pullrequestreview-20"},
+    {"id": 21, "user": {"login": "ann"}, "body": "", "state": "COMMENT", "comments_count": 1,
+     "submitted_at": "2026-01-02T11:00:00Z"},
+    {"id": 22, "user": {"login": "erin"}, "body": "", "state": "APPROVED", "comments_count": 0,
+     "submitted_at": "2026-01-02T12:00:00Z"}
+]"#;
+
+const REVIEW_20_COMMENTS: &str = r#"[
+    {"id": 300, "body": "Why square here?", "user": {"login": "dave"}, "path": "src/lib.rs",
+     "position": 10, "original_position": 0, "resolver": null, "pull_request_review_id": 20,
+     "created_at": "2026-01-02T09:58:00Z"},
+    {"id": 301, "body": "Say how big in numbers.", "user": {"login": "dave"}, "path": "notes.md",
+     "position": 3, "original_position": 0, "resolver": null, "pull_request_review_id": 20,
+     "created_at": "2026-01-02T09:59:00Z"}
+]"#;
+
+const REVIEW_21_COMMENTS: &str = r#"[
+    {"id": 310, "body": "It makes the sum grow faster.", "user": {"login": "ann"},
+     "path": "src/lib.rs", "position": 10, "original_position": 0, "resolver": null,
+     "pull_request_review_id": 21, "created_at": "2026-01-02T11:00:00Z"}
+]"#;
+
 pub(crate) const FORGES: &str = "review forges 1\nclient gitlab.test cid123\n";
 const DEVICE: &str = r#"{"device_code":"devsecret","user_code":"ABCD-1234","verification_uri":"https://gitlab.test/oauth/device","expires_in":300,"interval":1}"#;
 const PENDING: &str = r#"{"error":"authorization_pending"}"#;
@@ -308,8 +338,10 @@ pub(crate) fn fixture(name: &str) -> Fixture {
         &[
             ("pulls.json", &format!("[{pull}]")),
             ("pulls-1.json", &pull),
-            ("issues-1-comments.json", "[]"),
-            ("pulls-1-reviews.json", "[]"),
+            ("issues-1-comments.json", ISSUE_COMMENTS),
+            ("pulls-1-reviews.json", REVIEWS),
+            ("pulls-1-reviews-20-comments.json", REVIEW_20_COMMENTS),
+            ("pulls-1-reviews-21-comments.json", REVIEW_21_COMMENTS),
             ("device.json", DEVICE),
             ("poll-1.json", PENDING),
             ("poll-1.status", "400"),

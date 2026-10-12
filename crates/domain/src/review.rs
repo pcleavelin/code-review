@@ -22,7 +22,8 @@ pub use state::{
     Standing,
 };
 pub use talk::{
-    CodePlace, Commit, Conversation, Moment, Note, NoteKind, Prose, Thread, ThreadId, ThreadState,
+    Block, CodePlace, Commit, Conversation, Moment, Note, Prose, Submission, SubmissionId, Thread,
+    ThreadId, ThreadState,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

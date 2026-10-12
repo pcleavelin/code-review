@@ -311,13 +311,19 @@ review::talk::pub struct Commit { pub id: CommitId, pub author: Login, pub when:
 review::talk::pub struct ThreadId(String);
 review::talk::pub fn new(text: &str) -> Option<Self>
 review::talk::pub fn as_str(&self) -> &str
-review::talk::pub enum NoteKind { Comment, Approved, ChangesRequested, }
-review::talk::pub struct Note { pub author: Login, pub body: Prose, pub when: Moment, pub kind: NoteKind, pub link: Option<WebLink>, }
+review::talk::pub struct Note { pub author: Login, pub body: Prose, pub when: Moment, pub link: Option<WebLink>, }
 review::talk::pub struct CodePlace { pub file: RelativePath, pub side: Side, pub line: Line, }
 review::talk::pub enum ThreadState { Open, Resolved, Outdated, }
-review::talk::pub struct Thread { pub id: ThreadId, pub place: Option<CodePlace>, pub state: ThreadState, pub notes: Vec<Note>, }
+review::talk::pub struct SubmissionId(String);
+review::talk::pub fn new(text: &str) -> Option<Self>
+review::talk::pub fn as_str(&self) -> &str
+review::talk::pub struct Submission { pub id: SubmissionId, pub author: Login, pub decision: Decision, pub summary: Prose, pub when: Moment, pub link: Option<WebLink>, }
+review::talk::pub struct Thread { pub id: ThreadId, pub place: Option<CodePlace>, pub state: ThreadState, pub notes: Vec<Note>, pub submission: Option<SubmissionId>, }
 review::talk::pub fn started(&self) -> Option<&Moment>
-review::talk::pub struct Conversation { pub description: Prose, pub threads: Vec<Thread>, pub signed_pictures: Vec<SignedPicture>, }
+review::talk::pub enum Block<'talk> { Submitted { submission: &'talk Submission, threads: Vec<&'talk Thread>, }, Alone(&'talk Thread), }
+review::talk::pub fn when(&self) -> Option<&Moment>
+review::talk::pub struct Conversation { pub description: Prose, pub submissions: Vec<Submission>, pub threads: Vec<Thread>, pub signed_pictures: Vec<SignedPicture>, }
+review::talk::pub fn blocks(&self) -> Vec<Block<'_>>
 review::talk::pub fn on_code(&self) -> impl Iterator<Item = &Thread>
 review::talk::pub fn on_pull(&self) -> impl Iterator<Item = &Thread>
 review::talk::pub fn drawn_in<'talk>( &'talk self, file: &'talk RelativePath, ) -> impl Iterator<Item = &'talk Thread>

@@ -1,6 +1,6 @@
 use domain::{
-    ChangeKind, Decision, Draft, DraftOn, Note, NoteKind, RelativePath, Seen, Side, Span, Thread,
-    ThreadState,
+    Block, ChangeKind, Conversation, Decision, Draft, DraftOn, Login, Note, RelativePath, Seen,
+    Side, Span, Submission, Thread, ThreadState,
 };
 use ui::{Count, Icon, Label, Run};
 
@@ -367,28 +367,97 @@ pub(super) fn link_buttons(frame: &mut Frame<'_>, link: Option<WebLink>, key: &L
 
 fn note_head(model: &Model, frame: &mut Frame<'_>, note: &Note, key: &Label) {
     frame.start(Container::FillRow);
-    let author = ids::AUTHOR.with(key);
+    author_button(model, frame, &note.author, key);
+    frame.label_runs(vec![Run::new(format!("  {}", note.when), WEAK)]);
+    link_buttons(frame, note.link.clone(), key);
+    frame.finish();
+}
+
+fn author_button(model: &Model, frame: &mut Frame<'_>, author: &Login, key: &Label) {
+    let target = ids::AUTHOR.with(key);
     if frame
-        .inline_button(vec![Run::new(note.author.as_str(), ACCENT)], author)
+        .inline_button(vec![Run::new(author.as_str(), ACCENT)], target)
         .clicked()
         && let Some(link) = model
             .review
             .open
             .as_ref()
-            .and_then(|open| open.link(&Linked::User(note.author.clone())))
+            .and_then(|open| open.link(&Linked::User(author.clone())))
     {
         frame.push(Action::Review(ReviewAct::OpenLink(link)));
     }
-    frame.attach_tip(author);
-    let mut runs = vec![Run::new(format!("  {}", note.when), WEAK)];
-    match note.kind {
-        NoteKind::Comment => {}
-        NoteKind::Approved => runs.push(Run::new("  approved", GREEN)),
-        NoteKind::ChangesRequested => runs.push(Run::new("  requested changes", RED)),
+    frame.attach_tip(target);
+}
+
+fn decision_run(decision: Decision) -> Run {
+    match decision {
+        Decision::Approve => Run::new("  approved", GREEN),
+        Decision::RequestChanges => Run::new("  requested changes", RED),
+        Decision::Comment => Run::new("  commented", WEAK),
     }
-    frame.label_runs(runs);
-    link_buttons(frame, note.link.clone(), key);
+}
+
+fn submission_box(
+    model: &Model,
+    frame: &mut Frame<'_>,
+    talk: &Conversation,
+    submission: &Submission,
+    threads: &[&Thread],
+) {
+    let key = Label::new(format!("submission/{}", submission.id));
+    frame.start(Container::Comment {
+        look: CommentLook::Thread,
+        id: ids::thread_box().with(key.as_str()),
+    });
+    frame.start(Container::FillRow);
+    author_button(model, frame, &submission.author, &key);
+    frame.label_runs(vec![
+        decision_run(submission.decision),
+        Run::new(format!("  {}", submission.when), WEAK),
+    ]);
+    link_buttons(frame, submission.link.clone(), &key);
     frame.finish();
+    if !submission.summary.is_empty() {
+        markdown(model, frame, &submission.summary, &key);
+    }
+    for thread in threads {
+        place_row(frame, talk, thread);
+        thread_box(model, frame, thread);
+    }
+    frame.finish();
+}
+
+fn place_row(frame: &mut Frame<'_>, talk: &Conversation, thread: &Thread) {
+    let Some(place) = &thread.place else {
+        return;
+    };
+    let position = talk
+        .threads
+        .iter()
+        .position(|known| known.id == thread.id)
+        .unwrap_or_default();
+    let target = ids::THREAD_ROW.nth(Count::new(position));
+    let outdated = thread.state == ThreadState::Outdated;
+    let runs = vec![
+        Run::new(
+            format!(
+                "{}:{}{}",
+                place.file,
+                place.line.number(),
+                side_word(place.side).as_str()
+            ),
+            if outdated { WEAK } else { ACCENT },
+        ),
+        Run::new(state_word(thread.state), WEAK),
+    ];
+    if outdated {
+        frame.text_line(runs);
+    } else {
+        if frame.row(runs, target, Chosen::Plain).clicked() {
+            frame.push(Action::Review(ReviewAct::OpenPlace(place.clone())));
+        }
+        frame.attach_tip(target);
+    }
 }
 
 fn notes(model: &Model, frame: &mut Frame<'_>, thread: &Thread) {
@@ -632,10 +701,16 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     } else {
         markdown(model, frame, &talk.description, &Label::new("description"));
     }
+    let blocks = talk.blocks();
+    let reviews = blocks
+        .iter()
+        .filter(|block| matches!(block, Block::Submitted { .. }))
+        .count();
     frame.start(Container::ToolbarSmall);
     frame.label(
         format!(
-            "Conversation  {}",
+            "Conversation  {}, {}",
+            Counted::new(Count::new(reviews), Noun::Submission),
             Counted::new(Count::new(talk.threads.len()), Noun::Thread)
         ),
         ACCENT,
@@ -646,35 +721,23 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     }
     frame.attach_tip(refresh);
     frame.finish();
-    if talk.threads.is_empty() {
+    if blocks.is_empty() {
         frame.note("nobody has commented yet", WEAK, Padding::Step);
     }
-    for (position, thread) in talk.threads.iter().enumerate() {
-        if let Some(place) = &thread.place {
-            let target = ids::THREAD_ROW.nth(Count::new(position));
-            let outdated = thread.state == ThreadState::Outdated;
-            let runs = vec![
-                Run::new(
-                    format!(
-                        "{}:{}{}",
-                        place.file,
-                        place.line.number(),
-                        side_word(place.side).as_str()
-                    ),
-                    if outdated { WEAK } else { ACCENT },
-                ),
-                Run::new(state_word(thread.state), WEAK),
-            ];
-            if outdated {
-                frame.text_line(runs);
-            } else {
-                if frame.row(runs, target, Chosen::Plain).clicked() {
-                    frame.push(Action::Review(ReviewAct::OpenPlace(place.clone())));
-                }
-                frame.attach_tip(target);
+    for (position, block) in blocks.iter().enumerate() {
+        if position > 0 {
+            frame.step_gap();
+        }
+        match block {
+            Block::Submitted {
+                submission,
+                threads,
+            } => submission_box(model, frame, talk, submission, threads),
+            Block::Alone(thread) => {
+                place_row(frame, talk, thread);
+                thread_box(model, frame, thread);
             }
         }
-        thread_box(model, frame, thread);
     }
 }
 

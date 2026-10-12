@@ -2,6 +2,7 @@ use std::fmt::{self, Write as _};
 use std::io::{self, Write as _};
 use std::iter;
 
+use domain::{Block, Conversation};
 use platform::ScriptLine;
 use ui::{Axis, Id, Px, Ui};
 
@@ -102,6 +103,41 @@ impl Dump for Nav {
     }
 }
 
+fn dump_conversation(conversation: &Conversation, lines: &mut DumpLines) {
+    for thread in &conversation.threads {
+        let place = thread
+            .place
+            .as_ref()
+            .map(|place| format!("{}:{}:{:?}", place.file, place.line.number(), place.side));
+        lines.line(format_args!(
+            "thread {} {:?} notes={} at={}",
+            thread.id,
+            thread.state,
+            thread.notes.len(),
+            Optional(place)
+        ));
+    }
+    for block in conversation.blocks() {
+        match block {
+            Block::Submitted {
+                submission,
+                threads,
+            } => lines.line(format_args!(
+                "block submitted {} {} {:?} [{}]",
+                submission.id,
+                submission.author,
+                submission.decision,
+                threads
+                    .iter()
+                    .map(|thread| thread.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )),
+            Block::Alone(thread) => lines.line(format_args!("block alone {}", thread.id)),
+        }
+    }
+}
+
 impl Dump for Reviewing {
     fn dump(&self, _: &Context<'_>, lines: &mut DumpLines) {
         let inbox = match &self.inbox {
@@ -155,18 +191,7 @@ impl Dump for Reviewing {
         };
         lines.line(format_args!("talk {talk}"));
         if let Some(conversation) = open.conversation() {
-            for thread in &conversation.threads {
-                let place = thread.place.as_ref().map(|place| {
-                    format!("{}:{}:{:?}", place.file, place.line.number(), place.side)
-                });
-                lines.line(format_args!(
-                    "thread {} {:?} notes={} at={}",
-                    thread.id,
-                    thread.state,
-                    thread.notes.len(),
-                    Optional(place)
-                ));
-            }
+            dump_conversation(conversation, lines);
         }
         for change in &opened.changes {
             lines.line(format_args!(

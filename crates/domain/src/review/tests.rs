@@ -1,7 +1,8 @@
 use crate::review::{
-    ChangeKind, CodePlace, CommitId, Conversation, DiffLayout, DiffLine, DraftId, DraftOn,
-    DraftText, FileChange, FileRow, Hunk, LineKind, Moment, Pairing, PrNumber, Prose, RepoSlug,
-    Review, Seen, Side, Standing, Thread, ThreadId, ThreadState,
+    Block, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLayout, DiffLine, DraftId,
+    DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login, Moment, Note, Pairing,
+    PrNumber, Prose, RepoSlug, Review, Seen, Side, Standing, Submission, SubmissionId, Thread,
+    ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -369,6 +370,7 @@ fn thread_on(id: &str, file: &str, state: ThreadState) -> Thread {
         }),
         state,
         notes: Vec::new(),
+        submission: None,
     }
 }
 
@@ -382,6 +384,7 @@ fn a_file_draws_its_open_and_resolved_threads_but_not_outdated_ones() {
             thread_on("settled", "src/lib.rs", ThreadState::Resolved),
             thread_on("elsewhere", "src/main.rs", ThreadState::Open),
         ],
+        submissions: Vec::new(),
         signed_pictures: Vec::new(),
     };
     let file = RelativePath::new("src/lib.rs");
@@ -390,4 +393,80 @@ fn a_file_draws_its_open_and_resolved_threads_but_not_outdated_ones() {
         .map(|thread| thread.id.as_str())
         .collect();
     assert_eq!(drawn, vec!["open", "settled"]);
+}
+
+fn said(id: &str, author: &str, when: &str) -> Thread {
+    Thread {
+        id: ThreadId::new(id).unwrap(),
+        place: None,
+        state: ThreadState::Open,
+        notes: vec![Note {
+            author: Login::new(author),
+            body: Prose::new("text"),
+            when: Moment::new(when),
+            link: None,
+        }],
+        submission: None,
+    }
+}
+
+fn in_submission(mut thread: Thread, submission: &str) -> Thread {
+    thread.submission = SubmissionId::new(submission);
+    thread
+}
+
+fn submission(id: &str, decision: Decision, summary: &str, when: &str) -> Submission {
+    Submission {
+        id: SubmissionId::new(id).unwrap(),
+        author: Login::new("dave"),
+        decision,
+        summary: Prose::new(summary),
+        when: Moment::new(when),
+        link: None,
+    }
+}
+
+fn shape(conversation: &Conversation) -> Vec<String> {
+    conversation
+        .blocks()
+        .iter()
+        .map(|block| match block {
+            Block::Submitted {
+                submission,
+                threads,
+            } => {
+                let ids: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+                format!("{}[{}]", submission.id, ids.join(" "))
+            }
+            Block::Alone(thread) => thread.id.to_string(),
+        })
+        .collect()
+}
+
+#[test]
+fn a_submission_gathers_the_threads_started_in_it_and_blocks_follow_time() {
+    let conversation = Conversation {
+        submissions: vec![
+            submission("r1", Decision::Comment, "", "2026-05-01T10:30:00Z"),
+            submission("r2", Decision::Approve, "", "2026-05-01T12:00:00Z"),
+            submission("r3", Decision::Comment, "", "2026-05-01T11:00:00Z"),
+            submission(
+                "r4",
+                Decision::RequestChanges,
+                "split it",
+                "2026-05-01T08:00:00Z",
+            ),
+        ],
+        threads: vec![
+            in_submission(said("t1", "dave", "2026-05-01T10:00:00Z"), "r1"),
+            said("issue", "carol", "2026-05-01T09:00:00Z"),
+            in_submission(said("t2", "dave", "2026-05-01T10:01:00Z"), "r1"),
+            in_submission(said("lost", "octo", "2026-05-01T07:00:00Z"), "pending"),
+        ],
+        ..Conversation::default()
+    };
+    assert_eq!(
+        shape(&conversation),
+        vec!["lost", "r4[]", "issue", "r1[t1 t2]", "r2[]"]
+    );
 }

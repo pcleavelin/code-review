@@ -5,8 +5,8 @@ use std::path::Path;
 
 use clap::{Args, CommandFactory, Parser};
 use domain::{
-    ChangeKind, Conversation, Decision, Depth, Draft, FileChange, ForgeHost, Index, Line, LineKind,
-    Location, Mark, NoteKind, PrNumber, Program, Progress, Review, Seen, Side, SourceFile,
+    Block, ChangeKind, Conversation, Decision, Depth, Draft, FileChange, ForgeHost, Index, Line,
+    LineKind, Location, Mark, PrNumber, Program, Progress, Review, Seen, Side, SourceFile,
     SourceLine, Span, Standing, Symbol, SymbolId, Thread, ThreadState, WebLink,
 };
 use session::{DeviceAuthorization, Entry, Forgotten, Opened, Pinned, PullAddress, RepoName};
@@ -457,11 +457,11 @@ pub(crate) fn unpinned(output: &mut Output, name: &RepoName) {
     );
 }
 
-const fn note_word(kind: NoteKind) -> &'static str {
-    match kind {
-        NoteKind::Comment => "",
-        NoteKind::Approved => " approved",
-        NoteKind::ChangesRequested => " requested changes",
+const fn decision_word(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Comment => "commented",
+        Decision::Approve => "approved",
+        Decision::RequestChanges => "requested changes",
     }
 }
 
@@ -473,7 +473,7 @@ const fn thread_word(state: ThreadState) -> &'static str {
     }
 }
 
-fn thread(output: &mut Output, thread: &Thread) {
+fn thread(output: &mut Output, thread: &Thread, indent: &str) {
     let place = thread.place.as_ref().map_or_else(String::new, |place| {
         format!(
             " on {}:{}{}",
@@ -487,20 +487,14 @@ fn thread(output: &mut Output, thread: &Thread) {
     });
     write_line!(
         output,
-        "thread {}{place}{}",
+        "{indent}thread {}{place}{}",
         thread.id,
         thread_word(thread.state)
     );
     for note in &thread.notes {
-        write_line!(
-            output,
-            "  {} {}{}:",
-            note.when,
-            note.author,
-            note_word(note.kind)
-        );
+        write_line!(output, "{indent}  {} {}:", note.when, note.author);
         for line in note.body.as_str().lines() {
-            write_line!(output, "    {line}");
+            write_line!(output, "{indent}    {line}");
         }
     }
 }
@@ -512,9 +506,30 @@ pub(crate) fn discussion(output: &mut Output, conversation: &Conversation) {
     for line in conversation.description.as_str().lines() {
         write_line!(output, "{line}");
     }
-    for each in &conversation.threads {
+    for block in conversation.blocks() {
         write_line!(output, "");
-        thread(output, each);
+        match block {
+            Block::Alone(alone) => thread(output, alone, ""),
+            Block::Submitted {
+                submission,
+                threads,
+            } => {
+                write_line!(
+                    output,
+                    "{} {} {} ({})",
+                    submission.author,
+                    decision_word(submission.decision),
+                    submission.when,
+                    submission.id
+                );
+                for line in submission.summary.as_str().lines() {
+                    write_line!(output, "  {line}");
+                }
+                for each in threads {
+                    thread(output, each, "  ");
+                }
+            }
+        }
     }
 }
 

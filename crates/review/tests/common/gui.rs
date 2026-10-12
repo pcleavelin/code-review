@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login }
+        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login, submissions }
     };
 }
 
@@ -255,7 +255,7 @@ click-id layout
 idle
 wait 3
 rect table/6
-drag <<DUMP rect table/6|500,40>> <<DUMP rect table/6|500,72>>
+drag <<DUMP rect table/6|500,24>> <<DUMP rect table/6|500,56>>
 wait 2
 click-id copy-lines
 wait 2
@@ -357,6 +357,21 @@ quit
             "stage=gitlab.test device code=ABCD-1234 page=https://gitlab.test/oauth/device",
             "DUMP login sites=[gitlab.test=in forgejo.test=in] stage=none",
             "DUMP login sites=[gitlab.test=in forgejo.test=out] stage=none",
+        ],
+    }
+}
+
+pub(crate) fn submissions() -> Scenario {
+    Scenario {
+        script: "OPEN
+dump
+shot {shots}/submissions.png
+quit
+",
+        shows: &[
+            "DUMP block alone issue-501",
+            "DUMP block submitted review-20 dave RequestChanges [300 301]",
+            "DUMP block submitted review-22 erin Approve []",
         ],
     }
 }

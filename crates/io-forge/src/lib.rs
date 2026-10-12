@@ -536,6 +536,7 @@ impl ForgeClient {
         let api = self.api();
         let number = pull.number.get();
         let mut signed = Vec::new();
+        let mut submissions = Vec::new();
         let threads = match self.forge.kind() {
             ForgeKind::GitLab => self.read_pages(&api, &api.discussions(number), |items| {
                 wire::parse_discussions(items, pull.head_commit.as_str())
@@ -553,7 +554,7 @@ impl ForgeClient {
                     self.read_pages(&api, &api.reviews(number), |items| {
                         Some((wire::parse_reviews(items)?, wire::signed_in_page(items)))
                     })?;
-                threads.extend(reviews.threads);
+                submissions = reviews.submissions;
                 signed.extend(review_signed);
                 let (code_threads, code_signed) =
                     self.read_pages(&api, &api.review_comments(number), |items| {
@@ -581,7 +582,7 @@ impl ForgeClient {
                     wire::parse_issue_comments,
                 )?;
                 let reviews = self.read_pages(&api, &api.reviews(number), wire::parse_reviews)?;
-                threads.extend(reviews.threads);
+                submissions = reviews.submissions;
                 let mut comments = Vec::new();
                 for review in reviews.with_comments {
                     comments.extend(self.read_pages(
@@ -611,7 +612,7 @@ impl ForgeClient {
             }
             description = Prose::new(&api.absolute_uploads(description.as_str()));
         }
-        convert::conversation(&description, &threads, &signed)
+        convert::conversation(&description, &submissions, &threads, &signed)
             .ok_or_else(|| ForgeError::Malformed(ResponseBody::default()))
     }
 

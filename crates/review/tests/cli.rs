@@ -29,7 +29,8 @@ scenarios!(
     pinning,
     navigation,
     since_seen,
-    login
+    login,
+    discussion
 );
 
 struct Fixture {
@@ -55,6 +56,16 @@ fn git(directory: &Path, arguments: &[&str]) {
         "git {arguments:?}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn git_output(directory: &Path, arguments: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(arguments)
+        .current_dir(directory)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {arguments:?}");
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 fn put(directory: &Path, name: &str, text: &str) {
@@ -161,6 +172,10 @@ case "$url" in
   *) count=$(( $(cat "$api/polls" 2>/dev/null || echo 0) + 1 )); echo "$count" > "$api/polls"
      body=$(cat "$api/poll-$count.json"); status=$(cat "$api/poll-$count.status");;
   esac;;
+*/api/v1/*)
+  rest=${url#https://*/api/v1/}; rest=${rest%%\?*}
+  file="$api/$(printf '%s' "$rest" | tr '/' '-').json"
+  if [ -f "$file" ]; then body=$(cat "$file"); else body='{"message":"not found"}'; status=404; fi;;
 */merge_requests*)
   case "$config" in
   *"Authorization: Bearer $(cat "$api/token")\""*) body='[]';;
@@ -320,7 +335,7 @@ impl Drop for Fixture {
 mod scenario {
     use std::fs;
 
-    use super::{FakeForge, Fixture, git};
+    use super::{FakeForge, Fixture, git, git_output};
 
     pub(super) fn offline_review(fixture: &Fixture) {
         let changes = fixture.run(&["changes", "1"]);
@@ -876,6 +891,70 @@ mod scenario {
                 .contains("nothing that looks like a token was pasted for forgejo.test"),
             "{}",
             blank.stderr
+        );
+    }
+
+    const PULL: &str = r#"{"number":1,"title":"Shout two","user":{"login":"ann"},"base":{"ref":"main"},"head":{"ref":"feature","sha":"HEAD"},"body":"Says two louder.","updated_at":"2026-01-02T12:00:00Z"}"#;
+    const ISSUE_COMMENTS: &str = r#"[{"id":501,"user":{"login":"carol"},"body":"Can this land before the release?","created_at":"2026-01-02T09:00:00Z"}]"#;
+    const REVIEWS: &str = r#"[
+        {"id":20,"user":{"login":"dave"},"body":"Two things before this goes in.","state":"REQUEST_CHANGES","comments_count":1,"submitted_at":"2026-01-02T10:00:00Z"},
+        {"id":21,"user":{"login":"ann"},"body":"","state":"COMMENT","comments_count":1,"submitted_at":"2026-01-02T11:00:00Z"},
+        {"id":22,"user":{"login":"erin"},"body":"","state":"APPROVED","comments_count":0,"submitted_at":"2026-01-02T12:00:00Z"}
+    ]"#;
+    const REVIEW_20: &str = r#"[{"id":300,"body":"Why upper case?","user":{"login":"dave"},"path":"a.txt","position":2,"original_position":0,"resolver":null,"pull_request_review_id":20,"created_at":"2026-01-02T09:58:00Z"}]"#;
+    const REVIEW_21: &str = r#"[{"id":310,"body":"It is louder.","user":{"login":"ann"},"path":"a.txt","position":2,"original_position":0,"resolver":null,"pull_request_review_id":21,"created_at":"2026-01-02T11:00:00Z"}]"#;
+
+    fn forgejo(fixture: &Fixture) -> FakeForge {
+        let forge = FakeForge::new(fixture);
+        git(
+            &fixture.local,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://forgejo.test/owner/repo.git",
+            ],
+        );
+        let head = git_output(&fixture.local, &["rev-parse", "refs/code-review/1/head"]);
+        forge.answer(
+            "repos-owner-repo-pulls-1.json",
+            &PULL.replace("HEAD", head.trim()),
+        );
+        forge.answer("repos-owner-repo-issues-1-comments.json", ISSUE_COMMENTS);
+        forge.answer("repos-owner-repo-pulls-1-reviews.json", REVIEWS);
+        forge.answer(
+            "repos-owner-repo-pulls-1-reviews-20-comments.json",
+            REVIEW_20,
+        );
+        forge.answer(
+            "repos-owner-repo-pulls-1-reviews-21-comments.json",
+            REVIEW_21,
+        );
+        forge
+    }
+
+    pub(super) fn discussion(fixture: &Fixture) {
+        let forge = forgejo(fixture);
+        let shown = forge.run(fixture, &["discussion", "1"], &[], "");
+        assert_eq!(shown.code, Some(0), "{}", shown.stderr);
+        assert_eq!(
+            shown.stdout,
+            "Says two louder.
+
+thread issue-501
+  2026-01-02 09:00 carol:
+    Can this land before the release?
+
+dave requested changes 2026-01-02 10:00 (review-20)
+  Two things before this goes in.
+  thread 300 on a.txt:2
+    2026-01-02 09:58 dave:
+      Why upper case?
+    2026-01-02 11:00 ann:
+      It is louder.
+
+erin approved 2026-01-02 12:00 (review-22)
+"
         );
     }
 }

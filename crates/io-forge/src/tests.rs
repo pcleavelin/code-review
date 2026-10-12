@@ -1,15 +1,15 @@
 use domain::{
-    BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft, DraftId,
-    DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login, Moment,
-    NoteKind, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SignedPicture,
+    Block, BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft,
+    DraftId, DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login,
+    Moment, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SignedPicture,
     SourceLine, Span, ThreadId, ThreadState, Token, WebLink,
 };
 use serde_json::{Value, json};
 
 use crate::convert;
 use crate::wire::{
-    self, Api, Method, PendingNote, Request, WireDiffRefs, WireRemote, WireResponse, WireThread,
-    detect, forge_named, parse_items, parse_remote, parse_response,
+    self, Api, Method, PendingNote, Request, WireDiffRefs, WireRemote, WireResponse,
+    WireSubmission, WireThread, detect, forge_named, parse_items, parse_remote, parse_response,
 };
 use crate::{
     ForgeClient, ForgeError, HttpStatus, ResponseBody, TokenSource, Unsent, every_page,
@@ -1000,21 +1000,21 @@ const GITHUB_REVIEW_COMMENTS: &str = r#"[
 ]"#;
 
 fn conversation(threads: &[WireThread]) -> Conversation {
-    convert::conversation(&expected_pull().description, threads, &[]).unwrap()
+    conversation_of(&[], threads)
+}
+
+fn conversation_of(submissions: &[WireSubmission], threads: &[WireThread]) -> Conversation {
+    convert::conversation(&expected_pull().description, submissions, threads, &[]).unwrap()
 }
 
 fn github_conversation() -> Conversation {
     let mut threads =
         wire::parse_issue_comments(&parse_items(GITHUB_ISSUE_COMMENTS).unwrap()).unwrap();
     threads.extend(
-        wire::parse_reviews(&parse_items(GITHUB_REVIEWS).unwrap())
-            .unwrap()
-            .threads,
-    );
-    threads.extend(
         wire::parse_github_code_threads(&parse_items(GITHUB_REVIEW_COMMENTS).unwrap()).unwrap(),
     );
-    conversation(&threads)
+    let reviews = wire::parse_reviews(&parse_items(GITHUB_REVIEWS).unwrap()).unwrap();
+    conversation_of(&reviews.submissions, &threads)
 }
 
 fn ids(conversation: &Conversation) -> Vec<&str> {
@@ -1052,10 +1052,7 @@ fn bodies(conversation: &Conversation, id: &str) -> Vec<(String, String)> {
 fn github_threads_come_in_order_of_their_first_note_from_all_three_endpoints() {
     let conversation = github_conversation();
     assert_eq!(conversation.description, Prose::new("Fixes the crash."));
-    assert_eq!(
-        ids(&conversation),
-        vec!["1004", "review-82", "issue-501", "1001", "review-81"]
-    );
+    assert_eq!(ids(&conversation), vec!["1004", "issue-501", "1001"]);
 }
 
 #[test]
@@ -1088,18 +1085,64 @@ fn a_github_comment_whose_line_is_gone_is_outdated_at_its_original_line() {
 }
 
 #[test]
-fn reviews_keep_verdicts_and_bodies_but_drop_pending_and_empty_comments() {
+fn github_reviews_keep_their_decision_and_summary_but_drop_pending_ones() {
     let conversation = github_conversation();
-    let kind = |id: &str| {
-        conversation
-            .thread(&ThreadId::new(id).unwrap())
-            .map(|thread| (thread.place.clone(), thread.notes[0].kind))
-    };
-    assert_eq!(kind("review-81"), Some((None, NoteKind::Approved)));
-    assert_eq!(kind("review-82"), Some((None, NoteKind::ChangesRequested)));
-    assert_eq!(kind("issue-501"), Some((None, NoteKind::Comment)));
-    assert_eq!(kind("review-80"), None);
-    assert_eq!(kind("review-83"), None);
+    let submissions: Vec<(&str, &str, Decision, &str)> = conversation
+        .submissions
+        .iter()
+        .map(|submission| {
+            (
+                submission.id.as_str(),
+                submission.author.as_str(),
+                submission.decision,
+                submission.summary.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        submissions,
+        vec![
+            ("review-80", "dave", Decision::Comment, ""),
+            ("review-81", "erin", Decision::Approve, ""),
+            (
+                "review-82",
+                "dave",
+                Decision::RequestChanges,
+                "Please split this."
+            ),
+        ]
+    );
+}
+
+fn block_shape(conversation: &Conversation) -> Vec<String> {
+    conversation
+        .blocks()
+        .iter()
+        .map(|block| match block {
+            Block::Submitted {
+                submission,
+                threads,
+            } => {
+                let ids: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+                format!("{}[{}]", submission.id, ids.join(" "))
+            }
+            Block::Alone(thread) => thread.id.to_string(),
+        })
+        .collect()
+}
+
+#[test]
+fn a_github_thread_belongs_to_the_review_of_its_first_comment_and_replies_stay_in_it() {
+    assert_eq!(
+        block_shape(&github_conversation()),
+        vec![
+            "1004",
+            "review-82[]",
+            "issue-501",
+            "review-80[1001]",
+            "review-81[]"
+        ]
+    );
 }
 
 const GITLAB_DISCUSSIONS: &str = r#"[
@@ -1244,13 +1287,34 @@ const FORGEJO_REVIEW_21: &str = r#"[
 fn forgejo_reads_comments_only_of_sent_reviews_that_have_some() {
     let reviews = wire::parse_reviews(&parse_items(FORGEJO_REVIEWS).unwrap()).unwrap();
     assert_eq!(reviews.with_comments, vec![20, 21]);
-    let conversation = conversation(&reviews.threads);
-    assert_eq!(ids(&conversation), vec!["review-23", "review-22"]);
+    let decisions: Vec<(&str, Decision)> = reviews
+        .submissions
+        .iter()
+        .map(|submission| (submission.id.as_str(), submission.decision))
+        .collect();
     assert_eq!(
-        conversation.threads[0].notes[0].kind,
-        NoteKind::ChangesRequested
+        decisions,
+        vec![
+            ("review-20", Decision::Comment),
+            ("review-21", Decision::Comment),
+            ("review-22", Decision::Approve),
+            ("review-23", Decision::RequestChanges),
+        ]
     );
-    assert_eq!(conversation.threads[1].notes[0].kind, NoteKind::Approved);
+}
+
+#[test]
+fn a_forgejo_review_holds_the_threads_it_started_and_a_reply_only_review_shows_none() {
+    let reviews = wire::parse_reviews(&parse_items(FORGEJO_REVIEWS).unwrap()).unwrap();
+    let mut comments =
+        wire::parse_forgejo_comments(&parse_items(FORGEJO_REVIEW_21).unwrap()).unwrap();
+    comments
+        .extend(wire::parse_forgejo_comments(&parse_items(FORGEJO_REVIEW_20).unwrap()).unwrap());
+    let conversation = conversation_of(&reviews.submissions, &wire::forgejo_threads(comments));
+    assert_eq!(
+        block_shape(&conversation),
+        vec!["review-23[]", "review-20[300 301]", "review-22[]"]
+    );
 }
 
 #[test]

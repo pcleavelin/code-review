@@ -72,6 +72,7 @@ pub(crate) enum Noun {
     Draft,
     Comment,
     Thread,
+    Submission,
     Line,
 }
 
@@ -103,6 +104,8 @@ impl fmt::Display for Counted {
             Noun::Comment => "comments",
             Noun::Thread if one => "thread",
             Noun::Thread => "threads",
+            Noun::Submission if one => "submission",
+            Noun::Submission => "submissions",
             Noun::Line if one => "line",
             Noun::Line => "lines",
         };

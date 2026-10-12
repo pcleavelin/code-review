@@ -1,12 +1,13 @@
 use domain::{
     BranchName, ClientId, CodePlace, CommitId, Conversation, Decision, Draft, DraftText,
     FileChange, Grant, Lifetime, Line, Login, Moment, Note, PrNumber, PrTitle, Prose, PullRequest,
-    RefreshToken, RelativePath, Renewal, SignedPicture, Thread, ThreadId, Token, UnixTime, WebLink,
+    RefreshToken, RelativePath, Renewal, SignedPicture, Submission, SubmissionId, Thread, ThreadId,
+    Token, UnixTime, WebLink,
 };
 
 use crate::wire::{
     WireComment, WireGrant, WireNote, WirePlace, WirePull, WireReview, WireSignedPicture,
-    WireThread,
+    WireSubmission, WireThread,
 };
 
 pub(crate) fn pull(wire: &WirePull) -> Option<PullRequest> {
@@ -66,7 +67,6 @@ fn note(wire: &WireNote) -> Note {
         author: Login::new(&wire.author),
         body: Prose::new(&wire.body),
         when: Moment::new(&wire.when),
-        kind: wire.kind,
         link: wire.link.as_deref().and_then(WebLink::new),
     }
 }
@@ -85,6 +85,19 @@ fn thread(wire: &WireThread) -> Option<Thread> {
         place: wire.place.as_ref().map(place),
         state: wire.state,
         notes: wire.notes.iter().map(note).collect(),
+        submission: wire.submission.as_deref().and_then(SubmissionId::new),
+    })
+}
+
+fn submission(wire: &WireSubmission) -> Option<Submission> {
+    let said = note(&wire.note);
+    Some(Submission {
+        id: SubmissionId::new(&wire.id)?,
+        author: said.author,
+        decision: wire.decision,
+        summary: said.body,
+        when: said.when,
+        link: said.link,
     })
 }
 
@@ -97,6 +110,7 @@ fn signed_picture(wire: &WireSignedPicture) -> Option<SignedPicture> {
 
 pub(crate) fn conversation(
     description: &Prose,
+    submissions: &[WireSubmission],
     threads: &[WireThread],
     signed: &[WireSignedPicture],
 ) -> Option<Conversation> {
@@ -104,6 +118,7 @@ pub(crate) fn conversation(
     threads.sort_by(|left, right| left.started().cmp(&right.started()));
     Some(Conversation {
         description: description.clone(),
+        submissions: submissions.iter().map(submission).collect::<Option<_>>()?,
         threads,
         signed_pictures: signed.iter().filter_map(signed_picture).collect(),
     })
