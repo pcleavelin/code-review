@@ -12,7 +12,7 @@ use crate::wire::{
     detect, forge_named, parse_items, parse_remote, parse_response,
 };
 use crate::{
-    ForgeClient, ForgeError, HttpStatus, ResponseBody, TokenSource, Unsent, every_page,
+    ForgeClient, ForgeError, HttpStatus, ResponseBody, TokenFor, TokenSource, Unsent, every_page,
     send_gitlab, send_in_turn,
 };
 
@@ -896,8 +896,15 @@ fn submitting_without_a_token_names_the_variables_to_set_before_any_request() {
             None,
         )
         .unwrap_err();
-    assert!(matches!(error, ForgeError::NoToken(ForgeKind::GitHub)));
+    assert!(matches!(
+        error,
+        ForgeError::NoToken(_, TokenFor::Submitting)
+    ));
     let message = error.to_string();
+    assert!(
+        message.starts_with("submitting to github.com needs a login: `review login github.com`"),
+        "{message}"
+    );
     assert!(message.contains("GITHUB_TOKEN"), "{message}");
     assert!(message.contains("GH_TOKEN"), "{message}");
 }
@@ -1810,4 +1817,116 @@ fn other_forbidden_answers_and_other_forges_stay_plain_http_errors() {
         ResponseBody::new(INTEGRATION_REFUSAL),
     );
     assert!(matches!(forgejo, ForgeError::Http { .. }));
+}
+
+const GITHUB_SEARCH: &str = r#"{
+    "total_count": 2, "incomplete_results": false,
+    "items": [
+        {"id": 3001, "number": 41, "title": "Teach the parser", "state": "open",
+         "repository_url": "https://api.github.com/repos/owner/repo",
+         "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/41"}},
+        {"id": 3002, "number": 7, "title": "Bump", "state": "open",
+         "repository_url": "https://api.github.com/repos/owner/repo",
+         "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/7"}}
+    ]
+}"#;
+
+const GITLAB_REQUESTED: &str = r#"[
+    {"id": 9001, "iid": 41, "project_id": 5, "title": "Teach the parser", "state": "opened",
+     "reviewers": [{"id": 77, "username": "ann"}]}
+]"#;
+
+const FORGEJO_SEARCH: &str = r#"[
+    {"id": 501, "number": 41, "title": "Teach the parser", "state": "open",
+     "repository": {"id": 5, "name": "repo", "owner": "owner", "full_name": "Owner/Repo"},
+     "pull_request": {"merged": false}},
+    {"id": 502, "number": 9, "title": "Elsewhere", "state": "open",
+     "repository": {"id": 6, "name": "other", "owner": "owner", "full_name": "owner/other"},
+     "pull_request": {"merged": false}}
+]"#;
+
+fn requested_numbers(kind: ForgeKind, text: &str) -> Option<Vec<u64>> {
+    Api::new(kind, "example.org", "owner/repo").parse_requested(&parse_items(text)?)
+}
+
+#[test]
+fn each_forge_asks_for_the_review_requests_of_the_logged_in_user_in_its_own_way() {
+    let user = Api::parse_user(r#"{"id": 77, "username": "ann", "name": "Ann"}"#).unwrap();
+    let cases = [
+        (
+            Api::new(ForgeKind::GitHub, "github.com", "owner/repo").github_requested(),
+            "https://api.github.com/search/issues?q=repo%3Aowner/repo+is%3Apr+is%3Aopen+review-requested%3A%40me&per_page=100",
+        ),
+        (
+            Api::new(ForgeKind::GitHub, "ghe.example.com", "owner/repo").github_requested(),
+            "https://ghe.example.com/api/v3/search/issues?q=repo%3Aowner/repo+is%3Apr+is%3Aopen+review-requested%3A%40me&per_page=100",
+        ),
+        (
+            Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo").user(),
+            "https://gitlab.com/api/v4/user",
+        ),
+        (
+            Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo").gitlab_requested(user),
+            "https://gitlab.com/api/v4/projects/group%2Frepo/merge_requests?state=opened&reviewer_id=77&per_page=100",
+        ),
+        (
+            Api::new(ForgeKind::Forgejo, "codeberg.org", "owner/repo").forgejo_requested(),
+            "https://codeberg.org/api/v1/repos/issues/search?type=pulls&state=open&review_requested=true&owner=owner&limit=50",
+        ),
+    ];
+    for (request, expected) in cases {
+        assert_eq!(request.method, Method::Get);
+        assert_eq!(request.url, expected);
+    }
+}
+
+#[test]
+fn a_github_search_result_gives_the_numbers_of_its_items() {
+    assert_eq!(
+        requested_numbers(ForgeKind::GitHub, GITHUB_SEARCH),
+        Some(vec![41, 7])
+    );
+}
+
+#[test]
+fn a_gitlab_reviewer_list_gives_the_iids_not_the_global_ids() {
+    assert_eq!(
+        requested_numbers(ForgeKind::GitLab, GITLAB_REQUESTED),
+        Some(vec![41])
+    );
+}
+
+#[test]
+fn a_forgejo_search_keeps_only_the_pulls_of_this_repository() {
+    assert_eq!(
+        requested_numbers(ForgeKind::Forgejo, FORGEJO_SEARCH),
+        Some(vec![41])
+    );
+}
+
+#[test]
+fn a_search_answer_without_items_is_malformed() {
+    assert_eq!(parse_items(r#"{"total_count": 0}"#), None);
+    assert_eq!(parse_items(r#"{"items": {"number": 1}}"#), None);
+    assert_eq!(
+        requested_numbers(ForgeKind::GitHub, r#"{"items": [{"title": "no number"}]}"#),
+        None
+    );
+}
+
+#[test]
+fn review_requests_without_a_token_ask_for_a_login_before_any_request() {
+    let error = client(None).requested().unwrap_err();
+    assert!(
+        matches!(&error, ForgeError::NoToken(site, TokenFor::ReviewRequests) if site.host().as_str() == "github.com"),
+        "{error:?}"
+    );
+    let message = error.to_string();
+    assert!(
+        message.starts_with(
+            "log in to see the review requests on github.com: `review login github.com`"
+        ),
+        "{message}"
+    );
+    assert!(message.contains("GH_TOKEN"), "{message}");
 }

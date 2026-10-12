@@ -14,7 +14,7 @@ use io_vcs::VcsError;
 
 pub use crate::access::{Access, StartedLogin};
 pub use crate::desk::{Desk, LoginTarget, PinTarget, Pinned, PullAddress, Why};
-pub use crate::repo::{Entry, Opened, Repo, RepoName};
+pub use crate::repo::{Entry, Opened, Repo, RepoName, RequestedFrom};
 pub use io_config::Reach;
 pub use io_forge::{Cancel, DeviceAuthorization, Submitted};
 pub use io_keychain::Forgotten;
@@ -151,6 +151,12 @@ impl fmt::Display for SessionError {
                 target.as_str()
             ),
         }
+    }
+}
+
+impl SessionError {
+    pub const fn lacks_token(&self) -> bool {
+        matches!(self, Self::Forge(ForgeError::NoToken(..)))
     }
 }
 

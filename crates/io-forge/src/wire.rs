@@ -303,6 +303,11 @@ pub(crate) struct WirePull {
     pub(crate) updated: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WireUser {
+    pub(crate) id: u64,
+}
+
 struct PullFields {
     number: &'static str,
     title: &'static str,
@@ -341,6 +346,8 @@ const CREATED: &str = "/created_at";
 const SUBMITTED: &str = "/submitted_at";
 const UPDATED: &str = "/updated_at";
 const ID: &str = "/id";
+const REPOSITORY_NAME: &str = "/repository/full_name";
+const FOUND_ITEMS: &str = "items";
 
 fn text_at(value: &Value, pointer: &str) -> Option<String> {
     value.pointer(pointer)?.as_str().map(str::to_owned)
@@ -679,7 +686,14 @@ fn on_pull(id: String, note: WireNote) -> WireThread {
 }
 
 pub(crate) fn parse_items(text: &str) -> Option<Vec<Value>> {
-    serde_json::from_str(text).ok()
+    match serde_json::from_str(text).ok()? {
+        Value::Array(items) => Some(items),
+        Value::Object(mut found) => match found.remove(FOUND_ITEMS)? {
+            Value::Array(items) => Some(items),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 pub(crate) fn parse_issue_comments(items: &[Value]) -> Option<Vec<WireThread>> {
@@ -1066,6 +1080,69 @@ impl Api {
     pub(crate) fn parse_pull(&self, text: &str) -> Option<WirePull> {
         let value: Value = serde_json::from_str(text).ok()?;
         read_pull(&value, self.fields())
+    }
+
+    pub(crate) fn user(&self) -> Request {
+        let repos = format!("repos/{}", self.slug);
+        match self.repo.strip_suffix(&repos) {
+            Some(api) => Request::get(format!("{api}user")),
+            None => Request::get(format!("{}api/v4/user", self.origin)),
+        }
+    }
+
+    pub(crate) fn parse_user(text: &str) -> Option<WireUser> {
+        let value: Value = serde_json::from_str(text).ok()?;
+        Some(WireUser {
+            id: value.pointer(ID)?.as_u64()?,
+        })
+    }
+
+    fn repos_root(&self) -> &str {
+        self.repo
+            .strip_suffix(&format!("repos/{}", self.slug))
+            .unwrap_or(&self.origin)
+    }
+
+    pub(crate) fn github_requested(&self) -> Request {
+        Request::get(format!(
+            "{}search/issues?q=repo%3A{}+is%3Apr+is%3Aopen+review-requested%3A%40me&{}",
+            self.repos_root(),
+            self.slug,
+            self.page_size()
+        ))
+    }
+
+    pub(crate) fn gitlab_requested(&self, user: WireUser) -> Request {
+        Request::get(format!(
+            "{}?state=opened&reviewer_id={}&{}",
+            self.pulls_url(),
+            user.id,
+            self.page_size()
+        ))
+    }
+
+    pub(crate) fn forgejo_requested(&self) -> Request {
+        let owner = self.slug.split('/').next().unwrap_or_default();
+        Request::get(format!(
+            "{}repos/issues/search?type=pulls&state=open&review_requested=true&owner={owner}&{}",
+            self.repos_root(),
+            self.page_size()
+        ))
+    }
+
+    pub(crate) fn parse_requested(&self, items: &[Value]) -> Option<Vec<u64>> {
+        let number = self.fields().number;
+        items
+            .iter()
+            .filter(|item| {
+                self.kind != ForgeKind::Forgejo
+                    || item
+                        .pointer(REPOSITORY_NAME)
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.eq_ignore_ascii_case(&self.slug))
+            })
+            .map(|item| item.pointer(number)?.as_u64())
+            .collect()
     }
 
     pub(crate) fn parse_diff_refs(text: &str) -> Option<WireDiffRefs> {

@@ -87,6 +87,13 @@ impl Opened {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RequestedFrom {
+    #[default]
+    Any,
+    You,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub repo: RepoName,
@@ -203,6 +210,10 @@ impl Repo {
                 }
             })
             .collect())
+    }
+
+    pub fn requested(&self) -> Result<Vec<PrNumber>, SessionError> {
+        self.with_forge(ForgeClient::requested)
     }
 
     pub fn pull(&self, number: PrNumber) -> Result<PullRequest, SessionError> {

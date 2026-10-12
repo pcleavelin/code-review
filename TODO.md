@@ -5,9 +5,8 @@
 1. Submitting a review has not been run against a live forge: GitHub, GitLab and Forgejo
    listing were run against public repositories, and the request bodies are unit-tested, but
    no review has been posted. Try each on a pull request you own.
-6. The Inbox shows open pull requests only and filters by words and standing; there is no
-   "review requested from me" or "mine", which need the forge user. Trigger: an inbox too long
-   to scan.
+6. The Inbox filters by words, standing and review requested from you; there is no "mine"
+   (the pull requests you opened). Trigger: an inbox too long to scan.
 11. Markdown: HTML other than `<img>` is drawn as its text with the tags dropped, footnotes and
     math as plain text. Trigger: a description or comment whose meaning is lost that way (a
     `<details>` block read as running text, a footnote, an equation).
@@ -22,6 +21,9 @@
     not met a live forge, github.com's GitHub App is built in, and gitlab.com
     has no client ID in `BUILT_IN_APPS` (`crates/io-forge/src/wire.rs`) yet.
     Log in to each once.
+15. Review requests (`prs --requested`, the Inbox's requested filter) have met only the offline fake
+    forge and recorded answers: GitHub's search, GitLab's reviewer list and Forgejo's issues search
+    have not been asked with a live login. Ask each once, logged in.
 
 ## Inherited from codemap
 

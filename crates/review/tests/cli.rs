@@ -161,9 +161,14 @@ case "$url" in
   *) count=$(( $(cat "$api/polls" 2>/dev/null || echo 0) + 1 )); echo "$count" > "$api/polls"
      body=$(cat "$api/poll-$count.json"); status=$(cat "$api/poll-$count.status");;
   esac;;
-*/merge_requests*)
+*/api/v4/user|*/merge_requests*)
   case "$config" in
-  *"Authorization: Bearer $(cat "$api/token")\""*) body='[]';;
+  *"Authorization: Bearer $(cat "$api/token")\""*)
+    case "$url" in
+    */api/v4/user) body='{"id":77,"username":"ann"}';;
+    *reviewer_id=77*) body=$(cat "$api/requested.json" 2>/dev/null || echo '[]');;
+    *) body=$(cat "$api/merge_requests.json" 2>/dev/null || echo '[]');;
+    esac;;
   *) body='{"message":"401 Unauthorized"}'; status=401;;
   esac;;
 *) body='{"message":"not found"}'; status=404;;
@@ -679,6 +684,7 @@ mod scenario {
         );
         unregistered_logins(fixture, &forge);
         device_login(fixture, &forge);
+        review_requests(fixture, &forge);
         renewal(fixture, &forge);
         logout_and_refusals(fixture, &forge);
         pasted_login(fixture, &forge);
@@ -747,6 +753,45 @@ mod scenario {
                 "{secret} on a command line: {arguments}"
             );
         }
+    }
+
+    const MERGE_REQUESTS: &str = r#"[
+        {"id": 901, "iid": 12, "title": "Teach the parser", "author": {"username": "bob"},
+         "target_branch": "main", "source_branch": "parser",
+         "sha": "0123456789abcdef0123456789abcdef01234567", "updated_at": "2026-02-02T00:00:00Z"},
+        {"id": 902, "iid": 13, "title": "Bump the version", "author": {"username": "cat"},
+         "target_branch": "main", "source_branch": "bump",
+         "sha": "89abcdef0123456789abcdef0123456789abcdef", "updated_at": "2026-02-01T00:00:00Z"}
+    ]"#;
+    const REQUESTED: &str = r#"[{"id": 901, "iid": 12, "title": "Teach the parser"}]"#;
+
+    fn review_requests(fixture: &Fixture, forge: &FakeForge) {
+        let run = |arguments: &[&str]| forge.run(fixture, arguments, &[], "");
+        forge.answer("merge_requests.json", MERGE_REQUESTS);
+        forge.answer("requested.json", REQUESTED);
+        let every = run(&["prs"]);
+        assert!(every.stdout.contains("owner/repo#12"), "{}", every.stdout);
+        assert!(every.stdout.contains("owner/repo#13"), "{}", every.stdout);
+        let requested = run(&["prs", "--requested"]);
+        assert_eq!(requested.code, Some(0), "{}", requested.stderr);
+        assert_eq!(
+            requested.stdout,
+            "owner/repo#12 Teach the parser  (bob, 2026-02-02)  main <- parser  [new]\n"
+        );
+        let narrowed = run(&["prs", "bump", "--requested"]);
+        assert_eq!(
+            narrowed.stdout,
+            "no open pull request has a review requested from you\n"
+        );
+        forge.answer("requested.json", "[]");
+        let none = run(&["prs", "--requested"]);
+        assert_eq!(
+            none.stdout,
+            "no open pull request has a review requested from you\n"
+        );
+        let api = forge.tools.join("api");
+        fs::remove_file(api.join("merge_requests.json")).unwrap();
+        fs::remove_file(api.join("requested.json")).unwrap();
     }
 
     fn renewal(fixture: &Fixture, forge: &FakeForge) {
@@ -832,6 +877,16 @@ mod scenario {
             anonymous.stdout.contains("the forge answered HTTP 401"),
             "{}",
             anonymous.stdout
+        );
+        let unrequested = run(&["prs", "--requested"]);
+        assert_eq!(unrequested.code, Some(2));
+        assert_eq!(unrequested.stdout, "");
+        assert!(
+            unrequested.stderr.contains(
+                "log in to see the review requests on gitlab.test: `review login gitlab.test`, or set GITLAB_TOKEN"
+            ),
+            "{}",
+            unrequested.stderr
         );
 
         forge.polls(&[(PENDING, 400), (r#"{"error":"access_denied"}"#, 400)]);

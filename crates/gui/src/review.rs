@@ -11,7 +11,9 @@ use index::Indexed;
 use io_process::{Argument, Opener};
 use io_review::ReviewStamp;
 use platform::ClipboardRequest;
-use session::{Access, Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName};
+use session::{
+    Access, Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName, RequestedFrom,
+};
 use ui::{Count, Label, Typed};
 
 use crate::app::App;
@@ -37,12 +39,57 @@ pub(crate) struct Broken {
     pub(crate) why: Label,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cure {
+    LogIn,
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Unanswered {
+    pub(crate) broken: Broken,
+    pub(crate) cure: Cure,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Requests {
+    pub(crate) pulls: BTreeMap<RepoName, BTreeSet<PrNumber>>,
+    pub(crate) answered: Count,
+    pub(crate) unanswered: Vec<Unanswered>,
+}
+
+impl Requests {
+    pub(crate) fn of(&self, entry: &Entry) -> bool {
+        self.pulls
+            .get(&entry.repo)
+            .is_some_and(|numbers| numbers.contains(&entry.pull.number))
+    }
+
+    pub(crate) fn locked(&self) -> bool {
+        self.answered == Count::ZERO
+            && self
+                .unanswered
+                .iter()
+                .any(|unanswered| unanswered.cure == Cure::LogIn)
+    }
+
+    pub(crate) fn chip(&self, entries: &[Entry]) -> Label {
+        if self.locked() {
+            Label::new("requested: log in")
+        } else {
+            let count = entries.iter().filter(|entry| self.of(entry)).count();
+            Label::new(format!("requested {count}"))
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Inbox {
     Asking,
     Listed {
         entries: Vec<Entry>,
         broken: Vec<Broken>,
+        requests: Requests,
     },
 }
 
@@ -92,6 +139,7 @@ pub(crate) struct Submitted {
 pub(crate) struct Listed {
     entries: Vec<Entry>,
     broken: Vec<Broken>,
+    requests: Requests,
     held: BTreeMap<ForgeHost, Held>,
 }
 
@@ -169,6 +217,7 @@ pub(crate) struct Reviewing {
     pub(crate) desk: Desk,
     pub(crate) inbox: Inbox,
     pub(crate) standing: Option<Standing>,
+    pub(crate) requested: RequestedFrom,
     pub(crate) open: Option<OpenReview>,
     pub(crate) opening: Option<PrNumber>,
     pub(crate) pinning: Pinning,
@@ -194,6 +243,7 @@ impl Reviewing {
             desk,
             inbox: Inbox::Asking,
             standing: None,
+            requested: RequestedFrom::Any,
             open: None,
             opening: None,
             pinning: Pinning::Idle,
@@ -391,6 +441,7 @@ pub(crate) enum ReviewAct {
     Pin,
     Unpin(RepoName),
     ShowStanding(Option<Standing>),
+    ShowRequested(RequestedFrom),
     OpenChange(RelativePath),
     OpenPlace(CodePlace),
     ToggleSeen(RelativePath),
@@ -566,9 +617,13 @@ fn list(repos: &[Repo], pinned: &[Pinned], access: &Access, sites: &BTreeSet<For
             Pinned::Ready(_) => None,
         })
         .collect();
+    let mut requests = Requests::default();
     for repo in repos {
         match repo.inbox() {
-            Ok(found) => entries.extend(found),
+            Ok(found) => {
+                entries.extend(found);
+                ask_requests(repo, &mut requests);
+            }
             Err(error) => broken.push(Broken {
                 place: Label::new(repo.name().as_str()),
                 why: Label::new(error.to_string()),
@@ -579,7 +634,32 @@ fn list(repos: &[Repo], pinned: &[Pinned], access: &Access, sites: &BTreeSet<For
     Listed {
         entries,
         broken,
+        requests,
         held,
+    }
+}
+
+fn ask_requests(repo: &Repo, requests: &mut Requests) {
+    match repo.requested() {
+        Ok(numbers) => {
+            requests.answered += Count::new(1);
+            requests
+                .pulls
+                .entry(repo.name().clone())
+                .or_default()
+                .extend(numbers);
+        }
+        Err(error) => requests.unanswered.push(Unanswered {
+            broken: Broken {
+                place: Label::new(repo.name().as_str()),
+                why: Label::new(error.to_string()),
+            },
+            cure: if error.lacks_token() {
+                Cure::LogIn
+            } else {
+                Cure::Unknown
+            },
+        }),
     }
 }
 
@@ -836,6 +916,7 @@ impl App {
             ReviewAct::Pin => self.pin(),
             ReviewAct::Unpin(name) => self.unpin(&name),
             ReviewAct::ShowStanding(standing) => self.model.review.standing = standing,
+            ReviewAct::ShowRequested(requested) => self.model.review.requested = requested,
             ReviewAct::OpenChange(path) => self.model.open_change(&path),
             ReviewAct::OpenPlace(place) => self.model.open_place(&place),
             ReviewAct::ToggleSeen(path) => self.toggle_seen(&path),
@@ -925,6 +1006,7 @@ impl App {
             self.model.review.inbox = Inbox::Listed {
                 entries: Vec::new(),
                 broken: Vec::new(),
+                requests: Requests::default(),
             };
         }
         self.jobs.list = Some(Job::start(move || list(&repos, &pinned, &access, &sites)));
@@ -1120,6 +1202,7 @@ impl App {
                     place: Label::new("inbox"),
                     why: Label::new("the listing thread failed"),
                 }],
+                requests: Requests::default(),
                 held: BTreeMap::new(),
             },
         };
@@ -1143,6 +1226,7 @@ impl App {
         self.model.review.inbox = Inbox::Listed {
             entries: listed.entries,
             broken: listed.broken,
+            requests: listed.requests,
         };
     }
 

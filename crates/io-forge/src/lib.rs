@@ -178,11 +178,17 @@ pub enum Unsent {
     Approval,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenFor {
+    Submitting,
+    ReviewRequests,
+}
+
 #[derive(Debug)]
 pub enum ForgeError {
     UnknownHost(Host),
     UnreadableUrl(RemoteUrl),
-    NoToken(ForgeKind),
+    NoToken(ForgeHost, TokenFor),
     Process(ProcessError),
     Unreachable(Captured),
     Http {
@@ -230,7 +236,7 @@ impl ForgeError {
             Self::Unfinished { sent, .. } => sent,
             Self::UnknownHost(_)
             | Self::UnreadableUrl(_)
-            | Self::NoToken(_)
+            | Self::NoToken(..)
             | Self::Process(_)
             | Self::Unreachable(_)
             | Self::Http { .. }
@@ -246,6 +252,29 @@ impl ForgeError {
     }
 }
 
+fn no_token(formatter: &mut fmt::Formatter<'_>, site: &ForgeHost, wanted: TokenFor) -> fmt::Result {
+    match wanted {
+        TokenFor::Submitting => write!(formatter, "submitting to {site} needs a login")?,
+        TokenFor::ReviewRequests => {
+            write!(formatter, "log in to see the review requests on {site}")?;
+        }
+    }
+    let kind = site.kind();
+    let names: Vec<&str> = EnvVar::tokens(kind)
+        .iter()
+        .map(|variable| variable.name())
+        .collect();
+    write!(
+        formatter,
+        ": `review login {site}`, or set {}",
+        names.join(" or ")
+    )?;
+    if kind == ForgeKind::GitHub {
+        write!(formatter, ", or `{} auth login`", wire::GH)?;
+    }
+    Ok(())
+}
+
 impl fmt::Display for ForgeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -259,21 +288,7 @@ impl fmt::Display for ForgeError {
                 "cannot read a host and repository from the remote URL {}",
                 url.as_str()
             ),
-            Self::NoToken(kind) => {
-                let names: Vec<&str> = EnvVar::tokens(*kind)
-                    .iter()
-                    .map(|variable| variable.name())
-                    .collect();
-                write!(
-                    formatter,
-                    "submitting to {kind} needs a token: log in with `review login <host>`, or set {}",
-                    names.join(" or ")
-                )?;
-                if *kind == ForgeKind::GitHub {
-                    write!(formatter, ", or log in with `{} auth login`", wire::GH)?;
-                }
-                Ok(())
-            }
+            Self::NoToken(site, wanted) => no_token(formatter, site, *wanted),
             Self::Process(ProcessError::Missing(program)) => {
                 write!(formatter, "{program} is not on PATH: install it")
             }
@@ -524,6 +539,30 @@ impl ForgeClient {
         })
     }
 
+    pub fn requested(&self) -> Result<Vec<PrNumber>, ForgeError> {
+        if self.token.is_none() {
+            return Err(ForgeError::NoToken(
+                self.forge.forge_host(),
+                TokenFor::ReviewRequests,
+            ));
+        }
+        let api = self.api();
+        let request = match self.forge.kind() {
+            ForgeKind::GitHub => api.github_requested(),
+            ForgeKind::Forgejo => api.forgejo_requested(),
+            ForgeKind::GitLab => {
+                let user = self.read(&api, &api.user(), |body| Api::parse_user(body.as_str()))?;
+                api.gitlab_requested(user)
+            }
+        };
+        self.read_pages(&api, &request, |items| {
+            api.parse_requested(items)?
+                .into_iter()
+                .map(PrNumber::new)
+                .collect()
+        })
+    }
+
     pub fn pull(&self, number: PrNumber) -> Result<PullRequest, ForgeError> {
         let api = self.api();
         self.read(&api, &api.pull(number.get()), |body| {
@@ -646,7 +685,10 @@ impl ForgeClient {
     ) -> Result<Submitted, ForgeError> {
         let kind = self.forge.kind();
         if self.token.is_none() {
-            return Err(ForgeError::NoToken(kind));
+            return Err(ForgeError::NoToken(
+                self.forge.forge_host(),
+                TokenFor::Submitting,
+            ));
         }
         let api = self.api();
         let number = pull.number.get();

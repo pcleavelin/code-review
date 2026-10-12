@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login }
+        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login, requested }
     };
 }
 
@@ -32,7 +32,7 @@ shot {shots}/changed.png
 quit
 ",
         shows: &[
-            "DUMP entry owner/repo#1 New drafts=0 \"Square the inputs\"",
+            "DUMP entry owner/repo#1 New drafts=0 requested=false \"Square the inputs\"",
             "DUMP change old.txt Deleted +0 -400 Unseen",
             "DUMP change src/lib.rs Modified +1 -1 Unseen",
             "DUMP change notes.md Modified +1 -1 Unseen",
@@ -357,6 +357,61 @@ quit
             "stage=gitlab.test device code=ABCD-1234 page=https://gitlab.test/oauth/device",
             "DUMP login sites=[gitlab.test=in forgejo.test=in] stage=none",
             "DUMP login sites=[gitlab.test=in forgejo.test=out] stage=none",
+        ],
+    }
+}
+
+pub(crate) fn requested() -> Scenario {
+    Scenario {
+        script: "idle
+wait 2
+dump
+shot {shots}/out.png
+click-id inbox-requested
+wait 2
+rect pull/0
+dump
+shot {shots}/out-on.png
+click-id login@forgejo.test
+wait 2
+text fjtoken123
+key enter
+idle
+wait 2
+rect pull/0
+rect pull/1
+dump
+shot {shots}/in-on.png
+click-id inbox-requested
+wait 2
+rect pull/1
+dump
+shot {shots}/in-off.png
+rect inbox-requested
+mouse <<DUMP rect inbox-requested>>
+wait 2
+click <<DUMP rect inbox-requested>>
+wait 1
+click <<DUMP rect inbox-requested>>
+wait 1
+click <<DUMP rect inbox-requested>>
+wait 2
+rect inbox-requested
+absent pull/1
+rect pull/0
+dump
+quit
+",
+        shows: &[
+            "DUMP requests chip=\"requested: log in\" answered=0 pulls=[] unanswered=[owner/repo:LogIn:\"log in to see the review requests on forgejo.test",
+            "requested=You",
+            "DUMP rect pull/0 = None",
+            "DUMP requests chip=\"requested 1\" answered=1 pulls=[owner/repo#1] unanswered=[]",
+            "DUMP entry owner/repo#1 New drafts=0 requested=true \"Square the inputs\"",
+            "DUMP entry owner/repo#2 New drafts=0 requested=false \"Rename the notes\"",
+            "DUMP rect pull/0 = Some(",
+            "DUMP rect pull/1 = None",
+            "DUMP rect pull/1 = Some(",
         ],
     }
 }
