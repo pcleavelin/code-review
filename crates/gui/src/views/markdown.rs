@@ -41,6 +41,7 @@ enum Fence {
     Header,
     Cpp,
     Odin,
+    Sql,
 }
 
 impl Fence {
@@ -60,6 +61,7 @@ impl Fence {
             Self::Header => "h",
             Self::Cpp => "cpp",
             Self::Odin => "odin",
+            Self::Sql => "sql",
         })
     }
 
@@ -71,6 +73,7 @@ impl Fence {
             Self::TypeScript | Self::Ts | Self::Tsx => "ts",
             Self::Clang | Self::Header | Self::Cpp => "c",
             Self::Odin => "odin",
+            Self::Sql => "sql",
         })
     }
 }

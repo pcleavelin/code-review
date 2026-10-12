@@ -240,6 +240,7 @@ const DEPENDENCIES: [Allowed; 22] = [
             Literal::new("tree-sitter-python"),
             Literal::new("tree-sitter-javascript"),
             Literal::new("tree-sitter-typescript"),
+            Literal::new("tree-sitter-sequel"),
         ],
     },
     Allowed {

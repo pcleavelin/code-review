@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeMap;
 use std::iter;
 use std::path::Path;
@@ -21,6 +21,7 @@ enum Grammar {
     Javascript,
     Typescript,
     Tsx,
+    Sql,
 }
 
 impl Grammar {
@@ -33,6 +34,33 @@ impl Grammar {
             Self::Javascript => &[Word("js"), Word("mjs"), Word("cjs")],
             Self::Typescript => &[Word("ts")],
             Self::Tsx => &[Word("tsx")],
+            Self::Sql => &[Word("sql")],
+        }
+    }
+
+    const fn dialect(self) -> Dialect {
+        match self {
+            Self::Sql => Dialect::Neovim,
+            Self::Rust
+            | Self::Odin
+            | Self::Clang
+            | Self::Python
+            | Self::Javascript
+            | Self::Typescript
+            | Self::Tsx => Dialect::TreeSitter,
+        }
+    }
+
+    const fn symbol_source(self) -> SymbolSource {
+        match self {
+            Self::Sql => SymbolSource::Created,
+            Self::Rust
+            | Self::Odin
+            | Self::Clang
+            | Self::Python
+            | Self::Javascript
+            | Self::Typescript
+            | Self::Tsx => SymbolSource::Declared,
         }
     }
 
@@ -76,15 +104,89 @@ impl Grammar {
                 tree_sitter_typescript::LANGUAGE_TSX.into(),
                 tree_sitter_typescript::HIGHLIGHTS_QUERY,
             ),
+            Self::Sql => (
+                tree_sitter_sequel::LANGUAGE.into(),
+                tree_sitter_sequel::HIGHLIGHTS_QUERY,
+            ),
         };
-        let query = Query::new(&language, highlights).ok()?;
-        Some(Compiled { language, query })
+        let dialect = self.dialect();
+        let query = Query::new(&language, &dialect.query(HighlightQuery(highlights)).0).ok()?;
+        Some(Compiled {
+            language,
+            query,
+            dialect,
+            symbol_source: self.symbol_source(),
+        })
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Dialect {
+    TreeSitter,
+    Neovim,
+}
+
+impl Dialect {
+    fn query(self, highlights: HighlightQuery) -> QueryText {
+        QueryText(match self {
+            Self::TreeSitter => highlights.0.to_owned(),
+            Self::Neovim => LuaClass::VARIANTS
+                .iter()
+                .fold(highlights.0.to_owned(), |query, class| {
+                    query.replace(class.lua().as_str(), class.regex().as_str())
+                }),
+        })
+    }
+
+    fn order(self, span: &Highlight, pattern: PatternIndex) -> SpanOrder {
+        match self {
+            Self::TreeSitter => SpanOrder(span.start, Reverse(PatternIndex::default())),
+            Self::Neovim => SpanOrder(span.start, Reverse(pattern)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, VariantArray)]
+enum LuaClass {
+    Digit,
+}
+
+impl LuaClass {
+    const fn lua(self) -> Word {
+        match self {
+            Self::Digit => Word("%d"),
+        }
+    }
+
+    const fn regex(self) -> Word {
+        match self {
+            Self::Digit => Word("[0-9]"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+struct PatternIndex(usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SpanOrder(ByteOffset, Reverse<PatternIndex>);
+
+#[derive(Clone, Copy)]
+struct HighlightQuery(&'static str);
+
+struct QueryText(String);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SymbolSource {
+    Declared,
+    Created,
 }
 
 struct Compiled {
     language: tree_sitter::Language,
     query: Query,
+    dialect: Dialect,
+    symbol_source: SymbolSource,
 }
 
 #[derive(Default)]
@@ -113,8 +215,13 @@ impl Parsers {
             && parser.set_language(&compiled.language).is_ok()
             && let Some(tree) = parser.parse(contents.as_str(), None)
         {
-            collector.collect(tree.root_node(), Depth::default(), None);
-            highlights = highlight(tree.root_node(), &compiled.query, source, &text);
+            match compiled.symbol_source {
+                SymbolSource::Declared => {
+                    collector.collect(tree.root_node(), Depth::default(), None);
+                }
+                SymbolSource::Created => collector.collect_created(tree.root_node()),
+            }
+            highlights = highlight(tree.root_node(), compiled, source, &text);
         }
         let Collector {
             symbols, imports, ..
@@ -298,14 +405,15 @@ impl Offset {
 
 fn highlight(
     root: Node<'_>,
-    query: &Query,
+    compiled: &Compiled,
     source: Source<'_>,
     text: &FileText,
 ) -> Vec<Vec<Highlight>> {
+    let Compiled { query, dialect, .. } = compiled;
     let line_starts = source.line_starts();
     let lines = text.all();
     let names = query.capture_names();
-    let mut spans: Vec<Vec<Highlight>> = vec![Vec::new(); lines.len()];
+    let mut spans: Vec<Vec<(Highlight, PatternIndex)>> = vec![Vec::new(); lines.len()];
     let mut cursor = QueryCursor::new();
     let mut captures = cursor.captures(query, root, source.bytes());
     while let Some((found, position)) = captures.next() {
@@ -335,26 +443,35 @@ fn highlight(
             let line_end = line_start + line.as_str().len();
             let (from, to) = (start.max(*line_start), end.min(line_end));
             if from < to {
-                on_line.push(Highlight {
-                    start: Offset(from - line_start).byte(),
-                    end: Offset(to - line_start).byte(),
-                    class,
-                });
+                on_line.push((
+                    Highlight {
+                        start: Offset(from - line_start).byte(),
+                        end: Offset(to - line_start).byte(),
+                        class,
+                    },
+                    PatternIndex(found.pattern_index),
+                ));
             }
         }
     }
-    for on_line in &mut spans {
-        on_line.sort_by_key(|span| span.start);
-        let mut covered = ByteOffset::default();
-        on_line.retain(|span| {
-            let keep = span.start >= covered;
-            if keep {
-                covered = span.end;
-            }
-            keep
-        });
-    }
     spans
+        .into_iter()
+        .map(|mut on_line| {
+            on_line.sort_by_key(|(span, pattern)| dialect.order(span, *pattern));
+            let mut covered = ByteOffset::default();
+            on_line
+                .into_iter()
+                .map(|(span, _)| span)
+                .filter(|span| {
+                    let keep = span.start >= covered;
+                    if keep {
+                        covered = span.end;
+                    }
+                    keep
+                })
+                .collect()
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -693,6 +810,9 @@ enum NodeKindWord {
     Import,
     Module,
     Impl,
+    ObjectReference,
+    Identifier,
+    CreatePrefix,
 }
 
 impl NodeKindWord {
@@ -701,6 +821,9 @@ impl NodeKindWord {
             Self::Import => "use_declaration",
             Self::Module => "mod_item",
             Self::Impl => "impl_item",
+            Self::ObjectReference => "object_reference",
+            Self::Identifier => "identifier",
+            Self::CreatePrefix => "create_",
         })
     }
 }
@@ -717,6 +840,11 @@ impl NodeKind<'_> {
         self.mentions(NodeWord::Comment)
             || self.mentions(NodeWord::Package)
             || self.mentions(NodeWord::Attribute)
+    }
+
+    fn creates(self) -> bool {
+        self.0
+            .starts_with(NodeKindWord::CreatePrefix.word().as_str())
     }
 
     fn container(self) -> bool {
@@ -875,6 +1003,52 @@ impl Collector<'_> {
             if container && let Some(body) = node.child_by_field_name("body") {
                 self.collect(body, Depth::default().deeper(), own_type.as_ref());
             }
+        }
+    }
+
+    fn collect_created(&mut self, root: Node<'_>) {
+        let mut cursor = root.walk();
+        for statement in root.named_children(&mut cursor) {
+            let Some(declaration) = statement
+                .named_child(0)
+                .filter(|declaration| NodeKind(declaration.kind()).creates())
+            else {
+                continue;
+            };
+            let mut inner = declaration.walk();
+            let Some(name) = declaration
+                .child_by_field_name("column")
+                .or_else(|| {
+                    declaration.named_children(&mut inner).find(|child| {
+                        let kind = NodeKind(child.kind());
+                        kind.named(NodeKindWord::ObjectReference)
+                            || kind.named(NodeKindWord::Identifier)
+                    })
+                })
+                .and_then(|name| self.source.of(name))
+            else {
+                continue;
+            };
+            let start = Row(statement.start_position().row);
+            let mut end = Row(statement.end_position().row);
+            if statement.end_position().column == 0 && end > start {
+                end = Row(end.0 - 1);
+            }
+            let Some(span) = start
+                .line()
+                .zip(end.line())
+                .and_then(|(start, end)| Span::new(start, end))
+            else {
+                continue;
+            };
+            self.symbols.push(Symbol::new(
+                SymbolName::new(name),
+                NodeKind(declaration.kind()).symbol_kind(),
+                span,
+                Depth::default(),
+                None,
+                Vec::new(),
+            ));
         }
     }
 
