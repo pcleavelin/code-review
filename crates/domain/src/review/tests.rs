@@ -1,8 +1,9 @@
 use crate::review::{
     Block, BranchName, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision,
     DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login,
-    Moment, Note, Pairing, PrNumber, Prose, RefName, Refusal, RepoSlug, Review, Revision, Rights,
-    Seen, Side, Standing, Submission, SubmissionId, Thread, ThreadId, ThreadState,
+    Moment, Note, Pairing, PrNumber, Prose, Provenance, RefName, Refusal, RepoSlug, Review,
+    Revision, Rights, Seen, Side, Standing, Submission, SubmissionId, Thread, ThreadId,
+    ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -84,6 +85,51 @@ fn lines_removed_at_the_end_of_the_file_come_after_the_last_head_line() {
         })
     );
     assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn removals_group_the_lines_removed_before_each_head_line_and_added_lines_are_new_numbers() {
+    let two = change(
+        "a.txt",
+        vec![
+            Hunk::new(
+                Line::new(0),
+                Line::new(0),
+                vec![
+                    line(LineKind::Removed, "p"),
+                    line(LineKind::Removed, "q"),
+                    line(LineKind::Context, "r"),
+                ],
+            ),
+            Hunk::new(
+                Line::new(9),
+                Line::new(7),
+                vec![
+                    line(LineKind::Context, "s"),
+                    line(LineKind::Added, "t"),
+                    line(LineKind::Removed, "u"),
+                ],
+            ),
+        ],
+    );
+    let removals: Vec<(Line, Vec<Line>)> = two
+        .removals()
+        .iter()
+        .map(|removal| {
+            (
+                removal.before,
+                removal.lines.iter().map(|removed| removed.old).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        removals,
+        vec![
+            (Line::new(0), vec![Line::new(0), Line::new(1)]),
+            (Line::new(9), vec![Line::new(10)]),
+        ]
+    );
+    assert_eq!(two.added_lines(), vec![Line::new(8)]);
 }
 
 #[test]
@@ -509,4 +555,14 @@ fn a_revision_is_the_head_by_its_branch_or_a_prefix_of_its_commit() {
     assert!(!is_head(Revision::Commit(
         CommitId::new("0123456789abcdee").unwrap()
     )));
+}
+
+#[test]
+fn a_lock_file_is_generated_unless_its_attributes_say_it_is_handwritten() {
+    let generated = |marking: Provenance, path: &str| marking.generated(&RelativePath::new(path));
+    assert!(generated(Provenance::Undeclared, "tools/Cargo.lock"));
+    assert!(!generated(Provenance::Undeclared, "docs/Cargo.lock.md"));
+    assert!(!generated(Provenance::Undeclared, "src/lib.rs"));
+    assert!(!generated(Provenance::Handwritten, "Cargo.lock"));
+    assert!(generated(Provenance::Generated, "src/lib.rs"));
 }

@@ -1,6 +1,6 @@
 use domain::{
-    Block, ChangeKind, Content, Conversation, Decision, Draft, DraftOn, DraftText, Login, Note,
-    RelativePath, Rights, Seen, Side, Span, Submission, Thread, ThreadState,
+    Block, ChangeKind, Content, Conversation, Decision, Draft, DraftOn, DraftText, FileChange,
+    Login, Note, RelativePath, Rights, Seen, Side, Span, Submission, Thread, ThreadState,
 };
 use ui::{Color, Count, Icon, Label, Run};
 
@@ -25,7 +25,7 @@ use crate::widgets::{
 use super::inbox::{standing_color, standing_word};
 use super::markdown::markdown;
 
-fn seen_mark(seen: Seen) -> Run {
+pub(super) fn seen_mark(seen: Seen) -> Run {
     match seen {
         Seen::Seen => Run::new(Icon::Check, GREEN),
         Seen::Unseen => Run::new(Icon::Dot, ORANGE),
@@ -33,7 +33,7 @@ fn seen_mark(seen: Seen) -> Run {
     }
 }
 
-fn kind_word(kind: ChangeKind) -> Label {
+pub(super) fn kind_word(kind: ChangeKind) -> Label {
     Label::new(match kind {
         ChangeKind::Added => "added",
         ChangeKind::Deleted => "deleted",
@@ -62,7 +62,7 @@ fn commit_changes_window(model: &Model, frame: &mut Frame<'_>, commit: &CommitId
         return;
     };
     frame.start(Container::ToolbarSmall);
-    let all = ids::ALL_CHANGES.target();
+    let all = ids::ALL_CHANGES.with(&Label::new("changes"));
     if frame.small_button("all changes", all).clicked() {
         frame.push(Action::Review(ReviewAct::ViewCommit(None)));
     }
@@ -216,6 +216,9 @@ pub(super) fn changes_window(model: &Model, frame: &mut Frame<'_>) {
         if let Some(old) = change.old_path() {
             runs.push(Run::new(format!("  from {old}"), WEAK));
         }
+        if opened.generated.contains(path) {
+            runs.push(Run::new("  generated", WEAK));
+        }
         let drafts = opened.review.drafts_at(path).count();
         let mut badges = Vec::new();
         if drafts > 0 {
@@ -260,19 +263,11 @@ fn layout_toggle(model: &Model, frame: &mut Frame<'_>) {
     frame.attach_tip(layout);
 }
 
-pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
-    let Some(change) = model.review.shown_change(path) else {
-        return;
-    };
-    frame.label_runs(vec![
-        Run::new(kind_word(change.kind()), WEAK),
-        Run::new(format!("  +{}", change.added()), GREEN),
-        Run::new(format!(" -{}", change.removed()), RED),
-    ]);
+pub(super) fn diff_controls(model: &Model, frame: &mut Frame<'_>) {
     layout_toggle(model, frame);
     if let Some(commit) = model.review.diffs.commit() {
         frame.label(format!("commit {commit}"), ORANGE);
-        let all = ids::ALL_CHANGES.target();
+        let all = ids::ALL_CHANGES.with(&Label::new("source"));
         if frame.small_button("all changes", all).clicked() {
             frame.push(Action::Review(ReviewAct::ViewCommit(None)));
         }
@@ -284,23 +279,12 @@ pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &Relat
         frame.attach_tip(copy);
         return;
     }
-    let seen = model.review.seen(change);
-    let toggle = ids::SEEN.target();
-    let (word, chosen) = match seen {
-        Seen::Seen => ("seen", Chosen::Chosen),
-        Seen::Changed => ("changed since seen", Chosen::Plain),
-        Seen::Unseen => ("mark seen", Chosen::Plain),
-    };
-    if frame.button(word, toggle, chosen).clicked() {
-        frame.push(Action::Review(ReviewAct::ToggleShownSeen));
-    }
-    frame.attach_tip(toggle);
     for (label, target, act) in [
         ("prev", ids::PREVIOUS_HUNK.target(), ReviewAct::PreviousHunk),
         ("next", ids::NEXT_HUNK.target(), ReviewAct::NextHunk),
         (
             "next unseen",
-            ids::NEXT_UNSEEN.target(),
+            ids::NEXT_UNSEEN.with(&Label::new("source")),
             ReviewAct::NextUnseen,
         ),
         (
@@ -315,20 +299,29 @@ pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &Relat
         }
         frame.attach_tip(target);
     }
-    let whole = ids::WHOLE_FILE.target();
-    let shows_whole = model.review.whole.contains(path);
-    if frame
-        .button(
-            "whole file",
-            whole,
-            if shows_whole {
-                Chosen::Chosen
-            } else {
-                Chosen::Plain
-            },
-        )
-        .clicked()
-    {
+}
+
+pub(super) fn seen_button(model: &Model, frame: &mut Frame<'_>, change: &FileChange) {
+    let toggle = ids::SEEN.with(&Label::new(change.path().as_str()));
+    let (word, chosen) = match model.review.seen(change) {
+        Seen::Seen => ("seen", Chosen::Chosen),
+        Seen::Changed => ("changed since seen", Chosen::Plain),
+        Seen::Unseen => ("mark seen", Chosen::Plain),
+    };
+    if frame.button(word, toggle, chosen).clicked() {
+        frame.push(Action::Review(ReviewAct::ToggleSeen(change.path().clone())));
+    }
+    frame.attach_tip(toggle);
+}
+
+pub(super) fn whole_button(model: &Model, frame: &mut Frame<'_>, path: &RelativePath) {
+    let whole = ids::WHOLE_FILE.with(&Label::new(path.as_str()));
+    let chosen = if model.review.whole.contains(path) {
+        Chosen::Chosen
+    } else {
+        Chosen::Plain
+    };
+    if frame.button("whole file", whole, chosen).clicked() {
         frame.push(Action::Review(ReviewAct::ToggleWhole(path.clone())));
     }
     frame.attach_tip(whole);

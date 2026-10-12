@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, requested }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, requested, all_changes, stacked }
     };
 }
 
@@ -115,23 +115,24 @@ pub(crate) fn deleted() -> Scenario {
 click-id change/1
 idle
 wait 2
-rect draft-removed@1
-rect draft-removed@300
+rect draft-removed@old.txt:1
+rect draft-removed@old.txt:300
 dump
 shot {shots}/top.png
-click-id draft-removed@2
+click-id draft-removed@old.txt:2
 wait 1
 text near the top
 wait 2
 click-id draft-add
 wait 2
-scroll source 100000
+mouse 800 400
+wheel -5800
 wait 3
-rect draft-removed@1
-rect draft-removed@400
-click-id draft-removed@398
+rect draft-removed@old.txt:1
+rect draft-removed@old.txt:400
+click-id draft-removed@old.txt:398
 wait 1
-click-id draft-removed@400 shift
+click-id draft-removed@old.txt:400 shift
 wait 1
 text keep these
 wait 2
@@ -155,10 +156,10 @@ quit
 ",
         shows: &[
             "DUMP tab=Source focus=None file=None gone=Some(\"old.txt\")",
-            "DUMP rect draft-removed@1 = Some(",
-            "DUMP rect draft-removed@300 = None",
-            "DUMP rect draft-removed@1 = None",
-            "DUMP rect draft-removed@400 = Some(",
+            "DUMP rect draft-removed@old.txt:1 = Some(",
+            "DUMP rect draft-removed@old.txt:300 = None",
+            "DUMP rect draft-removed@old.txt:1 = None",
+            "DUMP rect draft-removed@old.txt:400 = Some(",
             "DUMP draft 1 old.txt:2-2 Old reply=None \"near the top\"",
             "DUMP draft 2 old.txt:398-400 Old reply=None \"keep these\"",
             "DUMP rect draft-box/1 = Some(",
@@ -177,22 +178,22 @@ wait 2
 click-id layout
 idle
 wait 3
-rect table/6
-mouse <<DUMP rect table/6|569,56>>
+rect table@src/lib.rs:6
+mouse <<DUMP rect table@src/lib.rs:6|569,56>>
 wait 60
 idle
 wait 3
 dump
 shot {shots}/hover.png
-hover-id table/6
+hover-id table@src/lib.rs:6
 swipe -400 0
 wait 3
 dump
 shot {shots}/sideways.png
 swipe 4000 0
 wait 3
-rect table/6
-click <<DUMP rect table/6|569,56>> ctrl
+rect table@src/lib.rs:6
+click <<DUMP rect table@src/lib.rs:6|569,56>> ctrl
 wait 3
 idle
 dump
@@ -204,8 +205,8 @@ wait 3
 click-id change/1
 idle
 wait 3
-rect table/6
-click <<DUMP rect table/6|569,56>> alt
+rect table@src/lib.rs:6
+click <<DUMP rect table@src/lib.rs:6|569,56>> alt
 wait 3
 idle
 dump
@@ -235,7 +236,7 @@ wait 2
 dump
 shot {shots}/head.png
 key u ctrl
-click-id draft-removed@10
+click-id draft-removed@src/lib.rs:10
 wait 2
 key c ctrl
 wait 2
@@ -254,8 +255,8 @@ dump
 click-id layout
 idle
 wait 3
-rect table/6
-drag <<DUMP rect table/6|500,24>> <<DUMP rect table/6|500,56>>
+rect table@src/lib.rs:6
+drag <<DUMP rect table@src/lib.rs:6|500,24>> <<DUMP rect table@src/lib.rs:6|500,56>>
 wait 2
 click-id copy-lines
 wait 2
@@ -449,8 +450,9 @@ wait 3
 idle
 wait 2
 dump
+rect file-header@src/lib.rs
 shot {shots}/head.png
-click-id link-open@file
+click-id link-open@src/lib.rs
 wait 2
 dump
 click-id tab@Review
@@ -470,6 +472,7 @@ quit
 ",
         shows: &[
             "file=Some(\"src/lib.rs\") gone=None sel=Some((4, 6))",
+            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 96,",
             "status=\"src/lib.rs from the link\"",
             "status=\"opened https://forgejo.test/owner/repo/src/commit/",
             "/src/lib.rs#L5-L7\"",
@@ -531,6 +534,106 @@ quit
             "DUMP rect pull/0 = Some(",
             "DUMP rect pull/1 = None",
             "DUMP rect pull/1 = Some(",
+        ],
+    }
+}
+
+pub(crate) fn all_changes() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id tab@Commits
+wait 2
+click-id commit/0
+idle
+wait 3
+click-id change/0
+idle
+wait 3
+dump
+click-id all-changes@changes
+wait 3
+hover-id next-unseen
+dump
+shot {shots}/from-changes.png
+click-id tab@Commits
+wait 2
+click-id commit/0
+idle
+wait 3
+click-id change/0
+idle
+wait 3
+click-id tab@Commits
+wait 2
+click-id all-changes
+wait 3
+hover-id next-unseen
+dump
+click-id tab@Commits
+wait 2
+click-id commit/0
+idle
+wait 3
+click-id change/0
+idle
+wait 3
+click-id all-changes@source
+wait 3
+hover-id next-unseen
+dump
+quit
+",
+        shows: &[
+            "DUMP diffs layout=Unified commit=Some(",
+            "DUMP diffs layout=Unified commit=None",
+        ],
+    }
+}
+
+pub(crate) fn stacked() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/2
+idle
+wait 3
+rect file-header@src/lib.rs
+rect source
+dump
+shot {shots}/last.png
+mouse 800 400
+wheel 300
+wait 3
+dump
+shot {shots}/scrolled.png
+click-id change/0
+idle
+wait 3
+rect file-header@notes.md
+rect file-header@old.txt
+click-id collapse@notes.md
+wait 3
+rect file-header@old.txt
+rect draft-removed@old.txt:1
+click-id collapse@old.txt
+wait 3
+absent draft-removed@old.txt:1
+rect file-header@src/lib.rs
+click-id seen@notes.md
+wait 2
+dump
+shot {shots}/collapsed.png
+quit
+",
+        shows: &[
+            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 96,",
+            "DUMP tab=Source focus=None file=Some(\"src/lib.rs\")",
+            "DUMP tab=Source focus=None file=None gone=Some(\"old.txt\")",
+            "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 96,",
+            "DUMP rect draft-removed@old.txt:1 = Some(",
+            "DUMP change notes.md Modified +1 -1 Seen",
+            "DUMP change notes.md Modified +1 -1 Unseen generated",
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 126,",
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 274,",
         ],
     }
 }

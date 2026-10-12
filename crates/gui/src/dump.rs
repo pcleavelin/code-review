@@ -227,17 +227,27 @@ impl Dump for Reviewing {
         };
         lines.line(format_args!("talk {talk}"));
         lines.line(format_args!("rights {:?}", open.rights));
+        lines.line(format_args!(
+            "diffs layout={:?} commit={}",
+            self.diffs.layout,
+            Optional(self.diffs.commit())
+        ));
         if let Some(conversation) = open.conversation() {
             dump_conversation(conversation, lines);
         }
         for change in &opened.changes {
             lines.line(format_args!(
-                "change {} {:?} +{} -{} {:?}",
+                "change {} {:?} +{} -{} {:?}{}",
                 change.path(),
                 change.kind(),
                 change.added(),
                 change.removed(),
-                opened.seen(change)
+                opened.seen(change),
+                if opened.generated.contains(change.path()) {
+                    " generated"
+                } else {
+                    ""
+                }
             ));
         }
         for draft in opened.review.drafts() {

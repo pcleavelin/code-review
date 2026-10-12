@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
+
 use domain::{
     ChangeKind, Commit, CommitId, DiffLine, FileChange, Hunk, Line, LineKind, Login, Moment, Prose,
-    RelativePath, SourceLine,
+    Provenance, RelativePath, SourceLine,
 };
 use io_process::{Argument, Captured, Program};
 
-use crate::wire::{CommandLine, WireCommit, WireFile, WireHunk, WireKind};
+use crate::wire::{self, CommandLine, WireAttribute, WireCommit, WireFile, WireHunk, WireKind};
 
 pub(crate) struct Invocation {
     pub(crate) program: Program,
@@ -66,4 +68,40 @@ pub(crate) fn file_change(wire: WireFile) -> FileChange {
         kind,
         wire.hunks.into_iter().map(hunk).collect(),
     )
+}
+
+pub(crate) fn provenances(attributes: &[WireAttribute]) -> BTreeMap<RelativePath, Provenance> {
+    let mut by_path: BTreeMap<&str, Vec<&WireAttribute>> = BTreeMap::new();
+    for attribute in attributes {
+        by_path
+            .entry(attribute.path.as_str())
+            .or_default()
+            .push(attribute);
+    }
+    by_path
+        .into_iter()
+        .map(|(path, given)| {
+            let said_of = |name: &str| {
+                given
+                    .iter()
+                    .find(|attribute| attribute.name == name)
+                    .map(|attribute| attribute.value.as_str())
+            };
+            let generated = [wire::LINGUIST_GENERATED, wire::GITLAB_GENERATED].map(said_of);
+            let provenance = if generated
+                .iter()
+                .any(|state| matches!(state, Some(wire::SET | wire::TRUE)))
+            {
+                Provenance::Generated
+            } else if generated
+                .iter()
+                .any(|state| matches!(state, Some(wire::UNSET | wire::FALSE)))
+            {
+                Provenance::Handwritten
+            } else {
+                Provenance::Undeclared
+            };
+            (RelativePath::new(path), provenance)
+        })
+        .collect()
 }

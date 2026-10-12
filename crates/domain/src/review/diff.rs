@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::iter;
 
 use crate::review::{Side, Spelling};
@@ -164,10 +164,29 @@ fn flush(
     added.clear();
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RemovedLine<'diff> {
+    pub old: Line,
+    pub text: &'diff SourceLine,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Removal<'diff> {
+    pub before: Line,
+    pub lines: Vec<RemovedLine<'diff>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileRow {
     Head { line: Line, kind: LineKind },
     Removed { old: Line, text: SourceLine },
+}
+
+fn removed_rows(removal: Removal<'_>) -> impl Iterator<Item = FileRow> + use<'_> {
+    removal.lines.into_iter().map(|removed| FileRow::Removed {
+        old: removed.old,
+        text: removed.text.clone(),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -342,36 +361,54 @@ impl FileChange {
         out
     }
 
-    pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow> {
-        let mut before: BTreeMap<Line, Vec<FileRow>> = BTreeMap::new();
-        let mut added = BTreeSet::new();
+    pub fn removals(&self) -> Vec<Removal<'_>> {
+        let mut removals: Vec<Removal<'_>> = Vec::new();
         for hunk in &self.hunks {
             let mut cursor = hunk.new_start;
             for line in hunk.numbered() {
                 match (line.kind, line.old, line.new) {
                     (LineKind::Removed, Some(old), _) => {
-                        before.entry(cursor).or_default().push(FileRow::Removed {
+                        let removed = RemovedLine {
                             old,
-                            text: line.text.clone(),
-                        });
-                    }
-                    (kind, _, Some(new)) => {
-                        if kind == LineKind::Added {
-                            added.insert(new);
+                            text: line.text,
+                        };
+                        match removals.last_mut() {
+                            Some(last) if last.before == cursor => last.lines.push(removed),
+                            _ => removals.push(Removal {
+                                before: cursor,
+                                lines: vec![removed],
+                            }),
                         }
-                        cursor = new.next().unwrap_or(new);
                     }
+                    (_, _, Some(new)) => cursor = new.next().unwrap_or(new),
                     _ => {}
                 }
             }
         }
+        removals
+    }
+
+    pub fn added_lines(&self) -> Vec<Line> {
+        self.hunks
+            .iter()
+            .flat_map(Hunk::numbered)
+            .filter(|line| line.kind == LineKind::Added)
+            .filter_map(|line| line.new)
+            .collect()
+    }
+
+    pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow> {
+        let added: BTreeSet<Line> = self.added_lines().into_iter().collect();
+        let mut removals = self.removals().into_iter().peekable();
         let mut rows = Vec::new();
         for line in head
             .and_then(FileText::span)
             .into_iter()
             .flat_map(Span::lines)
         {
-            rows.extend(before.remove(&line).into_iter().flatten());
+            while let Some(removal) = removals.next_if(|removal| removal.before <= line) {
+                rows.extend(removed_rows(removal));
+            }
             let kind = if added.contains(&line) {
                 LineKind::Added
             } else {
@@ -379,7 +416,47 @@ impl FileChange {
             };
             rows.push(FileRow::Head { line, kind });
         }
-        rows.extend(before.into_values().flatten());
+        rows.extend(removals.flat_map(removed_rows));
         rows
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Provenance {
+    Generated,
+    Handwritten,
+    Undeclared,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileName(&'static str);
+
+const GENERATED_NAMES: [FileName; 14] = [
+    FileName("Cargo.lock"),
+    FileName("package-lock.json"),
+    FileName("npm-shrinkwrap.json"),
+    FileName("pnpm-lock.yaml"),
+    FileName("bun.lock"),
+    FileName("composer.lock"),
+    FileName("Pipfile.lock"),
+    FileName("poetry.lock"),
+    FileName("pdm.lock"),
+    FileName("uv.lock"),
+    FileName("flake.lock"),
+    FileName("deno.lock"),
+    FileName("Package.resolved"),
+    FileName("Gopkg.lock"),
+];
+
+impl Provenance {
+    pub fn generated(self, path: &RelativePath) -> bool {
+        match self {
+            Self::Generated => true,
+            Self::Handwritten => false,
+            Self::Undeclared => {
+                let name = path.as_str().rsplit('/').next().unwrap_or_default();
+                GENERATED_NAMES.iter().any(|known| known.0 == name)
+            }
+        }
     }
 }

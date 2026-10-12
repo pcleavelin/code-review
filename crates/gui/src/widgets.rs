@@ -138,6 +138,7 @@ pub(crate) enum Container {
     CommentRow(Id),
     Removed(Id),
     Folded,
+    FileHeader { id: Id, height: Px },
     Markdown(Id),
 }
 
@@ -279,6 +280,16 @@ impl Container {
             Self::Removed(id) => Shape::new(
                 Layout::column().grow_width(),
                 Style::background(REMOVED_FILL),
+                Some(id),
+            ),
+            Self::FileHeader { id, height } => Shape::new(
+                Layout::row()
+                    .grow_width()
+                    .height(height)
+                    .padding(BAR_PADDING)
+                    .gap(SMALL_GAP)
+                    .cross(Align::Center),
+                Style::background(PANEL).border(Sides::TOP.with(Sides::BOTTOM), BORDER),
                 Some(id),
             ),
             Self::Folded => Shape::new(

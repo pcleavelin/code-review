@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::mem;
 use std::path::PathBuf;
@@ -49,6 +50,7 @@ pub(crate) struct App {
     pub(crate) settings: KeptSettings,
     cursor: Cursor,
     hidden_focus: Count,
+    reported_duplicates: BTreeSet<Id>,
 }
 
 #[derive(Debug, Default)]
@@ -112,6 +114,7 @@ impl App {
             cursor: Cursor::Default,
             settings,
             hidden_focus: Count::ZERO,
+            reported_duplicates: BTreeSet::new(),
         };
         app.model.set_tab(Tab::Inbox);
         app.index_working_copy();
@@ -134,6 +137,7 @@ impl App {
             settings: KeptSettings::default(),
             cursor: Cursor::Default,
             hidden_focus: Count::ZERO,
+            reported_duplicates: BTreeSet::new(),
         }
     }
 
@@ -324,6 +328,7 @@ impl platform::App for App {
         self.cursor = cursor;
         self.ui.end(renderer);
         self.check_focus_shown();
+        self.check_ids_unique();
         if laid_out {
             self.fit_console();
         }
@@ -477,6 +482,20 @@ impl App {
             dump::report(format_args!(
                 "script: the {which:?} field has the keyboard but is not on screen: the action that focused it must also show it"
             ));
+        }
+    }
+
+    fn check_ids_unique(&mut self) {
+        if !scripted() {
+            return;
+        }
+        for duplicate in self.ui.duplicate_ids() {
+            if self.reported_duplicates.insert(duplicate.id) {
+                dump::report(format_args!(
+                    "script: two elements were laid out under one id, at {:?} and at {:?}: only the second takes clicks, so give each its own id (`with` or `nth` on its control in ids.rs)",
+                    duplicate.first, duplicate.second
+                ));
+            }
         }
     }
 

@@ -9,6 +9,7 @@ mod panel_tree;
 mod references;
 mod review;
 mod settings;
+mod stack;
 mod table;
 mod tooltip;
 

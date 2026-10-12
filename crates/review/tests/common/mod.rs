@@ -44,6 +44,7 @@ pub fn twice(value: i32) -> i32 {
 ",
     ),
     ("notes.md", "# notes\n\nWhat the shapes are for.\n"),
+    (".gitattributes", "notes.md linguist-generated\n"),
 ];
 
 pub(crate) const FIRST: &[(&str, &str)] = &[(

@@ -605,13 +605,25 @@ impl Element {
         }
     }
 
-    fn record(&self, placements: &mut BTreeMap<Id, Placement>, inherited: Layer) {
+    fn record(
+        &self,
+        placements: &mut BTreeMap<Id, Placement>,
+        duplicates: &mut Vec<DuplicateId>,
+        inherited: Layer,
+    ) {
         let layer = self.layer(inherited);
         if let Some(id) = self.id {
-            placements.insert(id, self.placement(layer));
+            let placement = self.placement(layer);
+            if let Some(first) = placements.insert(id, placement) {
+                duplicates.push(DuplicateId {
+                    id,
+                    first: first.rect,
+                    second: placement.rect,
+                });
+            }
         }
         for child in &self.children {
-            child.record(placements, layer);
+            child.record(placements, duplicates, layer);
         }
     }
 
@@ -781,6 +793,13 @@ struct Kept {
     moved: Vec<Id>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DuplicateId {
+    pub id: Id,
+    pub first: Rect,
+    pub second: Rect,
+}
+
 #[derive(Default)]
 pub struct Ui {
     roots: Vec<Element>,
@@ -796,6 +815,7 @@ pub struct Ui {
     capture: Capture,
     held: Option<Held>,
     kept: Kept,
+    duplicates: Vec<DuplicateId>,
 }
 
 impl Ui {
@@ -977,6 +997,10 @@ impl Ui {
         self.previous.get(&id).copied()
     }
 
+    pub fn duplicate_ids(&self) -> &[DuplicateId] {
+        &self.duplicates
+    }
+
     pub fn on_scrollbar(&self, id: Id) -> bool {
         let mouse = self.pointer.mouse;
         self.previous.get(&id).is_some_and(|placement| {
@@ -1117,8 +1141,9 @@ impl Ui {
         }
 
         self.previous.clear();
+        self.duplicates.clear();
         for root in &self.roots {
-            root.record(&mut self.previous, Layer::Base);
+            root.record(&mut self.previous, &mut self.duplicates, Layer::Base);
         }
         self.last_mouse = self.pointer.mouse;
     }

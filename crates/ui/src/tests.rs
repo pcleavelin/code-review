@@ -3,9 +3,10 @@ use std::rc::Rc;
 use strum::VariantArray;
 
 use crate::{
-    Axis, Button, Buttons, Canvas, Capture, Cell, Color, Command, Coordinate, Count, Extent,
-    FontSize, Glyph, Grid, Icon, Id, Input, Key, Kind, Label, Layout, Measure, Mods, Pinch, Point,
-    Press, Px, Rect, Run, Scale, ScrollAxes, Scrollbar, Sides, Style, Text, Ui, Vector, Wrap,
+    Axis, Button, Buttons, Canvas, Capture, Cell, Color, Command, Coordinate, Count, DuplicateId,
+    Extent, FontSize, Glyph, Grid, Icon, Id, Input, Key, Kind, Label, Layout, Measure, Mods, Pinch,
+    Point, Press, Px, Rect, Run, Scale, ScrollAxes, Scrollbar, Sides, Style, Text, Ui, Vector,
+    Wrap,
 };
 
 struct Cells;
@@ -1188,4 +1189,35 @@ fn the_wheel_scrolls_a_column_while_the_pointer_rests_on_a_button_clicked_or_not
     frame.pointer.wheel = Vector::ZERO;
     listing(&mut ui, &frame, &mut offset, 2);
     assert_eq!(offset, Point::new(px(0), px(20)));
+}
+
+fn boxes(ui: &mut Ui, names: &[&str]) {
+    ui.begin(&input(100, 100));
+    ui.open(Kind::None, Layout::column().grow(), Style::default(), None);
+    for name in names {
+        ui.leaf(
+            Kind::None,
+            Layout::row().width(px(10)).height(px(10)),
+            Style::default(),
+            Some(Id::new(name)),
+        );
+    }
+    ui.close();
+    ui.end(&mut Cells);
+}
+
+#[test]
+fn a_duplicate_id_names_both_places_until_a_frame_lays_it_out_once() {
+    let mut ui = Ui::default();
+    boxes(&mut ui, &["twice", "once", "twice"]);
+    assert_eq!(
+        ui.duplicate_ids(),
+        [DuplicateId {
+            id: Id::new("twice"),
+            first: rect(0, 0, 10, 10),
+            second: rect(0, 20, 10, 10),
+        }]
+    );
+    boxes(&mut ui, &["twice", "once"]);
+    assert_eq!(ui.duplicate_ids(), []);
 }

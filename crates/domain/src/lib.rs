@@ -22,9 +22,9 @@ pub use review::{
     Decision, DiffLayout, DiffLine, Draft, DraftError, DraftId, DraftOn, DraftText, FileChange,
     FileCount, FileRow, Forge, ForgeHost, ForgeKind, Grant, Host, Hunk, Lifetime, LineKind, Linked,
     LinkedFile, Login, Mark, Moment, Note, NumberedLine, OAuthApp, Paired, Pairing, PrNumber,
-    PrTitle, Progress, Prose, PullRequest, RefName, RefreshToken, Refusal, Renewal, RepoSlug,
-    Review, Revision, Rights, Seen, Side, Spelling, Standing, Submission, SubmissionId, Thread,
-    ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
+    PrTitle, Progress, Prose, Provenance, PullRequest, RefName, RefreshToken, Refusal, Removal,
+    RemovedLine, Renewal, RepoSlug, Review, Revision, Rights, Seen, Side, Spelling, Standing,
+    Submission, SubmissionId, Thread, ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
 };
 pub use settings::{BaseFontSize, FontFamily, Settings, Theme};
 pub use text::{

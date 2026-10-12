@@ -1,6 +1,7 @@
 mod convert;
 mod wire;
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -8,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
 use domain::{
-    BranchName, Commit, CommitId, FileChange, FileText, PrNumber, RefName, RelativePath, Root,
+    BranchName, Commit, CommitId, FileChange, FileText, PrNumber, Provenance, RefName,
+    RelativePath, Root,
 };
 use io_process::Process;
 
@@ -284,6 +286,25 @@ impl Vcs {
         Ok(FileText::from(stdout.text().as_str()))
     }
 
+    pub fn provenances(
+        &self,
+        commit: &CommitId,
+        paths: &[RelativePath],
+    ) -> Result<BTreeMap<RelativePath, Provenance>, VcsError> {
+        if paths.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let asked: Vec<&str> = paths.iter().map(RelativePath::as_str).collect();
+        let stdout = Self::run_with(
+            &wire::check_attributes(commit.as_str()),
+            self.root.as_path(),
+            &Captured::of(&wire::attribute_paths(&asked)),
+        )?;
+        Ok(convert::provenances(&wire::parse_attributes(
+            &stdout.text(),
+        )))
+    }
+
     pub fn check_out(&self, tree: &Path, commit: &CommitId) -> Result<(), VcsError> {
         if tree.join(wire::GIT_MARKER).exists() {
             Self::run(&wire::check_out(commit.as_str()), tree)?;
@@ -313,9 +334,21 @@ impl Vcs {
     }
 
     fn run(line: &CommandLine, directory: &Path) -> Result<Captured, VcsError> {
+        Self::run_with(line, directory, &Captured::of(&[]))
+    }
+
+    fn run_with(
+        line: &CommandLine,
+        directory: &Path,
+        input: &Captured,
+    ) -> Result<Captured, VcsError> {
         let invocation = Invocation::from(line);
-        let output = Process::run(&invocation.program, &invocation.arguments, directory)
-            .map_err(VcsError::Process)?;
+        let output = if input.is_empty() {
+            Process::run(&invocation.program, &invocation.arguments, directory)
+        } else {
+            Process::run_with_input(&invocation.program, &invocation.arguments, directory, input)
+        }
+        .map_err(VcsError::Process)?;
         if output.success() {
             Ok(output.stdout)
         } else {

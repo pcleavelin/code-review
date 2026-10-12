@@ -89,6 +89,7 @@ rule applies.
 | **Base, head** | The two commits a review compares: the merge base of the base branch and the head, and the head. Fetched into `refs/code-review/<n>/base` and `/head`, so every command after `open` works offline. |
 | **Tree** | The head of a pull request checked out in a git worktree of its own, `<git common dir>/code-review/trees/<n>`. The Source view, the index and the language servers read it. |
 | **Change** | One file the pull request changes: path (and old path when renamed), kind, hunks of added, removed and context lines. |
+| **Generated** | A change the head's `.gitattributes` marks `linguist-generated` or `gitlab-generated`, or a well-known lock file (`Cargo.lock`, `package-lock.json`, ...) it does not mark `-linguist-generated`. Read through `git check-attr --source`, so every forge sees it. Its diff starts collapsed in the Source view; it is seen like any change. |
 | **Seen** | A change the reviewer marked as read. The mark keeps a hash of the change's diff; when the pull request changes that file again the hash differs and it is **changed since seen**, which counts as unseen. |
 | **Draft** | A comment on one line or a run of lines of a change, on the new side or (for removed lines) the old side, kept locally until it is submitted. Only lines inside one hunk take one, because forges refuse others. In the Source view a selection (click, shift-click or drag, on head lines or on removed lines) takes one by typing, the comment button or alt+c; a reply is drawn inside its thread. |
 | **Review** | Per pull request, the seen marks and the drafts: `<git common dir>/code-review/reviews/<n>.review`, written at once on every change, read again by an open window when it changes. Submitting sends every draft and the summary as one review (comment, approve, request changes) and clears the drafts. The forge decides which of the three a reviewer may send: GitHub and Forgejo take no approval or request for changes from the author, GitLab says who may approve; comment and request changes need a draft or a summary, and nothing goes out without a login. The Review tab colours the three buttons (approve green, request changes red), disables a refused one with the reason as its tip, and asks before it sends. |
@@ -120,8 +121,11 @@ rule applies.
   it seen; one that changes it brings it back. The mark also keeps the head commit it was made
   at, so a file changed since seen shows what changed since that commit. No ref holds that
   commit: it lasts as long as git keeps the object, and `--since-seen` says so once it is gone.
-- **The diff is drawn on the head file, folded to the change.** The Source view shows the head
-  file with added lines tinted and removed lines, threads that are not outdated and drafts
+- **The diff is drawn on the head file, folded to the change.** The Source view shows every
+  changed file in one column, in the order of Changes, each under a header that marks it seen,
+  collapses it and links it; picking a file in Changes scrolls to its header, and scrolling makes
+  the file in sight the selection. A file the pull request does not change is shown alone. Each
+  file is the head file with added lines tinted and removed lines, threads that are not outdated and drafts
   inserted where they belong; lines more than three away from a change fold
   into a row that opens twenty lines at a time toward either change, or all at once, and
   "whole file" drops the folds. Every identifier on a changed line navigates like any other
@@ -212,14 +216,16 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
   `dblclick-id <id>`, `hover-id <id>`, `absent <id>`, `shot <file.png>`, `dump`. A `script:`
   line on stderr fails the run. Id names are the ones in `crates/gui/src/ids.rs`: `name`,
   `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, changed files `change/<n>`,
-  commits `commit/<n>`, `all-changes`, the split toggle `layout`, thread rows `thread/<n>`,
-  a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up/<first line>`,
-  `fold-down/<last line>` and `fold/<first line>`, link buttons `link-open@<key>` and
-  `link-copy@<key>` (`pull`, `file`, `<thread>/<note>`), a
-  removed line `draft-removed@<old line>`, a draft's remove button `draft-remove@<id>`, every
+  commits `commit/<n>`, `all-changes` (in the Changes and Source toolbars `all-changes@changes`, `@source`), the split toggle `layout`, thread rows `thread/<n>`,
+  a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up@<path>:<first line>`,
+  `fold-down@<path>:<last line>` and `fold@<path>:<first line>` (lines from 0), a file's header
+  `file-header@<path>` with `collapse@<path>`, `seen@<path>`, `whole-file@<path>`, split rows
+  `table@<path>:<row>`, link buttons `link-open@<key>` and `link-copy@<key>` (`pull`, `file`,
+  `<path>`, `<thread>/<note>`), a removed line `draft-removed@<path>:<old line>`, a draft's remove button `draft-remove@<id>`, every
   view's tab `tab@<View>`). Rects come from the previous frame, so `wait 1` after anything
   that changes the layout. `dump` prints the selection, the review (pulls, the open pull
-  request, the inbox entries, the open pull request, every change with its seen state, the threads,
+  request, the inbox entries, the open pull request, the diff layout and the commit shown, every
+  change with its seen state, the threads,
   every draft), scroll offsets, the panel tree,
   fields, the backend and the servers to stderr as `DUMP` lines (grep `^DUMP`).
   A script or screenshot run opens a fixed 1600x1000 window at scale 1 and ignores the real
