@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
+use std::thread;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Prefix(&'static str);
@@ -172,14 +173,24 @@ impl Process {
             .stdin
             .take()
             .ok_or_else(|| ProcessError::NoPipe(program.clone()))?;
-        let written = stdin.write_all(&input.0);
-        drop(stdin);
-        let output = child
-            .wait_with_output()
-            .map_err(|error| ProcessError::Start {
-                program: program.clone(),
-                error,
-            })?;
+        let (written, output) = thread::scope(|scope| {
+            let writer = scope.spawn(move || {
+                let written = stdin.write_all(&input.0);
+                drop(stdin);
+                written
+            });
+            let output = child.wait_with_output();
+            (writer.join(), output)
+        });
+        let output = output.map_err(|error| ProcessError::Start {
+            program: program.clone(),
+            error,
+        })?;
+        let written = written.unwrap_or_else(|_| {
+            Err(io::Error::other(format!(
+                "the thread writing to {program} stopped"
+            )))
+        });
         written.map_err(|error| ProcessError::Start {
             program: program.clone(),
             error,

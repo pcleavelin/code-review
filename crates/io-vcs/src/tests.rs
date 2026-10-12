@@ -4,6 +4,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use domain::{
     BranchName, ChangeKind, CommitId, Line, PrNumber, Provenance, RefName, RelativePath, Root,
@@ -409,4 +412,52 @@ fn attributes_at_the_commit_mark_files_generated_or_handwritten_whatever_the_wor
     assert_eq!(said("logo.bin"), Some(Provenance::Undeclared));
     assert_eq!(said("mr.rs"), Some(Provenance::Generated));
     assert_eq!(said("src/main.rs"), Some(Provenance::Undeclared));
+}
+
+const RUN_WAIT: Duration = Duration::from_secs(60);
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the run goes on a thread of its own so a deadlock fails the test instead of hanging it"
+)]
+fn run_bounded<T: Send + 'static>(run: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (sender, receiver) = mpsc::channel();
+    drop(thread::spawn(move || drop(sender.send(run()))));
+    receiver.recv_timeout(RUN_WAIT).ok()
+}
+
+#[test]
+fn attributes_answer_for_more_paths_than_a_pipe_holds() {
+    if !available("git") {
+        return;
+    }
+    let repo = Scratch::new("many-attributes");
+    repo.run("git", &["init", "-q", "-b", "main"]);
+    repo.put(".gitattributes", "gen/** linguist-generated\n");
+    repo.put("README", "x\n");
+    commit_all(&repo, "marked");
+    let vcs = Vcs::detect(&repo.root()).unwrap();
+    let head = Process::run(
+        &Program::new("git"),
+        &[Argument::new("rev-parse"), Argument::new("HEAD")],
+        &repo.0,
+    )
+    .unwrap();
+    let head = CommitId::new(head.stdout.text().trim()).unwrap();
+    let paths: Vec<RelativePath> = (0..10_000)
+        .map(|number| {
+            let folder = if number % 2 == 0 { "gen" } else { "src" };
+            RelativePath::new(&format!("{folder}/module-{number:05}.rs"))
+        })
+        .collect();
+    let asked = paths.clone();
+    let marked = run_bounded(move || vcs.provenances(&head, &asked))
+        .expect("git check-attr fed more paths than a pipe holds never ended")
+        .unwrap();
+    let generated = marked
+        .values()
+        .filter(|provenance| **provenance == Provenance::Generated)
+        .count();
+    assert_eq!(marked.len(), paths.len());
+    assert_eq!(generated, paths.len() / 2);
 }

@@ -2,6 +2,9 @@ use std::env;
 use std::io::{Read, Write};
 
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use crate::{Argument, Captured, Process, ProcessError, Program, plain};
 
@@ -62,6 +65,30 @@ fn run_with_input_feeds_stdin_and_waits() {
     .unwrap();
     assert!(output.success());
     assert_eq!(output.stdout.as_bytes(), b"token");
+}
+
+const RUN_WAIT: Duration = Duration::from_secs(60);
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the run goes on a thread of its own so a deadlock fails the test instead of hanging it"
+)]
+fn run_bounded<T: Send + 'static>(run: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (sender, receiver) = mpsc::channel();
+    drop(thread::spawn(move || drop(sender.send(run()))));
+    receiver.recv_timeout(RUN_WAIT).ok()
+}
+
+#[test]
+fn run_with_input_reads_the_output_while_it_writes_input_larger_than_a_pipe() {
+    let input = Captured::of(&vec![b'x'; 4 << 20]);
+    let fed = input.clone();
+    let output = run_bounded(move || {
+        Process::run_with_input(&Program::new("cat"), &[], &env::temp_dir(), &fed)
+    })
+    .expect("cat fed more than a pipe holds never ended")
+    .unwrap();
+    assert_eq!(output.stdout, input);
 }
 
 #[test]
