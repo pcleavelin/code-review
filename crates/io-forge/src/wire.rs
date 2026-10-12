@@ -1325,7 +1325,7 @@ pub(crate) struct BuiltInApp {
 pub(crate) const BUILT_IN_APPS: [BuiltInApp; 2] = [
     BuiltInApp {
         host: "github.com",
-        client: "Ov23libeQuW6oeJLiwjn",
+        client: "Iv23ctOWEMAaCnTk6twY",
     },
     BuiltInApp {
         host: "gitlab.com",
@@ -1392,11 +1392,10 @@ pub(crate) fn token_page(kind: ForgeKind, host: &str) -> String {
     }
 }
 
-const fn scope(kind: ForgeKind) -> &'static str {
+const fn scope(kind: ForgeKind) -> Option<&'static str> {
     match kind {
-        ForgeKind::GitHub => "repo",
-        ForgeKind::GitLab => "api",
-        ForgeKind::Forgejo => "",
+        ForgeKind::GitLab => Some("api"),
+        ForgeKind::GitHub | ForgeKind::Forgejo => None,
     }
 }
 
@@ -1421,7 +1420,10 @@ fn form(fields: &[(&str, &str)]) -> String {
 }
 
 pub(crate) fn device_form(kind: ForgeKind, client: &str) -> String {
-    form(&[("client_id", client), ("scope", scope(kind))])
+    match scope(kind) {
+        Some(scope) => form(&[("client_id", client), ("scope", scope)]),
+        None => form(&[("client_id", client)]),
+    }
 }
 
 pub(crate) fn poll_form(client: &str, device_code: &str) -> String {
@@ -1532,4 +1534,10 @@ pub(crate) fn refresh_request(
     refresh: &str,
 ) -> Option<Captured> {
     form_request(token_url(kind, host), &refresh_form(client, refresh))
+}
+
+const INTEGRATION_REFUSED: &str = "Resource not accessible by integration";
+
+pub(crate) fn integration_refused(body: &str) -> bool {
+    body.contains(INTEGRATION_REFUSED)
 }

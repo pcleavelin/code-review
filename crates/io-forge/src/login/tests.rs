@@ -86,8 +86,8 @@ fn forgejo_logs_in_by_pasting_a_token_made_on_its_applications_page() {
 #[test]
 fn the_forms_ask_for_the_scope_poll_with_the_device_grant_and_refresh_with_the_refresh_token() {
     assert_eq!(
-        wire::device_form(ForgeKind::GitHub, "Ov23libeQuW6oeJLiwjn"),
-        "client_id=Ov23libeQuW6oeJLiwjn&scope=repo"
+        wire::device_form(ForgeKind::GitHub, "Iv23client"),
+        "client_id=Iv23client"
     );
     assert_eq!(
         wire::device_form(ForgeKind::GitLab, "abc"),
@@ -271,10 +271,54 @@ fn a_cancel_ends_a_pause_before_its_time() {
 }
 
 #[test]
-fn a_built_in_host_finds_its_app_and_any_other_host_has_none() {
-    assert!(built_in_client(&Host::new("GitHub.com").unwrap()).is_ok());
+fn a_host_with_a_built_in_slot_is_never_told_it_has_none_and_any_other_host_is() {
+    assert_ne!(
+        built_in_client(&Host::new("GitHub.com").unwrap()),
+        Err(MissingClient::NotBuiltIn)
+    );
     assert_eq!(
         built_in_client(&Host::new("gitlab.example.org").unwrap()),
         Err(MissingClient::NotBuiltIn)
+    );
+}
+
+const GITHUB_APP_GRANT: &str = r#"{"access_token":"ghu_16C7e42F292c6912E7710c838347Ae178B4a","expires_in":28800,"refresh_token":"ghr_1B4a2e77838347a7E420ce178F2E7c6912E169246c34E1ccbF66C46812d16D5B1A9Dc86A1498","refresh_token_expires_in":15897600,"scope":"","token_type":"bearer"}"#;
+const GITHUB_APP_LASTING_GRANT: &str = r#"{"access_token":"ghu_16C7e42F292c6912E7710c838347Ae178B4a","scope":"","token_type":"bearer"}"#;
+
+#[test]
+fn a_github_app_token_expires_in_eight_hours_with_its_refresh_token_unless_it_comes_alone() {
+    let client = ClientId::new("Iv23client").unwrap();
+    let WirePolled::Granted(expiring) = said(GITHUB_APP_GRANT) else {
+        panic!("not granted");
+    };
+    let renewal = convert::grant(&expiring, &client, UnixTime::new(1000))
+        .unwrap()
+        .renewal
+        .unwrap();
+    assert_eq!(renewal.expires, UnixTime::new(29_800));
+    assert!(renewal.refresh.as_str().starts_with("ghr_1B4a"));
+    let WirePolled::Granted(lasting) = said(GITHUB_APP_LASTING_GRANT) else {
+        panic!("not granted");
+    };
+    assert_eq!(
+        convert::grant(&lasting, &client, UnixTime::new(1000))
+            .unwrap()
+            .renewal,
+        None
+    );
+}
+
+#[test]
+fn github_renews_at_its_token_endpoint_with_the_refresh_token_and_no_secret() {
+    let request = wire::refresh_request(ForgeKind::GitHub, "github.com", "Iv23client", "ghr_x")
+        .unwrap()
+        .text();
+    assert_eq!(
+        request,
+        "url = \"https://github.com/login/oauth/access_token\"\n\
+         header = \"Accept: application/json\"\n\
+         header = \"Content-Type: application/x-www-form-urlencoded\"\n\
+         data-binary = \"client_id=Iv23client&grant_type=refresh_token&refresh_token=ghr_x\"\n\
+         write-out = \"\\n%header{link}\\n%{http_code}\"\n"
     );
 }

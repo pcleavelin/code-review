@@ -1761,3 +1761,53 @@ fn only_github_asks_for_rendered_bodies() {
         Some("header = \"Accept: application/json\"")
     );
 }
+
+const INTEGRATION_REFUSAL: &str = r#"{"message":"Resource not accessible by integration","documentation_url":"https://docs.github.com/rest/pulls/reviews#create-a-review-for-a-pull-request","status":"403"}"#;
+
+fn forge(kind: ForgeKind) -> Forge {
+    Forge::new(
+        kind,
+        Host::new("github.com").unwrap(),
+        RepoSlug::new("owner/repo").unwrap(),
+    )
+}
+
+#[test]
+fn a_github_app_refused_on_a_repository_says_to_install_it_there() {
+    let refused = crate::refusal(
+        &forge(ForgeKind::GitHub),
+        HttpStatus::new(403),
+        ResponseBody::new(INTEGRATION_REFUSAL),
+    );
+    assert!(
+        matches!(refused, ForgeError::NotPermitted { .. }),
+        "{refused:?}"
+    );
+    let said = refused.to_string();
+    assert!(
+        said.contains("may not do that on owner/repo: install the App on that repository"),
+        "{said}"
+    );
+}
+
+#[test]
+fn other_forbidden_answers_and_other_forges_stay_plain_http_errors() {
+    let other = crate::refusal(
+        &forge(ForgeKind::GitHub),
+        HttpStatus::new(403),
+        ResponseBody::new(r#"{"message":"Must have admin rights to Repository."}"#),
+    );
+    assert!(matches!(other, ForgeError::Http { .. }), "{other:?}");
+    let unauthorized = crate::refusal(
+        &forge(ForgeKind::GitHub),
+        HttpStatus::new(401),
+        ResponseBody::new(INTEGRATION_REFUSAL),
+    );
+    assert!(matches!(unauthorized, ForgeError::Http { .. }));
+    let forgejo = crate::refusal(
+        &forge(ForgeKind::Forgejo),
+        HttpStatus::new(403),
+        ResponseBody::new(INTEGRATION_REFUSAL),
+    );
+    assert!(matches!(forgejo, ForgeError::Http { .. }));
+}

@@ -7,6 +7,7 @@ pub const fn new(count: usize) -> Self
 pub const fn get(self) -> usize
 pub struct HttpStatus(u16);
 pub const UNAUTHORIZED: Self = Self(401);
+pub const FORBIDDEN: Self = Self(403);
 pub const fn new(code: u16) -> Self
 pub const fn get(self) -> u16
 pub const fn success(self) -> bool
@@ -15,7 +16,7 @@ pub fn new(text: &str) -> Self
 pub fn as_str(&self) -> &str
 pub struct Submitted { pub comments: CommentCount, }
 pub enum Unsent { Drafts, Approval, }
-pub enum ForgeError { UnknownHost(Host), UnreadableUrl(RemoteUrl), NoToken(ForgeKind), Process(ProcessError), Unreachable(Captured), Http { status: HttpStatus, body: ResponseBody, }, Malformed(ResponseBody), Unfinished { sent: Vec<DraftId>, unsent: Unsent, cause: Box<ForgeError>, }, PendingLeft { pending: CommentCount, cause: Box<ForgeError>, }, NoDeviceLogin(ForgeHost), LoginDenied(ForgeHost), LoginExpired(ForgeHost), LoginCancelled(ForgeHost), LoginRefused { site: ForgeHost, code: OAuthErrorCode, description: ResponseBody, }, }
+pub enum ForgeError { UnknownHost(Host), UnreadableUrl(RemoteUrl), NoToken(ForgeKind), Process(ProcessError), Unreachable(Captured), Http { status: HttpStatus, body: ResponseBody, }, Malformed(ResponseBody), Unfinished { sent: Vec<DraftId>, unsent: Unsent, cause: Box<ForgeError>, }, PendingLeft { pending: CommentCount, cause: Box<ForgeError>, }, NotPermitted { slug: RepoSlug, body: ResponseBody, }, NoDeviceLogin(ForgeHost), LoginDenied(ForgeHost), LoginExpired(ForgeHost), LoginCancelled(ForgeHost), LoginRefused { site: ForgeHost, code: OAuthErrorCode, description: ResponseBody, }, }
 pub const fn refused_token(&self) -> bool
 pub fn sent(&self) -> &[DraftId]
 pub struct ForgeClient { forge: Forge, token: Option<Token>, source: Option<TokenSource>, }

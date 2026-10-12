@@ -62,6 +62,20 @@ impl Sourced {
     }
 }
 
+fn refusal(forge: &Forge, status: HttpStatus, body: ResponseBody) -> ForgeError {
+    if status == HttpStatus::FORBIDDEN
+        && forge.kind() == ForgeKind::GitHub
+        && wire::integration_refused(body.as_str())
+    {
+        ForgeError::NotPermitted {
+            slug: forge.slug().clone(),
+            body,
+        }
+    } else {
+        ForgeError::Http { status, body }
+    }
+}
+
 fn now() -> UnixTime {
     UnixTime::new(
         SystemTime::now()
@@ -113,6 +127,7 @@ pub struct HttpStatus(u16);
 
 impl HttpStatus {
     pub const UNAUTHORIZED: Self = Self(401);
+    pub const FORBIDDEN: Self = Self(403);
 
     pub const fn new(code: u16) -> Self {
         Self(code)
@@ -184,6 +199,10 @@ pub enum ForgeError {
         pending: CommentCount,
         cause: Box<ForgeError>,
     },
+    NotPermitted {
+        slug: RepoSlug,
+        body: ResponseBody,
+    },
     NoDeviceLogin(ForgeHost),
     LoginDenied(ForgeHost),
     LoginExpired(ForgeHost),
@@ -217,6 +236,7 @@ impl ForgeError {
             | Self::Http { .. }
             | Self::Malformed(_)
             | Self::PendingLeft { .. }
+            | Self::NotPermitted { .. }
             | Self::NoDeviceLogin(_)
             | Self::LoginDenied(_)
             | Self::LoginExpired(_)
@@ -296,6 +316,10 @@ impl fmt::Display for ForgeError {
             } => write!(
                 formatter,
                 "the forge took every draft and the summary, then refused the approval: {cause}. Approve again, without a summary"
+            ),
+            Self::NotPermitted { slug, body } => write!(
+                formatter,
+                "the GitHub App this tool logs in through may not do that on {slug}: install the App on that repository, or grant it the permission it lacks, in its settings on GitHub; public reads keep working without it (the forge said: {body})"
             ),
             Self::NoDeviceLogin(site) => write!(
                 formatter,
@@ -459,10 +483,11 @@ impl ForgeClient {
         if status.success() {
             Ok(response)
         } else {
-            Err(ForgeError::Http {
+            Err(refusal(
+                &self.forge,
                 status,
-                body: ResponseBody::new(&response.body),
-            })
+                ResponseBody::new(&response.body),
+            ))
         }
     }
 
