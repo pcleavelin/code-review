@@ -2,8 +2,9 @@ use std::fmt;
 use std::path::PathBuf;
 
 use domain::{
-    Commit, CommitId, Conversation, Decision, Draft, DraftText, FileChange, FileText, Forge, Mark,
-    PrNumber, Progress, PullRequest, RelativePath, Review, Root, Seen, Standing,
+    Commit, CommitId, Content, Conversation, Decision, Draft, DraftText, FileChange, FileText,
+    Forge, Mark, PrNumber, Progress, PullRequest, RelativePath, Review, Rights, Root, Seen,
+    Standing,
 };
 use io_forge::{ForgeClient, ForgeError, Submitted, TokenSource};
 use io_review::ReviewStore;
@@ -213,6 +214,10 @@ impl Repo {
         self.with_forge(|forge| forge.conversation(pull))
     }
 
+    pub fn rights(&self, pull: &PullRequest) -> Result<Rights, SessionError> {
+        self.with_forge(|forge| forge.rights(pull))
+    }
+
     pub fn fetch(&self, pull: &PullRequest) -> Result<Opened, SessionError> {
         let forge = self.forge()?;
         self.vcs.fetch(
@@ -306,11 +311,26 @@ impl Repo {
         decision: Decision,
         body: Option<&DraftText>,
     ) -> Result<Submitted, SessionError> {
-        if opened.review.drafts().is_empty() && body.is_none() && decision == Decision::Comment {
-            return Err(SessionError::NothingToSubmit(opened.number));
+        let content = Content::of(opened.review.drafts(), body);
+        let refused = |rights: &Rights| {
+            rights
+                .refusal(decision, content)
+                .map(|refusal| SessionError::SubmitRefused {
+                    number: opened.number,
+                    refusal,
+                })
+        };
+        if let Some(refused) = refused(&Rights::default()) {
+            return Err(refused);
         }
-        let (forge, pull) =
-            self.with_forge(|forge| Ok((forge.clone(), forge.pull(opened.number)?)))?;
+        let (forge, pull, rights) = self.with_forge(|forge| {
+            let pull = forge.pull(opened.number)?;
+            let rights = forge.rights(&pull)?;
+            Ok((forge.clone(), pull, rights))
+        })?;
+        if let Some(refused) = refused(&rights) {
+            return Err(refused);
+        }
         if pull.head_commit != opened.head {
             return Err(SessionError::Moved {
                 number: opened.number,

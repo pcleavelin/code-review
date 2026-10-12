@@ -30,7 +30,8 @@ scenarios!(
     navigation,
     since_seen,
     login,
-    discussion
+    discussion,
+    submit_refused
 );
 
 struct Fixture {
@@ -335,7 +336,7 @@ impl Drop for Fixture {
 mod scenario {
     use std::fs;
 
-    use super::{FakeForge, Fixture, git, git_output};
+    use super::{FakeForge, Fixture, Ran, git, git_output};
 
     pub(super) fn offline_review(fixture: &Fixture) {
         let changes = fixture.run(&["changes", "1"]);
@@ -956,5 +957,41 @@ dave requested changes 2026-01-02 10:00 (review-20)
 erin approved 2026-01-02 12:00 (review-22)
 "
         );
+    }
+
+    pub(super) fn submit_refused(fixture: &Fixture) {
+        let forge = forgejo(fixture);
+        let token = [("FORGEJO_TOKEN", "fjtoken")];
+        let refused = |ran: &Ran| {
+            assert_eq!(ran.code, Some(2), "{}", ran.stdout);
+            ran.stderr.clone()
+        };
+        let logged_out = forge.run(fixture, &["submit", "1", "--approve"], &[], "");
+        assert!(
+            refused(&logged_out).contains(
+                "cannot submit to pull request 1: not logged in to forgejo.test: log in with `review login forgejo.test`"
+            ),
+            "{}",
+            logged_out.stderr
+        );
+        let empty = forge.run(fixture, &["submit", "1", "--request-changes"], &token, "");
+        assert!(
+            refused(&empty).contains("there are no draft comments and no summary to send"),
+            "{}",
+            empty.stderr
+        );
+        forge.answer("user.json", r#"{"login":"ann"}"#);
+        for decision in ["--approve", "--request-changes"] {
+            let own = forge.run(fixture, &["submit", "1", "Fine.", decision], &token, "");
+            assert!(
+                refused(&own).contains("you opened this pull request"),
+                "{decision}: {}",
+                own.stderr
+            );
+        }
+        forge.answer("user.json", r#"{"login":"zed"}"#);
+        let approved = forge.run(fixture, &["submit", "1", "--approve"], &token, "");
+        assert_eq!(approved.code, Some(0), "{}", approved.stderr);
+        assert_eq!(approved.stdout, "approved #1 with 0 inline comments\n");
     }
 }

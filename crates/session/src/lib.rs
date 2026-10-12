@@ -6,7 +6,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-use domain::{CommitId, ForgeHost, Host, PrNumber, RelativePath};
+use domain::{CommitId, ForgeHost, Host, PrNumber, Refusal, RelativePath};
 use io_forge::{ForgeError, MissingClient};
 use io_keychain::KeychainError;
 use io_review::ReviewError;
@@ -31,7 +31,10 @@ pub enum SessionError {
         reviewed: CommitId,
         now: CommitId,
     },
-    NothingToSubmit(PrNumber),
+    SubmitRefused {
+        number: PrNumber,
+        refusal: Refusal,
+    },
     NothingToDrop(PrNumber),
     SeenHeadGone {
         file: RelativePath,
@@ -93,9 +96,9 @@ impl fmt::Display for SessionError {
                 formatter,
                 "pull request {number} moved from {reviewed} to {now} since it was opened: open it again and look at what changed before submitting"
             ),
-            Self::NothingToSubmit(number) => write!(
+            Self::SubmitRefused { number, refusal } => write!(
                 formatter,
-                "pull request {number} has no draft comments and no summary to submit"
+                "cannot submit to pull request {number}: {refusal}"
             ),
             Self::SeenHeadGone { file, head } => write!(
                 formatter,

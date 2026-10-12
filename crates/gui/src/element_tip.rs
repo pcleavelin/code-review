@@ -20,6 +20,10 @@ impl ElementTip {
         }
     }
 
+    pub(crate) const fn text(text: Label) -> Self {
+        Self { text, chord: None }
+    }
+
     pub(crate) const fn chord(&self) -> Option<&Label> {
         self.chord.as_ref()
     }

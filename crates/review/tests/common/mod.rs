@@ -211,6 +211,7 @@ config=$(cat)
 url=$(printf '%s\n' "$config" | sed -n 's/^url = "\(.*\)"$/\1/p')
 case "$url" in
 */login/device/code|*/oauth/authorize_device) cat "{api}/device.json"; status=200;;
+*/api/v1/user) cat "{api}/user.json"; status=200;;
 */login/oauth/access_token|*/oauth/token)
   count=$(( $(cat "{api}/polls" 2>/dev/null || echo 0) + 1 )); echo "$count" > "{api}/polls"
   [ -f "{api}/poll-$count.json" ] || count=granted
@@ -343,6 +344,7 @@ pub(crate) fn fixture(name: &str) -> Fixture {
             ("pulls-1-reviews-20-comments.json", REVIEW_20_COMMENTS),
             ("pulls-1-reviews-21-comments.json", REVIEW_21_COMMENTS),
             ("device.json", DEVICE),
+            ("user.json", r#"{"login": "zed"}"#),
             ("poll-1.json", PENDING),
             ("poll-1.status", "400"),
             ("poll-2.json", PENDING),

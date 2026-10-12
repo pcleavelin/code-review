@@ -356,6 +356,17 @@ impl Frame<'_> {
         }
     }
 
+    pub(crate) fn attach_tip_text(&mut self, target: Target, text: Label) {
+        let interaction = self.ui.interaction(target.id());
+        if let Some(rect) = interaction.rect().filter(|_| interaction.hovered()) {
+            self.attached_tip = Some(AttachedTip {
+                id: target.id(),
+                rect,
+                tip: ElementTip::text(text),
+            });
+        }
+    }
+
     pub(crate) fn start(&mut self, container: Container) -> Interaction {
         let shape = container.shape();
         self.ui
@@ -603,6 +614,30 @@ impl Frame<'_> {
             ),
             layout,
             Style::background(if hovered { HOVER } else { FIELD }).border(Sides::ALL, BORDER),
+            Some(id),
+        )
+    }
+
+    pub(crate) fn tinted_button(
+        &mut self,
+        text: impl Into<Label>,
+        target: Target,
+        tint: Color,
+        enabled: Enabled,
+    ) -> Interaction {
+        let id = target.id();
+        let enabled = enabled == Enabled::Enabled;
+        let hovered = enabled && self.ui.interaction(id).hovered();
+        let (color, edge) = if enabled {
+            (tint, tint)
+        } else {
+            (theme::DISABLED, BORDER)
+        };
+        let size = self.metrics.font;
+        self.ui.leaf(
+            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            Layout::row().padding(SMALL_BUTTON_PADDING).steady(),
+            Style::background(if hovered { HOVER } else { FIELD }).border(Sides::ALL, edge),
             Some(id),
         )
     }

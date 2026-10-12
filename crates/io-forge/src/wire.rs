@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use domain::{Decision, DraftId, ForgeKind, Linked, Side, Span, ThreadState};
+use domain::{Decision, DraftId, ForgeKind, Linked, Login, Side, Span, ThreadState};
 use io_process::Captured;
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
@@ -892,6 +892,12 @@ pub(crate) fn forgejo_threads(mut comments: Vec<WireCodeComment>) -> Vec<WireThr
     threads
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WireApprovals {
+    pub(crate) can_approve: bool,
+    pub(crate) has_approved: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WireDiffRefs {
     pub(crate) base: String,
@@ -1086,6 +1092,31 @@ impl Api {
     pub(crate) fn parse_pull(&self, text: &str) -> Option<WirePull> {
         let value: Value = serde_json::from_str(text).ok()?;
         read_pull(&value, self.fields())
+    }
+
+    pub(crate) fn user(&self) -> Request {
+        let repos = format!("repos/{}", self.slug);
+        match self.repo.strip_suffix(&repos) {
+            Some(api) => Request::get(format!("{api}user")),
+            None => Request::get(format!("{}api/v4/user", self.origin)),
+        }
+    }
+
+    pub(crate) fn parse_login(text: &str) -> Option<Login> {
+        let value: Value = serde_json::from_str(text).ok()?;
+        text_at(&value, "/login").map(|login| Login::new(&login))
+    }
+
+    pub(crate) fn gitlab_approvals(&self, number: u64) -> Request {
+        Request::get(format!("{}/approvals", self.merge_request(number)))
+    }
+
+    pub(crate) fn parse_approvals(text: &str) -> Option<WireApprovals> {
+        let value: Value = serde_json::from_str(text).ok()?;
+        Some(WireApprovals {
+            can_approve: value.pointer("/user_can_approve")?.as_bool()?,
+            has_approved: value.pointer("/user_has_approved")?.as_bool()?,
+        })
     }
 
     pub(crate) fn parse_diff_refs(text: &str) -> Option<WireDiffRefs> {

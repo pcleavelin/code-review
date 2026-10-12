@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use domain::{
     Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeHost,
     ForgeKind, Host, Linked, PictureSource, PrNumber, Prose, PullRequest, RefName, RepoSlug,
-    SignedPicture, Token, UnixTime, WebLink,
+    Rights, SignedPicture, Token, UnixTime, WebLink,
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
@@ -673,6 +673,26 @@ impl ForgeClient {
         Ok(Submitted {
             comments: CommentCount::new(drafts.len()),
         })
+    }
+
+    pub fn rights(&self, pull: &PullRequest) -> Result<Rights, ForgeError> {
+        if self.token.is_none() {
+            return Ok(Rights::logged_out(&self.forge.forge_host()));
+        }
+        let api = self.api();
+        match self.forge.kind() {
+            ForgeKind::GitHub | ForgeKind::Forgejo => {
+                let me = self.read(&api, &api.user(), |body| Api::parse_login(body.as_str()))?;
+                Ok(convert::rights(pull, Some(&me), None))
+            }
+            ForgeKind::GitLab => {
+                let approvals =
+                    self.read(&api, &api.gitlab_approvals(pull.number.get()), |body| {
+                        Api::parse_approvals(body.as_str())
+                    })?;
+                Ok(convert::rights(pull, None, Some(approvals)))
+            }
+        }
     }
 }
 

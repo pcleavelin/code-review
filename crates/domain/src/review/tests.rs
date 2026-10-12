@@ -1,8 +1,8 @@
 use crate::review::{
-    Block, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLayout, DiffLine, DraftId,
-    DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login, Moment, Note, Pairing,
-    PrNumber, Prose, RepoSlug, Review, Seen, Side, Standing, Submission, SubmissionId, Thread,
-    ThreadId, ThreadState,
+    Block, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision, DiffLayout, DiffLine,
+    DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login, Moment, Note, Pairing,
+    PrNumber, Prose, Refusal, RepoSlug, Review, Rights, Seen, Side, Standing, Submission,
+    SubmissionId, Thread, ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -395,7 +395,7 @@ fn a_file_draws_its_open_and_resolved_threads_but_not_outdated_ones() {
     assert_eq!(drawn, vec!["open", "settled"]);
 }
 
-fn said(id: &str, author: &str, when: &str) -> Thread {
+fn content(id: &str, author: &str, when: &str) -> Thread {
     Thread {
         id: ThreadId::new(id).unwrap(),
         place: None,
@@ -458,10 +458,10 @@ fn a_submission_gathers_the_threads_started_in_it_and_blocks_follow_time() {
             ),
         ],
         threads: vec![
-            in_submission(said("t1", "dave", "2026-05-01T10:00:00Z"), "r1"),
-            said("issue", "carol", "2026-05-01T09:00:00Z"),
-            in_submission(said("t2", "dave", "2026-05-01T10:01:00Z"), "r1"),
-            in_submission(said("lost", "octo", "2026-05-01T07:00:00Z"), "pending"),
+            in_submission(content("t1", "dave", "2026-05-01T10:00:00Z"), "r1"),
+            content("issue", "carol", "2026-05-01T09:00:00Z"),
+            in_submission(content("t2", "dave", "2026-05-01T10:01:00Z"), "r1"),
+            in_submission(content("lost", "octo", "2026-05-01T07:00:00Z"), "pending"),
         ],
         ..Conversation::default()
     };
@@ -469,4 +469,29 @@ fn a_submission_gathers_the_threads_started_in_it_and_blocks_follow_time() {
         shape(&conversation),
         vec!["lost", "r4[]", "issue", "r1[t1 t2]", "r2[]"]
     );
+}
+
+#[test]
+fn an_empty_review_may_only_approve_and_a_forge_refusal_comes_before_the_empty_one() {
+    let open = Rights::default();
+    assert_eq!(open.refusal(Decision::Approve, Content::Nothing), None);
+    assert_eq!(
+        open.refusal(Decision::RequestChanges, Content::Nothing),
+        Some(Refusal::NothingToSend)
+    );
+    assert_eq!(
+        open.refusal(Decision::Comment, Content::Nothing),
+        Some(Refusal::NothingToSend)
+    );
+    assert_eq!(open.refusal(Decision::Comment, Content::Something), None);
+    let author = Rights {
+        approve: Some(Refusal::OwnPullRequest),
+        request_changes: Some(Refusal::OwnPullRequest),
+        ..Rights::default()
+    };
+    assert_eq!(
+        author.refusal(Decision::RequestChanges, Content::Nothing),
+        Some(Refusal::OwnPullRequest)
+    );
+    assert_eq!(author.refusal(Decision::Comment, Content::Something), None);
 }

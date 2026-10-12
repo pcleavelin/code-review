@@ -32,6 +32,7 @@ pub fn pull(&self, number: PrNumber) -> Result<PullRequest, ForgeError>
 pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, ForgeError>
 pub fn picture_source(&self, link: &WebLink, signed: &[SignedPicture]) -> PictureSource
 pub fn submit( &self, pull: &PullRequest, drafts: &[Draft], changes: &[FileChange], decision: Decision, body: Option<&DraftText>, ) -> Result<Submitted, ForgeError>
+pub fn rights(&self, pull: &PullRequest) -> Result<Rights, ForgeError>
 login::pub enum MissingClient { BuiltInEmpty, NotBuiltIn, }
 login::pub enum LoginMethod { Device, Paste(Option<WebLink>), }
 login::pub struct Cancel(Arc<AtomicBool>);

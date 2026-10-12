@@ -384,6 +384,14 @@ pub(crate) const SUBMIT_CHANGES: Control = Control::new(
     Element::new("submit-changes"),
     Words::new("send the drafts and the summary and request changes"),
 );
+pub(crate) const SUBMIT_CONFIRM: Control = Control::new(
+    Element::new("submit-confirm"),
+    Words::new("send the review to the forge now"),
+);
+pub(crate) const SUBMIT_CANCEL: Control = Control::new(
+    Element::new("submit-cancel"),
+    Words::new("keep the review here unsent"),
+);
 pub(crate) const REVIEW_DRAFT: Control = Control::new(
     Element::new("review-draft"),
     Words::new("show this draft where it is in the code"),
@@ -496,6 +504,8 @@ pub(crate) const CONTROLS: &[Control] = &[
     SUBMIT_COMMENT,
     SUBMIT_APPROVE,
     SUBMIT_CHANGES,
+    SUBMIT_CONFIRM,
+    SUBMIT_CANCEL,
     REVIEW_DRAFT,
     PALETTE_FIELD,
     PALETTE_ROW,

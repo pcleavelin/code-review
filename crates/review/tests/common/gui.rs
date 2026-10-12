@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login, submissions }
+        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login, submissions, confirm_submit }
     };
 }
 
@@ -372,6 +372,52 @@ quit
             "DUMP block alone issue-501",
             "DUMP block submitted review-20 dave RequestChanges [300 301]",
             "DUMP block submitted review-22 erin Approve []",
+        ],
+    }
+}
+
+pub(crate) fn confirm_submit() -> Scenario {
+    Scenario {
+        script: "idle
+wait 2
+click-id login@forgejo.test
+wait 2
+text fjtoken123
+key enter
+idle
+wait 2
+OPEN
+dump
+shot {shots}/rights.png
+hover-id submit-changes
+wait 80
+dump
+shot {shots}/refused.png
+click-id field@summary
+text Looks right.
+wait 2
+click-id submit-approve
+wait 2
+dump
+shot {shots}/confirm.png
+click-id submit-cancel
+wait 2
+absent submit-confirm
+dump
+click-id submit-approve
+wait 2
+click-id submit-confirm
+idle
+wait 2
+dump
+shot {shots}/sent.png
+quit
+",
+        shows: &[
+            "DUMP rights Some(Rights { comment: None, approve: None, request_changes: None })",
+            "tip=Some(\"there are no draft comments and no summary to send\")",
+            "submitting=Asking(Approve)",
+            "status=\"approved with 0 inline comments\"",
         ],
     }
 }

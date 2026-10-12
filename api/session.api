@@ -31,7 +31,7 @@ desk::pub fn names(&self) -> Vec<RepoName>
 desk::pub fn pin(&mut self, target: &PinTarget) -> Result<RepoName, SessionError>
 desk::pub fn unpin(&mut self, asked: &RepoName) -> Result<RepoName, SessionError>
 desk::pub fn find(&self, address: &PullAddress) -> Result<&Repo, SessionError>
-pub enum SessionError { Vcs(VcsError), NoRemote, Forge(ForgeError), Review(ReviewError), NotOpened(PrNumber, VcsError), Moved { number: PrNumber, reviewed: CommitId, now: CommitId, }, NothingToSubmit(PrNumber), NothingToDrop(PrNumber), SeenHeadGone { file: RelativePath, head: CommitId, }, NoPins, NoPinStore, Pins(io::Error), AlreadyPinned(RepoName), NoSuchRepo(RepoName, Vec<RepoName>), Ambiguous(PrNumber, Vec<RepoName>), Keychain(KeychainError), NoKeychain, NoClient { host: Host, gap: MissingClient, file: Option<PathBuf>, }, Renewal { site: ForgeHost, cause: ForgeError, }, TokenRefused { site: ForgeHost, cause: ForgeError, }, NoSite(LoginTarget), }
+pub enum SessionError { Vcs(VcsError), NoRemote, Forge(ForgeError), Review(ReviewError), NotOpened(PrNumber, VcsError), Moved { number: PrNumber, reviewed: CommitId, now: CommitId, }, SubmitRefused { number: PrNumber, refusal: Refusal, }, NothingToDrop(PrNumber), SeenHeadGone { file: RelativePath, head: CommitId, }, NoPins, NoPinStore, Pins(io::Error), AlreadyPinned(RepoName), NoSuchRepo(RepoName, Vec<RepoName>), Ambiguous(PrNumber, Vec<RepoName>), Keychain(KeychainError), NoKeychain, NoClient { host: Host, gap: MissingClient, file: Option<PathBuf>, }, Renewal { site: ForgeHost, cause: ForgeError, }, TokenRefused { site: ForgeHost, cause: ForgeError, }, NoSite(LoginTarget), }
 repo::pub struct RepoName(String);
 repo::pub fn new(text: &str) -> Self
 repo::pub fn as_str(&self) -> &str
@@ -51,6 +51,7 @@ repo::pub fn pulls(&self) -> Result<Vec<PullRequest>, SessionError>
 repo::pub fn inbox(&self) -> Result<Vec<Entry>, SessionError>
 repo::pub fn pull(&self, number: PrNumber) -> Result<PullRequest, SessionError>
 repo::pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, SessionError>
+repo::pub fn rights(&self, pull: &PullRequest) -> Result<Rights, SessionError>
 repo::pub fn fetch(&self, pull: &PullRequest) -> Result<Opened, SessionError>
 repo::pub fn state(&self, number: PrNumber) -> Result<Opened, SessionError>
 repo::pub fn reopen(&self, number: PrNumber) -> Result<Opened, SessionError>

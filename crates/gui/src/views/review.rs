@@ -1,8 +1,8 @@
 use domain::{
-    Block, ChangeKind, Conversation, Decision, Draft, DraftOn, Login, Note, RelativePath, Seen,
-    Side, Span, Submission, Thread, ThreadState,
+    Block, ChangeKind, Content, Conversation, Decision, Draft, DraftOn, DraftText, Login, Note,
+    RelativePath, Seen, Side, Span, Submission, Thread, ThreadState,
 };
-use ui::{Count, Icon, Label, Run};
+use ui::{Color, Count, Icon, Label, Run};
 
 use domain::{CommitId, DiffLayout, Linked, Prose, WebLink};
 
@@ -10,7 +10,7 @@ use crate::diffs::Loading;
 
 use crate::action::Action;
 use crate::field::Which;
-use crate::ids;
+use crate::ids::{self, Control};
 use crate::model::Model;
 use crate::review::{OpenReview, ReviewAct, Submitting, Talk};
 use crate::text::{Counted, Noun};
@@ -19,7 +19,7 @@ use crate::theme::{
     ORANGE, RED, ROW_EXTRA, SELECTED, SUMMARY_FIELD, TEXT, WEAK,
 };
 use crate::widgets::{
-    Chosen, CommentLook, Container, Frame, Padding, RowAction, Scroller, TreeRow,
+    Chosen, CommentLook, Container, Enabled, Frame, Padding, RowAction, Scroller, TreeRow,
 };
 
 use super::inbox::{standing_color, standing_word};
@@ -788,25 +788,101 @@ fn your_review(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
         SUMMARY_FIELD,
     );
     frame.start(Container::ToolbarSmall);
-    if model.review.submitting == Submitting::Sending {
-        frame.label("submitting...", ORANGE);
-    } else {
-        for (word, target, decision) in [
-            ("comment", ids::SUBMIT_COMMENT.target(), Decision::Comment),
-            ("approve", ids::SUBMIT_APPROVE.target(), Decision::Approve),
-            (
-                "request changes",
-                ids::SUBMIT_CHANGES.target(),
-                Decision::RequestChanges,
-            ),
-        ] {
-            if frame.small_button(word, target).clicked() {
-                frame.push(Action::Review(ReviewAct::Submit(decision)));
-            }
-            frame.attach_tip(target);
-        }
+    match model.review.submitting {
+        Submitting::Sending => frame.label("submitting...", ORANGE),
+        Submitting::Idle => submit_buttons(model, frame, open),
+        Submitting::Asking(decision) => ask_submit(model, frame, open, decision),
     }
     frame.finish();
+}
+
+struct SubmitButton {
+    word: Label,
+    control: Control,
+    tint: Color,
+}
+
+fn submit_button(decision: Decision) -> SubmitButton {
+    let (word, control, tint) = match decision {
+        Decision::Comment => ("comment", ids::SUBMIT_COMMENT, TEXT),
+        Decision::Approve => ("approve", ids::SUBMIT_APPROVE, GREEN),
+        Decision::RequestChanges => ("request changes", ids::SUBMIT_CHANGES, RED),
+    };
+    SubmitButton {
+        word: Label::new(word),
+        control,
+        tint,
+    }
+}
+
+fn summary_text(model: &Model) -> Option<DraftText> {
+    DraftText::new(model.fields.get(Which::Summary).text().as_str())
+}
+
+fn submit_buttons(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
+    let summary = summary_text(model);
+    let content = Content::of(open.opened.review.drafts(), summary.as_ref());
+    let rights = open.rights.clone().unwrap_or_default();
+    for decision in [
+        Decision::Comment,
+        Decision::Approve,
+        Decision::RequestChanges,
+    ] {
+        let SubmitButton {
+            word,
+            control,
+            tint,
+        } = submit_button(decision);
+        let target = control.target();
+        let refusal = rights.refusal(decision, content);
+        let enabled = if refusal.is_some() {
+            Enabled::Disabled
+        } else {
+            Enabled::Enabled
+        };
+        if frame.tinted_button(word, target, tint, enabled).clicked() && refusal.is_none() {
+            frame.push(Action::Review(ReviewAct::AskSubmit(decision)));
+        }
+        match refusal {
+            Some(refusal) => frame.attach_tip_text(target, Label::new(refusal.to_string())),
+            None => frame.attach_tip(target),
+        }
+    }
+}
+
+fn submit_question(model: &Model, open: &OpenReview, decision: Decision) -> Label {
+    let verb = match decision {
+        Decision::Comment => "comment on",
+        Decision::Approve => "approve",
+        Decision::RequestChanges => "request changes on",
+    };
+    let drafts = open.opened.review.drafts().len();
+    let comments = Counted::new(Count::new(drafts), Noun::Comment);
+    let with = match (drafts, summary_text(model).is_some()) {
+        (0, false) => String::new(),
+        (0, true) => " with the summary".to_owned(),
+        (_, false) => format!(" with {comments}"),
+        (_, true) => format!(" with {comments} and the summary"),
+    };
+    Label::new(format!("{verb} #{}{with}?", open.pull.number))
+}
+
+fn ask_submit(model: &Model, frame: &mut Frame<'_>, open: &OpenReview, decision: Decision) {
+    let SubmitButton { word, tint, .. } = submit_button(decision);
+    frame.label(submit_question(model, open, decision), TEXT);
+    let confirm = ids::SUBMIT_CONFIRM.target();
+    if frame
+        .tinted_button(word, confirm, tint, Enabled::Enabled)
+        .clicked()
+    {
+        frame.push(Action::Review(ReviewAct::Submit(decision)));
+    }
+    frame.attach_tip(confirm);
+    let cancel = ids::SUBMIT_CANCEL.target();
+    if frame.small_button("cancel", cancel).clicked() {
+        frame.push(Action::Review(ReviewAct::CancelSubmit));
+    }
+    frame.attach_tip(cancel);
 }
 
 pub(super) fn review_tab(model: &Model, frame: &mut Frame<'_>) {

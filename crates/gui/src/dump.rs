@@ -14,7 +14,7 @@ use crate::nav::Nav;
 use crate::palette::Palette;
 use crate::panels::Panels;
 use crate::peek::{Peek, Probe, Queries};
-use crate::review::{Inbox, Reviewing, Submitting, Talk};
+use crate::review::{Inbox, Reviewing, Talk};
 use crate::settings::{SettingsMenu, ShownFont, ThemeName};
 use crate::status::Status;
 use crate::work::{Services, WorkState};
@@ -152,7 +152,7 @@ impl Dump for Reviewing {
             .map(|repo| repo.name().to_string())
             .collect();
         lines.line(format_args!(
-            "review inbox={inbox} repos=[{}] standing={:?} opening={} open={} draft={} submitting={}",
+            "review inbox={inbox} repos=[{}] standing={:?} opening={} open={} draft={} submitting={:?}",
             pins.join(" "),
             self.standing,
             Optional(self.opening),
@@ -162,7 +162,7 @@ impl Dump for Reviewing {
                     .as_ref()
                     .map(|on| format!("{}:{}:{:?}", on.file, on.line.number(), on.side))
             ),
-            self.submitting == Submitting::Sending
+            self.submitting
         ));
         if let Inbox::Listed { entries, .. } = &self.inbox {
             for entry in entries {
@@ -190,6 +190,7 @@ impl Dump for Reviewing {
             ),
         };
         lines.line(format_args!("talk {talk}"));
+        lines.line(format_args!("rights {:?}", open.rights));
         if let Some(conversation) = open.conversation() {
             dump_conversation(conversation, lines);
         }

@@ -1,8 +1,8 @@
 use domain::{
     Block, BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft,
     DraftId, DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login,
-    Moment, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SignedPicture,
-    SourceLine, Span, ThreadId, ThreadState, Token, WebLink,
+    Moment, PrNumber, PrTitle, Prose, PullRequest, Refusal, RelativePath, RepoSlug, Rights, Side,
+    SignedPicture, SourceLine, Span, ThreadId, ThreadState, Token, WebLink,
 };
 use serde_json::{Value, json};
 
@@ -1874,4 +1874,54 @@ fn other_forbidden_answers_and_other_forges_stay_plain_http_errors() {
         ResponseBody::new(INTEGRATION_REFUSAL),
     );
     assert!(matches!(forgejo, ForgeError::Http { .. }));
+}
+
+#[test]
+fn the_logged_in_user_is_asked_at_the_root_of_each_forges_api() {
+    let urls: Vec<String> = [
+        (ForgeKind::GitHub, "github.com"),
+        (ForgeKind::GitHub, "git.corp"),
+        (ForgeKind::Forgejo, "codeberg.org"),
+    ]
+    .into_iter()
+    .map(|(kind, host)| Api::new(kind, host, "owner/repo").user().url)
+    .collect();
+    assert_eq!(
+        urls,
+        vec![
+            "https://api.github.com/user",
+            "https://git.corp/api/v3/user",
+            "https://codeberg.org/api/v1/user",
+        ]
+    );
+    assert_eq!(
+        Api::parse_login(r#"{"login": "octo", "id": 1}"#),
+        Some(Login::new("octo"))
+    );
+}
+
+#[test]
+fn the_author_may_only_comment_and_gitlab_says_who_approves() {
+    let pull = expected_pull();
+    let author = convert::rights(&pull, Some(&Login::new("octo")), None);
+    assert_eq!(author.comment, None);
+    assert_eq!(author.approve, Some(Refusal::OwnPullRequest));
+    assert_eq!(author.request_changes, Some(Refusal::OwnPullRequest));
+    assert_eq!(
+        convert::rights(&pull, Some(&Login::new("hubot")), None),
+        Rights::default()
+    );
+    let approvals = |text: &str| convert::rights(&pull, None, Api::parse_approvals(text)).approve;
+    assert_eq!(
+        approvals(r#"{"user_can_approve": true, "user_has_approved": true}"#),
+        Some(Refusal::ApprovedAlready)
+    );
+    assert_eq!(
+        approvals(r#"{"user_can_approve": false, "user_has_approved": false}"#),
+        Some(Refusal::NotApprover)
+    );
+    assert_eq!(
+        approvals(r#"{"user_can_approve": true, "user_has_approved": false}"#),
+        None
+    );
 }

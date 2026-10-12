@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use domain::{
     CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn, DraftText,
     FileChange, FileRow, FileText, Forge, ForgeHost, Hunk, Index, Line, LineKind, Linked, PrNumber,
-    PullRequest, RelativePath, Root, Seen, Side, Span, Standing, WebLink,
+    PullRequest, RelativePath, Rights, Root, Seen, Side, Span, Standing, WebLink,
 };
 use index::Indexed;
 use io_process::{Argument, Opener};
@@ -58,6 +58,7 @@ pub(crate) struct OpenReview {
     pub(crate) pull: PullRequest,
     pub(crate) opened: Opened,
     pub(crate) talk: Talk,
+    pub(crate) rights: Option<Rights>,
     pub(crate) web: Option<Forge>,
 }
 
@@ -107,6 +108,7 @@ pub(crate) struct ReviewJobs {
     list: Option<Job<Listed>>,
     open: Option<Job<Result<Landed, Label>>>,
     talk: Option<Job<Result<Conversation, Label>>>,
+    rights: Option<Job<Result<Rights, Label>>>,
     submit: Option<Job<Result<Submitted, Label>>>,
     pin: Option<Job<Result<PinLanded, Label>>>,
     pub(crate) login: Option<Job<Ended>>,
@@ -125,6 +127,7 @@ impl ReviewJobs {
         self.list.is_some()
             || self.open.is_some()
             || self.talk.is_some()
+            || self.rights.is_some()
             || self.submit.is_some()
             || self.pin.is_some()
             || self.diffs.busy()
@@ -136,6 +139,7 @@ impl ReviewJobs {
 pub(crate) enum Submitting {
     Idle,
     Sending,
+    Asking(Decision),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,6 +413,8 @@ pub(crate) enum ReviewAct {
     CancelDraft,
     RemoveDraft(DraftId),
     RefreshTalk,
+    AskSubmit(Decision),
+    CancelSubmit,
     Submit(Decision),
     OpenLink(WebLink),
     CopyLink(WebLink),
@@ -879,6 +885,10 @@ impl App {
             }
             ReviewAct::RemoveDraft(id) => self.remove_draft(id),
             ReviewAct::RefreshTalk => self.ask_talk(),
+            ReviewAct::AskSubmit(decision) => {
+                self.model.review.submitting = Submitting::Asking(decision);
+            }
+            ReviewAct::CancelSubmit => self.model.review.submitting = Submitting::Idle,
             ReviewAct::Submit(decision) => self.submit(decision),
             ReviewAct::OpenLink(link) => match Opener::open(&Argument::new(link.as_str())) {
                 Ok(()) => self.model.say(ReviewStatus::LinkOpened(link)),
@@ -1001,6 +1011,31 @@ impl App {
             repo.conversation(&pull)
                 .map_err(|error| Label::new(error.to_string()))
         }));
+        self.ask_rights();
+    }
+
+    fn ask_rights(&mut self) {
+        let Some(open) = self.model.review.open.as_ref() else {
+            return;
+        };
+        let repo = open.repo.clone();
+        let pull = open.pull.clone();
+        self.jobs.rights = Some(Job::start(move || {
+            repo.rights(&pull)
+                .map_err(|error| Label::new(error.to_string()))
+        }));
+    }
+
+    fn poll_rights(&mut self) {
+        let result = match landed(&mut self.jobs.rights) {
+            Landing::Waiting => return,
+            Landing::Landed(result) => result,
+            Landing::Failed => Err(Label::new("the thread asking the forge failed")),
+        };
+        let Some(open) = self.model.review.open.as_mut() else {
+            return;
+        };
+        open.rights = result.ok();
     }
 
     fn save_review(&mut self) {
@@ -1104,6 +1139,7 @@ impl App {
         self.poll_pin();
         self.poll_open();
         self.poll_talk();
+        self.poll_rights();
         self.poll_submit();
         self.poll_diffs();
         self.poll_pictures();
@@ -1128,6 +1164,7 @@ impl App {
             self.list_pulls();
         } else {
             self.model.review.logins.held.extend(listed.held);
+            self.ask_rights();
         }
         let pulls = Count::new(listed.entries.len());
         match &self.model.status {
@@ -1256,6 +1293,7 @@ impl App {
             pull,
             opened,
             talk: Talk::Asking,
+            rights: None,
         });
         self.model.say(ReviewStatus::Opened { number, files });
         self.model.panels.activate(View::Changes);

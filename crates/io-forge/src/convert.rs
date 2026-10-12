@@ -1,13 +1,13 @@
 use domain::{
     BranchName, ClientId, CodePlace, CommitId, Conversation, Decision, Draft, DraftText,
     FileChange, Grant, Lifetime, Line, Login, Moment, Note, PrNumber, PrTitle, Prose, PullRequest,
-    RefreshToken, RelativePath, Renewal, SignedPicture, Submission, SubmissionId, Thread, ThreadId,
-    Token, UnixTime, WebLink,
+    RefreshToken, Refusal, RelativePath, Renewal, Rights, SignedPicture, Submission, SubmissionId,
+    Thread, ThreadId, Token, UnixTime, WebLink,
 };
 
 use crate::wire::{
-    WireComment, WireGrant, WireNote, WirePlace, WirePull, WireReview, WireSignedPicture,
-    WireSubmission, WireThread,
+    WireApprovals, WireComment, WireGrant, WireNote, WirePlace, WirePull, WireReview,
+    WireSignedPicture, WireSubmission, WireThread,
 };
 
 pub(crate) fn pull(wire: &WirePull) -> Option<PullRequest> {
@@ -135,4 +135,27 @@ pub(crate) fn grant(wire: &WireGrant, client: &ClientId, now: UnixTime) -> Optio
         _ => None,
     };
     Some(Grant { token, renewal })
+}
+
+pub(crate) fn rights(
+    pull: &PullRequest,
+    me: Option<&Login>,
+    approvals: Option<WireApprovals>,
+) -> Rights {
+    let own = me == Some(&pull.author);
+    let approve = match approvals {
+        Some(WireApprovals {
+            has_approved: true, ..
+        }) => Some(Refusal::ApprovedAlready),
+        Some(WireApprovals {
+            can_approve: false, ..
+        }) => Some(Refusal::NotApprover),
+        _ if own => Some(Refusal::OwnPullRequest),
+        _ => None,
+    };
+    Rights {
+        comment: None,
+        approve,
+        request_changes: own.then_some(Refusal::OwnPullRequest),
+    }
 }

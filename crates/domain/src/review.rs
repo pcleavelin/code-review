@@ -1,6 +1,7 @@
 mod access;
 mod diff;
 mod link;
+mod rights;
 mod state;
 mod talk;
 
@@ -17,6 +18,7 @@ pub use diff::{
     Pairing,
 };
 pub use link::{Linked, WebLink};
+pub use rights::{Content, Refusal, Rights};
 pub use state::{
     Draft, DraftError, DraftId, DraftOn, DraftText, FileCount, Mark, Progress, Review, Seen, Side,
     Standing,
