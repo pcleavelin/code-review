@@ -211,14 +211,15 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
   `dblclick-id <id>`, `hover-id <id>`, `absent <id>`, `shot <file.png>`, `dump`. A `script:`
   line on stderr fails the run. Id names are the ones in `crates/gui/src/ids.rs`: `name`,
   `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, changed files `change/<n>`,
-  commits `commit/<n>`, `all-changes`, the split toggle `layout`, thread rows `thread/<n>`,
+  commits `commit/<n>`, `all-changes` (in the Changes and Source toolbars `all-changes@changes`, `@source`), the split toggle `layout`, thread rows `thread/<n>`,
   a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up/<first line>`,
   `fold-down/<last line>` and `fold/<first line>`, link buttons `link-open@<key>` and
   `link-copy@<key>` (`pull`, `file`, `<thread>/<note>`), a
   removed line `draft-removed@<old line>`, a draft's remove button `draft-remove@<id>`, every
   view's tab `tab@<View>`). Rects come from the previous frame, so `wait 1` after anything
   that changes the layout. `dump` prints the selection, the review (pulls, the open pull
-  request, the inbox entries, the open pull request, every change with its seen state, the threads,
+  request, the inbox entries, the open pull request, the diff layout and the commit shown, every
+  change with its seen state, the threads,
   every draft), scroll offsets, the panel tree,
   fields, the backend and the servers to stderr as `DUMP` lines (grep `^DUMP`).
   A script or screenshot run opens a fixed 1600x1000 window at scale 1 and ignores the real

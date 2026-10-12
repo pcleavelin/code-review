@@ -154,6 +154,11 @@ impl Dump for Reviewing {
             ),
         };
         lines.line(format_args!("talk {talk}"));
+        lines.line(format_args!(
+            "diffs layout={:?} commit={}",
+            self.diffs.layout,
+            Optional(self.diffs.commit())
+        ));
         if let Some(conversation) = open.conversation() {
             for thread in &conversation.threads {
                 let place = thread.place.as_ref().map(|place| {

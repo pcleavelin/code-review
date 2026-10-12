@@ -62,7 +62,7 @@ fn commit_changes_window(model: &Model, frame: &mut Frame<'_>, commit: &CommitId
         return;
     };
     frame.start(Container::ToolbarSmall);
-    let all = ids::ALL_CHANGES.target();
+    let all = ids::ALL_CHANGES.with(&Label::new("changes"));
     if frame.small_button("all changes", all).clicked() {
         frame.push(Action::Review(ReviewAct::ViewCommit(None)));
     }
@@ -272,7 +272,7 @@ pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &Relat
     layout_toggle(model, frame);
     if let Some(commit) = model.review.diffs.commit() {
         frame.label(format!("commit {commit}"), ORANGE);
-        let all = ids::ALL_CHANGES.target();
+        let all = ids::ALL_CHANGES.with(&Label::new("source"));
         if frame.small_button("all changes", all).clicked() {
             frame.push(Action::Review(ReviewAct::ViewCommit(None)));
         }
@@ -300,7 +300,7 @@ pub(super) fn change_controls(model: &Model, frame: &mut Frame<'_>, path: &Relat
         ("next", ids::NEXT_HUNK.target(), ReviewAct::NextHunk),
         (
             "next unseen",
-            ids::NEXT_UNSEEN.target(),
+            ids::NEXT_UNSEEN.with(&Label::new("source")),
             ReviewAct::NextUnseen,
         ),
         (

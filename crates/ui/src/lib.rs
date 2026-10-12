@@ -16,7 +16,7 @@ pub use id::Id;
 pub use input::{Button, Buttons, Clicks, Glyph, Input, Key, Mods, Pinch, Pointer, Press, Typed};
 pub use layout::{Align, Direction, Layout, ScrollAxes, Sides, Size, Style};
 pub use text::{Cell, Grid, Label, Run, Text, Wrap};
-pub use tree::{Capture, Draw, Interaction, Kind, Placement, Scrollbar, Ui};
+pub use tree::{Capture, Draw, DuplicateId, Interaction, Kind, Placement, Scrollbar, Ui};
 
 #[cfg(test)]
 mod tests;

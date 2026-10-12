@@ -236,7 +236,8 @@ tree::pub const fn drag(self) -> Option<Point>
 tree::pub const fn wheel(self) -> Vector
 tree::pub const fn pinch(self) -> Pinch
 tree::pub const fn rect(self) -> Option<Rect>
-tree::pub struct Ui { roots: Vec<Element>, stack: Vec<Element>, previous: BTreeMap<Id, Placement>, hot: Option<Id>, active: Option<Id>, last_mouse: Point, aim: Aim, scroll_drag: Option<ScrollGrab>, pointer: Pointer, size: Extent, capture: Capture, held: Option<Held>, kept: Kept, }
+tree::pub struct DuplicateId { pub id: Id, pub first: Rect, pub second: Rect, }
+tree::pub struct Ui { roots: Vec<Element>, stack: Vec<Element>, previous: BTreeMap<Id, Placement>, hot: Option<Id>, active: Option<Id>, last_mouse: Point, aim: Aim, scroll_drag: Option<ScrollGrab>, pointer: Pointer, size: Extent, capture: Capture, held: Option<Held>, kept: Kept, duplicates: Vec<DuplicateId>, }
 tree::pub const fn capture(&mut self, capture: Capture)
 tree::pub fn begin(&mut self, input: &Input)
 tree::pub const fn holding(&self) -> bool
@@ -251,6 +252,7 @@ tree::pub fn close(&mut self)
 tree::pub fn leaf( &mut self, kind: Kind, layout: Layout, style: Style, id: Option<Id>, ) -> Interaction
 tree::pub const fn dragging(&self) -> bool
 tree::pub fn placement(&self, id: Id) -> Option<Placement>
+tree::pub fn duplicate_ids(&self) -> &[DuplicateId]
 tree::pub fn on_scrollbar(&self, id: Id) -> bool
 tree::pub fn scroll_by_wheel(&mut self, id: Id, offset: &mut Point) -> Point
 tree::pub fn end(&mut self, measure: &mut dyn Measure)

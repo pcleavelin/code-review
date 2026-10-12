@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login }
+        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login, all_changes }
     };
 }
 
@@ -357,6 +357,58 @@ quit
             "stage=gitlab.test device code=ABCD-1234 page=https://gitlab.test/oauth/device",
             "DUMP login sites=[gitlab.test=in forgejo.test=in] stage=none",
             "DUMP login sites=[gitlab.test=in forgejo.test=out] stage=none",
+        ],
+    }
+}
+
+pub(crate) fn all_changes() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id tab@Commits
+wait 2
+click-id commit/0
+idle
+wait 3
+click-id change/0
+idle
+wait 3
+dump
+click-id all-changes@changes
+wait 3
+hover-id next-unseen
+dump
+shot {shots}/from-changes.png
+click-id tab@Commits
+wait 2
+click-id commit/0
+idle
+wait 3
+click-id change/0
+idle
+wait 3
+click-id tab@Commits
+wait 2
+click-id all-changes
+wait 3
+hover-id next-unseen
+dump
+click-id tab@Commits
+wait 2
+click-id commit/0
+idle
+wait 3
+click-id change/0
+idle
+wait 3
+click-id all-changes@source
+wait 3
+hover-id next-unseen
+dump
+quit
+",
+        shows: &[
+            "DUMP diffs layout=Unified commit=Some(",
+            "DUMP diffs layout=Unified commit=None",
         ],
     }
 }
