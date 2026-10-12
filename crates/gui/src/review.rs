@@ -4,20 +4,21 @@ use std::time::{Duration, Instant};
 
 use domain::{
     CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn, DraftText,
-    FileChange, FileRow, FileText, Forge, Hunk, Index, Line, LineKind, Linked, PrNumber,
+    FileChange, FileRow, FileText, Forge, ForgeHost, Hunk, Index, Line, LineKind, Linked, PrNumber,
     PullRequest, RelativePath, Root, Seen, Side, Span, Standing, WebLink,
 };
 use index::Indexed;
 use io_process::{Argument, Opener};
 use io_review::ReviewStamp;
 use platform::ClipboardRequest;
-use session::{Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName};
+use session::{Access, Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName};
 use ui::{Count, Label, Typed};
 
 use crate::app::App;
 use crate::diffs::{DiffJobs, Diffs, Loading, SidesKey};
 use crate::field::Which;
 use crate::keys::Going;
+use crate::login::{self, Ended, Held, LoginStatus, Logins};
 use crate::model::{LineSelection, Model, Tab};
 use crate::nav::Aim;
 use crate::panels::View;
@@ -91,6 +92,14 @@ pub(crate) struct Submitted {
 pub(crate) struct Listed {
     entries: Vec<Entry>,
     broken: Vec<Broken>,
+    held: BTreeMap<ForgeHost, Held>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Relist {
+    #[default]
+    Settled,
+    Again,
 }
 
 #[derive(Default)]
@@ -100,6 +109,8 @@ pub(crate) struct ReviewJobs {
     talk: Option<Job<Result<Conversation, Label>>>,
     submit: Option<Job<Result<Submitted, Label>>>,
     pin: Option<Job<Result<PinLanded, Label>>>,
+    pub(crate) login: Option<Job<Ended>>,
+    relist: Relist,
     pub(crate) diffs: DiffJobs,
     pub(crate) pictures: PictureJobs,
 }
@@ -168,6 +179,7 @@ pub(crate) struct Reviewing {
     pub(crate) unfolded: BTreeMap<RelativePath, Vec<Span>>,
     pub(crate) diffs: Diffs,
     pub(crate) pictures: Pictures,
+    pub(crate) logins: Logins,
     stamp: Option<ReviewStamp>,
     last_poll: Instant,
 }
@@ -192,6 +204,7 @@ impl Reviewing {
             unfolded: BTreeMap::new(),
             diffs: Diffs::default(),
             pictures: Pictures::default(),
+            logins: Logins::default(),
             stamp: None,
             last_poll: Instant::now(),
         }
@@ -540,7 +553,8 @@ impl fmt::Display for ReviewStatus {
     }
 }
 
-fn list(repos: &[Repo], pinned: &[Pinned]) -> Listed {
+fn list(repos: &[Repo], pinned: &[Pinned], access: &Access, sites: &BTreeSet<ForgeHost>) -> Listed {
+    let held = login::holding(access, sites);
     let mut entries = Vec::new();
     let mut broken: Vec<Broken> = pinned
         .iter()
@@ -562,7 +576,11 @@ fn list(repos: &[Repo], pinned: &[Pinned]) -> Listed {
         }
     }
     entries.sort_by(|left, right| right.pull.updated.cmp(&left.pull.updated));
-    Listed { entries, broken }
+    Listed {
+        entries,
+        broken,
+        held,
+    }
 }
 
 fn open(repo: Repo, pull: PullRequest) -> Result<Landed, Label> {
@@ -895,18 +913,21 @@ impl App {
 
     pub(crate) fn list_pulls(&mut self) {
         if self.jobs.list.is_some() {
+            self.jobs.relist = Relist::Again;
             return;
         }
         let desk = &self.model.review.desk;
         let repos: Vec<Repo> = desk.repos().cloned().collect();
         let pinned = desk.pinned().to_vec();
+        let access = desk.access().clone();
+        let sites = self.model.review.logins.sites(desk);
         if matches!(self.model.review.inbox, Inbox::Listed { .. }) && repos.is_empty() {
             self.model.review.inbox = Inbox::Listed {
                 entries: Vec::new(),
                 broken: Vec::new(),
             };
         }
-        self.jobs.list = Some(Job::start(move || list(&repos, &pinned)));
+        self.jobs.list = Some(Job::start(move || list(&repos, &pinned, &access, &sites)));
     }
 
     fn pin(&mut self) {
@@ -1099,11 +1120,25 @@ impl App {
                     place: Label::new("inbox"),
                     why: Label::new("the listing thread failed"),
                 }],
+                held: BTreeMap::new(),
             },
         };
-        if self.model.review.open.is_none() && self.model.review.opening.is_none() {
-            self.model
-                .say(ReviewStatus::Listed(Count::new(listed.entries.len())));
+        if self.jobs.relist == Relist::Again {
+            self.jobs.relist = Relist::Settled;
+            self.list_pulls();
+        } else {
+            self.model.review.logins.held.extend(listed.held);
+        }
+        let pulls = Count::new(listed.entries.len());
+        match &self.model.status {
+            Status::Login(LoginStatus::In(site)) => {
+                self.model.status = Status::Login(LoginStatus::Listed(site.clone(), pulls));
+            }
+            Status::Login(_) => {}
+            _ if self.model.review.open.is_none() && self.model.review.opening.is_none() => {
+                self.model.say(ReviewStatus::Listed(pulls));
+            }
+            _ => {}
         }
         self.model.review.inbox = Inbox::Listed {
             entries: listed.entries,

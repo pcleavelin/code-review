@@ -198,6 +198,7 @@ review::pub const fn new(kind: ForgeKind, host: Host, slug: RepoSlug) -> Self
 review::pub const fn kind(&self) -> ForgeKind
 review::pub const fn host(&self) -> &Host
 review::pub const fn slug(&self) -> &RepoSlug
+review::pub fn forge_host(&self) -> ForgeHost
 review::pub struct PrNumber(u64);
 review::pub fn new(number: u64) -> Option<Self>
 review::pub fn parse(text: &str) -> Option<Self>
@@ -209,6 +210,21 @@ review::pub fn short(&self) -> &str
 review::pub struct PullRequest { pub number: PrNumber, pub title: PrTitle, pub author: Login, pub base: BranchName, pub head: BranchName, pub head_commit: CommitId, pub description: Prose, pub updated: Moment, }
 review::pub enum Decision { Comment, Approve, RequestChanges, }
 review::pub const fn name(self) -> Spelling
+review::access::pub struct UnixTime(u64);
+review::access::pub const fn new(seconds: u64) -> Self
+review::access::pub const fn get(self) -> u64
+review::access::pub const fn later_by(self, seconds: Lifetime) -> Self
+review::access::pub struct Lifetime(u64);
+review::access::pub const fn seconds(seconds: u64) -> Self
+review::access::pub struct Renewal { pub refresh: RefreshToken, pub expires: UnixTime, pub client: ClientId, }
+review::access::pub struct Grant { pub token: Token, pub renewal: Option<Renewal>, }
+review::access::pub const fn lasting(token: Token) -> Self
+review::access::pub fn expired(&self, now: UnixTime) -> bool
+review::access::pub struct OAuthApp { pub host: Host, pub client: ClientId, }
+review::access::pub struct ForgeHost { kind: ForgeKind, host: Host, }
+review::access::pub const fn new(kind: ForgeKind, host: Host) -> Self
+review::access::pub const fn kind(&self) -> ForgeKind
+review::access::pub const fn host(&self) -> &Host
 review::diff::pub enum LineKind { Context, Added, Removed, }
 review::diff::pub const fn marker(self) -> Spelling
 review::diff::pub struct DiffLine { pub kind: LineKind, pub text: SourceLine, }

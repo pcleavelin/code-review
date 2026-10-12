@@ -76,6 +76,11 @@ pub(crate) const DESCRIPTION: &str = "Squares the inputs before adding them.
 |---|---:|---|
 | 3 | 9 | the square grows faster than the sum once the input passes two, which is the point of this change; measured on the shapes benchmark, see https://example.com/bench |";
 
+pub(crate) const FORGES: &str = "review forges 1\nclient gitlab.test cid123\n";
+const DEVICE: &str = r#"{"device_code":"devsecret","user_code":"ABCD-1234","verification_uri":"https://gitlab.test/oauth/device","expires_in":300,"interval":1}"#;
+const PENDING: &str = r#"{"error":"authorization_pending"}"#;
+const GRANTED: &str = r#"{"access_token":"glaccess1","token_type":"Bearer","expires_in":7200,"refresh_token":"glrefresh1"}"#;
+
 pub(crate) fn binary() -> PathBuf {
     env::var_os("REVIEW_BIN").map_or_else(
         || PathBuf::from(env!("CARGO_BIN_EXE_review")),
@@ -174,14 +179,48 @@ fn fake_curl(api: &Path) -> String {
 PATH=/usr/bin:/bin
 config=$(cat)
 url=$(printf '%s\n' "$config" | sed -n 's/^url = "\(.*\)"$/\1/p')
-rest=${{url#https://{HOST}/api/v1/repos/{SLUG}/}}
-rest=${{rest%%\?*}}
-file="{api}/$(printf '%s' "$rest" | tr '/' '-').json"
-if [ -f "$file" ]; then cat "$file"; status=200; else printf '{{"message":"not found"}}'; status=404; fi
+case "$url" in
+*/login/device/code|*/oauth/authorize_device) cat "{api}/device.json"; status=200;;
+*/login/oauth/access_token|*/oauth/token)
+  count=$(( $(cat "{api}/polls" 2>/dev/null || echo 0) + 1 )); echo "$count" > "{api}/polls"
+  [ -f "{api}/poll-$count.json" ] || count=granted
+  cat "{api}/poll-$count.json"; status=$(cat "{api}/poll-$count.status");;
+*)
+  rest=${{url#https://{HOST}/api/v1/repos/{SLUG}/}}
+  rest=${{rest%%\?*}}
+  file="{api}/$(printf '%s' "$rest" | tr '/' '-').json"
+  if [ -f "$file" ]; then cat "$file"; status=200; else printf '{{"message":"not found"}}'; status=404; fi;;
+esac
 case "$config" in *write-out*) printf '\n\n%s' "$status";; esac
 "#,
         api = api.display()
     )
+}
+
+fn fake_keychain(store: &Path) -> String {
+    format!(
+        r#"#!/bin/sh
+PATH=/usr/bin:/bin
+store="{store}"
+mkdir -p "$store"
+case "$1" in
+-i) line=$(cat)
+    account=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)".*/\1/p')
+    secret=$(printf '%s' "$line" | sed -n 's/.* -w "\([^"]*\)".*/\1/p')
+    printf '%s' "$secret" > "$store/$account";;
+find-generic-password) [ -f "$store/$5" ] || exit 44; cat "$store/$5"; echo;;
+lookup) [ -f "$store/$5" ] || exit 1; cat "$store/$5";;
+delete-generic-password|clear) [ -f "$store/$5" ] || exit 44; rm "$store/$5";;
+store) cat > "$store/$6";;
+*) exit 1;;
+esac
+"#,
+        store = store.display()
+    )
+}
+
+fn fake_opener(log: &Path) -> String {
+    format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n", log.display())
 }
 
 fn fake_ssh(git: &Path, forge: &Path) -> String {
@@ -249,6 +288,17 @@ pub(crate) fn fixture(name: &str) -> Fixture {
     );
     executable(&ssh, &fake_ssh(&real_git, &forge));
     executable(&tools.join("curl"), &fake_curl(&api));
+    for keychain in ["security", "secret-tool"] {
+        executable(
+            &tools.join(keychain),
+            &fake_keychain(&home.join("keychain")),
+        );
+    }
+    for opener in ["open", "xdg-open"] {
+        executable(&tools.join(opener), &fake_opener(&home.join("opened")));
+    }
+    fs::write(home.join("keychain.file"), "").unwrap();
+    fs::write(home.join("forges"), FORGES).unwrap();
     #[cfg(unix)]
     symlink(&real_git, tools.join("git")).unwrap();
     let head = git(&forge, &["rev-parse", "feature"]).trim().to_owned();
@@ -260,6 +310,13 @@ pub(crate) fn fixture(name: &str) -> Fixture {
             ("pulls-1.json", &pull),
             ("issues-1-comments.json", "[]"),
             ("pulls-1-reviews.json", "[]"),
+            ("device.json", DEVICE),
+            ("poll-1.json", PENDING),
+            ("poll-1.status", "400"),
+            ("poll-2.json", PENDING),
+            ("poll-2.status", "400"),
+            ("poll-granted.json", GRANTED),
+            ("poll-granted.status", "200"),
         ],
     );
     Fixture { local, tools, home }
@@ -277,6 +334,11 @@ pub(crate) fn review(binary: &Path, fixture: &Fixture, arguments: &[&str]) -> St
         .env("PATH", &fixture.tools)
         .env("REVIEW_PINS", fixture.home.join("pins"))
         .env("REVIEW_CLONES", fixture.home.join("clones"))
+        .env("REVIEW_KEYCHAIN", fixture.home.join("keychain.file"))
+        .env("REVIEW_FORGES", fixture.home.join("forges"))
+        .env_remove("GITLAB_TOKEN")
+        .env_remove("FORGEJO_TOKEN")
+        .env_remove("GITEA_TOKEN")
         .output()
         .expect("run review");
     let mut text = rooted(&String::from_utf8_lossy(&out.stdout), &fixture.home);
@@ -303,6 +365,11 @@ pub(crate) fn play_script(binary: &Path, fixture: &Fixture, name: &str, script: 
         .env("PATH", &fixture.tools)
         .env("REVIEW_PINS", fixture.home.join("pins"))
         .env("REVIEW_CLONES", fixture.home.join("clones"))
+        .env("REVIEW_KEYCHAIN", fixture.home.join("keychain.file"))
+        .env("REVIEW_FORGES", fixture.home.join("forges"))
+        .env_remove("GITLAB_TOKEN")
+        .env_remove("FORGEJO_TOKEN")
+        .env_remove("GITEA_TOKEN")
         .env("REVIEW_SCRIPT", &file)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

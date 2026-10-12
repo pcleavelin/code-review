@@ -1,7 +1,12 @@
+pub enum TokenSource { Environment, Keychain, GhCli, }
+pub struct OAuthErrorCode(String);
+pub fn new(text: &str) -> Self
+pub fn as_str(&self) -> &str
 pub struct CommentCount(usize);
 pub const fn new(count: usize) -> Self
 pub const fn get(self) -> usize
 pub struct HttpStatus(u16);
+pub const UNAUTHORIZED: Self = Self(401);
 pub const fn new(code: u16) -> Self
 pub const fn get(self) -> u16
 pub const fn success(self) -> bool
@@ -10,16 +15,35 @@ pub fn new(text: &str) -> Self
 pub fn as_str(&self) -> &str
 pub struct Submitted { pub comments: CommentCount, }
 pub enum Unsent { Drafts, Approval, }
-pub enum ForgeError { UnknownHost(Host), UnreadableUrl(RemoteUrl), NoToken(ForgeKind), Process(ProcessError), Unreachable(Captured), Http { status: HttpStatus, body: ResponseBody, }, Malformed(ResponseBody), Unfinished { sent: Vec<DraftId>, unsent: Unsent, cause: Box<ForgeError>, }, PendingLeft { pending: CommentCount, cause: Box<ForgeError>, }, }
+pub enum ForgeError { UnknownHost(Host), UnreadableUrl(RemoteUrl), NoToken(ForgeKind), Process(ProcessError), Unreachable(Captured), Http { status: HttpStatus, body: ResponseBody, }, Malformed(ResponseBody), Unfinished { sent: Vec<DraftId>, unsent: Unsent, cause: Box<ForgeError>, }, PendingLeft { pending: CommentCount, cause: Box<ForgeError>, }, NoDeviceLogin(ForgeHost), LoginDenied(ForgeHost), LoginExpired(ForgeHost), LoginCancelled(ForgeHost), LoginRefused { site: ForgeHost, code: OAuthErrorCode, description: ResponseBody, }, }
+pub const fn refused_token(&self) -> bool
 pub fn sent(&self) -> &[DraftId]
-pub struct ForgeClient { forge: Forge, token: Option<Token>, }
+pub struct ForgeClient { forge: Forge, token: Option<Token>, source: Option<TokenSource>, }
+pub fn forge_host_of(host: &Host) -> Result<ForgeHost, ForgeError>
 pub fn forge_of(url: &RemoteUrl) -> Result<Forge, ForgeError>
 pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink>
-pub fn connect(url: &RemoteUrl) -> Result<Self, ForgeError>
+pub fn connect( url: &RemoteUrl, stored: impl FnOnce(&Forge) -> Option<Token>, ) -> Result<Self, ForgeError>
 pub fn forge(&self) -> &Forge
+pub const fn token_source(&self) -> Option<TokenSource>
 pub fn head_ref(&self, number: PrNumber) -> RefName
 pub fn open_pulls(&self) -> Result<Vec<PullRequest>, ForgeError>
 pub fn pull(&self, number: PrNumber) -> Result<PullRequest, ForgeError>
 pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, ForgeError>
 pub fn picture_source(&self, link: &WebLink, signed: &[SignedPicture]) -> PictureSource
 pub fn submit( &self, pull: &PullRequest, drafts: &[Draft], changes: &[FileChange], decision: Decision, body: Option<&DraftText>, ) -> Result<Submitted, ForgeError>
+login::pub enum MissingClient { BuiltInEmpty, NotBuiltIn, }
+login::pub enum LoginMethod { Device, Paste(Option<WebLink>), }
+login::pub struct Cancel(Arc<AtomicBool>);
+login::pub fn new() -> Self
+login::pub fn cancel(&self)
+login::pub fn cancelled(&self) -> bool
+login::pub struct DeviceAuthorization { site: ForgeHost, client: ClientId, device_code: DeviceCode, user_code: UserCode, verification: WebLink, opens: WebLink, interval: Duration, lifetime: Duration, }
+login::pub fn built_in_client(host: &Host) -> Result<ClientId, MissingClient>
+login::pub fn login_method(site: &ForgeHost) -> LoginMethod
+login::pub fn authorize_device( site: &ForgeHost, client: &ClientId, ) -> Result<DeviceAuthorization, ForgeError>
+login::pub const fn forge_host(&self) -> &ForgeHost
+login::pub const fn user_code(&self) -> &UserCode
+login::pub const fn verification(&self) -> &WebLink
+login::pub const fn opens(&self) -> &WebLink
+login::pub fn wait(&self, cancel: &Cancel) -> Result<Grant, ForgeError>
+login::pub fn refresh(site: &ForgeHost, renewal: &Renewal) -> Result<Grant, ForgeError>

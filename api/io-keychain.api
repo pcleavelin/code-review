@@ -1,0 +1,9 @@
+pub enum KeychainError { Unsupported, NoKeychain(PathBuf), Process(ProcessError), Refused { program: Program, stderr: Captured }, Unreadable(Host), }
+pub enum Forgotten { Removed, Absent, }
+pub struct Keychain { file: Option<PathBuf>, }
+pub fn user() -> Self
+pub fn override_only() -> Option<Self>
+pub fn file(&self) -> Option<&Path>
+pub fn load(&self, host: &Host) -> Result<Option<Grant>, KeychainError>
+pub fn save(&self, host: &Host, grant: &Grant) -> Result<(), KeychainError>
+pub fn forget(&self, host: &Host) -> Result<Forgotten, KeychainError>

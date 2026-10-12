@@ -1,6 +1,6 @@
 use std::fmt;
 
-use domain::{DraftError, Line, PrNumber, RelativePath, Side, SymbolName};
+use domain::{DraftError, ForgeHost, Line, PrNumber, RelativePath, Side, SymbolName};
 use session::SessionError;
 
 #[derive(Debug)]
@@ -21,6 +21,7 @@ pub enum Failure {
     NoSuchFile(RelativePath),
     NoSuchSymbol(SymbolName),
     BadPattern(regex::Error),
+    NoToken(ForgeHost),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

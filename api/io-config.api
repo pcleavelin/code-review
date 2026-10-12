@@ -18,3 +18,8 @@ pub fn path(&self) -> &Path
 pub fn clones(&self) -> Option<&Path>
 pub fn load(&self) -> Vec<Root>
 pub fn save(&self, pins: &[Root]) -> io::Result<()>
+pub struct ForgesStore { path: PathBuf, }
+pub const fn at(path: PathBuf) -> Self
+pub fn find(reach: Reach) -> Option<Self>
+pub fn path(&self) -> &Path
+pub fn load(&self) -> Vec<OAuthApp>

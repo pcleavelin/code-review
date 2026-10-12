@@ -5,12 +5,13 @@ use domain::{
     Root, Seen, SourceFile, Span, Symbol, SymbolId, SymbolName, SymbolQuery,
 };
 use index::Servers;
-use session::{Desk, Pinned, PullAddress, Repo, RepoName, SessionError};
+use io_process::{Argument, Opener};
+use session::{Desk, LoginTarget, Pinned, PullAddress, Repo, RepoName, SessionError, StartedLogin};
 
 use crate::convert::{Files, Filter, Marking, Navigation, Request};
 use crate::failure::Failure;
 use crate::output::Output;
-use crate::wire::{self, OldSide};
+use crate::wire::{self, Browser, OldSide};
 
 pub(crate) struct Run<'run> {
     pub(crate) desk: &'run mut Desk,
@@ -23,6 +24,8 @@ pub enum Touched {
     Pins,
     Review(PrNumber),
     Dropped(RepoName, PrNumber),
+    LoginStarted(StartedLogin),
+    Keychain,
 }
 
 fn change_of<'changes>(
@@ -61,6 +64,8 @@ impl Run<'_> {
                 wire::unpinned(self.output, &name);
                 Ok(Touched::Pins)
             }
+            Request::Login(target) => self.login(&target),
+            Request::Logout(target) => self.logout(&target),
             Request::Pulls(filter) => self.pulls(&filter).map(|()| Touched::Nothing),
             Request::Open(address) => {
                 let repo = self.repo(&address)?;
@@ -142,6 +147,30 @@ impl Run<'_> {
                 Ok(Touched::Review(address.number))
             }
         }
+    }
+
+    fn login(&mut self, target: &LoginTarget) -> Result<Touched, Failure> {
+        let started = self.desk.access().start(&self.desk.forge_host(target)?)?;
+        match &started {
+            StartedLogin::Device(authorization) => {
+                let browser = match Opener::open(&Argument::new(authorization.opens().as_str())) {
+                    Ok(()) => Browser::Opened,
+                    Err(_) => Browser::NotOpened,
+                };
+                wire::login_code(self.output, authorization, browser);
+            }
+            StartedLogin::Paste { site, page } => {
+                wire::login_paste(self.output, site, page.as_ref());
+            }
+        }
+        Ok(Touched::LoginStarted(started))
+    }
+
+    fn logout(&mut self, target: &LoginTarget) -> Result<Touched, Failure> {
+        let site = self.desk.forge_host(target)?;
+        let forgotten = self.desk.access().forget(&site)?;
+        wire::logged_out(self.output, &site, forgotten);
+        Ok(Touched::Keychain)
     }
 
     fn pulls(&mut self, filter: &Filter) -> Result<(), Failure> {

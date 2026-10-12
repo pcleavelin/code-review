@@ -10,6 +10,7 @@ io-vcs = { path = "../io-vcs" }
 io-forge = { path = "../io-forge" }
 io-review = { path = "../io-review" }
 io-config = { path = "../io-config" }
+io-keychain = { path = "../io-keychain" }
 io-process = { path = "../io-process" }
 
 [lints]

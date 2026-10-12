@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 domain = { path = "../domain" }
 session = { path = "../session" }
+io-process = { path = "../io-process" }
 regex = "1"
 index = { path = "../index" }
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }

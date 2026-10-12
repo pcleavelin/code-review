@@ -212,6 +212,34 @@ pub(crate) const UNPIN: Control = Control::new(
     Element::new("unpin"),
     Words::new("unpin this repository; its reviews stay on disk"),
 );
+pub(crate) const LOGIN: Control = Control::new(
+    Element::new("login"),
+    Words::new("log in to this forge; the token goes to the system keychain"),
+);
+pub(crate) const LOGOUT: Control = Control::new(
+    Element::new("logout"),
+    Words::new("log out of this forge: remove its token from the system keychain"),
+);
+pub(crate) const LOGIN_COPY: Control = Control::new(
+    Element::new("login-copy"),
+    Words::new("copy the code to enter on the forge's page"),
+);
+pub(crate) const LOGIN_OPEN: Control = Control::new(
+    Element::new("login-open"),
+    Words::new("open the forge's login page in the browser again"),
+);
+pub(crate) const LOGIN_CANCEL: Control = Control::new(
+    Element::new("login-cancel"),
+    Words::new("stop this login; nothing is kept"),
+);
+pub(crate) const LOGIN_SAVE: Control = Control::new(
+    Element::new("login-save"),
+    Words::new("keep the pasted token in the system keychain"),
+);
+pub(crate) const TOKEN_FIELD: Control = Control::new(
+    Element::new("field@token"),
+    Words::new("paste the access token made on the forge's page; enter keeps it"),
+);
 pub(crate) const CHANGE_ROW: Control = Control::new(
     Element::new("change"),
     Words::new("show this changed file at its first change"),
@@ -427,6 +455,13 @@ pub(crate) const CONTROLS: &[Control] = &[
     PIN_FIELD,
     PIN_ADD,
     UNPIN,
+    LOGIN,
+    LOGOUT,
+    LOGIN_COPY,
+    LOGIN_OPEN,
+    LOGIN_CANCEL,
+    LOGIN_SAVE,
+    TOKEN_FIELD,
     CHANGE_ROW,
     SEEN,
     NEXT_UNSEEN,

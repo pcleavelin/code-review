@@ -7,6 +7,7 @@ use crate::element_tip::Pressing;
 use crate::field::{AfterSubmit, Edit, FieldAct, FieldText, Which};
 use crate::ids;
 use crate::keys::{LineGesture, PaletteKey};
+use crate::login::{Browser, LoginAct};
 use crate::model::{HIT_LIMIT, Hit, HitsShown, Tab};
 use crate::nav::{Going, Ticket};
 use crate::palette::{Palette, PaletteAction};
@@ -54,6 +55,7 @@ pub(crate) enum Action {
     Field(Which, FieldAct),
     Settings(SettingsAct),
     Review(ReviewAct),
+    Login(LoginAct),
 }
 
 impl App {
@@ -127,6 +129,7 @@ impl App {
             Action::Field(which, act) => model.fields.act(which, act),
             Action::Settings(act) => self.change_setting(act),
             Action::Review(act) => self.review(act),
+            Action::Login(act) => self.login(act),
         }
     }
 
@@ -218,7 +221,8 @@ impl App {
             | Which::Draft
             | Which::Summary
             | Which::Inbox
-            | Which::Pin => AfterSubmit::Keep,
+            | Which::Pin
+            | Which::Token => AfterSubmit::Keep,
             Which::Command | Which::ViewSearch => AfterSubmit::Clear,
         };
         let escaped = which == Which::Draft
@@ -246,6 +250,7 @@ impl App {
             Which::ViewSearch => self.pick_first(&line),
             Which::Draft => self.review(ReviewAct::SaveDraft),
             Which::Pin => self.review(ReviewAct::Pin),
+            Which::Token => self.login(LoginAct::Save),
             Which::SymbolFilter | Which::Palette | Which::Summary | Which::Inbox => {}
         }
     }
@@ -333,8 +338,16 @@ impl App {
                 model.status = Status::CommandFailed(Label::new(text.as_str()));
                 model.console.failed(&text);
             }
-            Ok(cli::Touched::Pins) => self.list_pulls(),
+            Ok(cli::Touched::Pins | cli::Touched::Keychain) => self.list_pulls(),
             Ok(cli::Touched::Dropped(name, number)) => self.dropped(&name, number),
+            Ok(cli::Touched::LoginStarted(started)) => {
+                if matches!(started, session::StartedLogin::Paste { .. }) {
+                    self.model.console.append(
+                        "in this window, paste the token in the Inbox's token field instead; the Console keeps every line typed in it\n",
+                    );
+                }
+                self.carry_login(started, Browser::Opened);
+            }
             Ok(cli::Touched::Nothing | cli::Touched::Review(_)) => {}
         }
     }

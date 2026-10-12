@@ -5,8 +5,9 @@ use std::iter;
 use platform::ScriptLine;
 use ui::{Axis, Id, Px, Ui};
 
-use crate::field::{Fields, Which};
+use crate::field::{Fields, Shown, Which};
 use crate::ids;
+use crate::login::{Held, Logins, Stage};
 use crate::model::{Model, Scrolls};
 use crate::nav::Nav;
 use crate::palette::Palette;
@@ -192,6 +193,44 @@ impl Dump for Reviewing {
     }
 }
 
+impl Dump for Logins {
+    fn dump(&self, context: &Context<'_>, lines: &mut DumpLines) {
+        let sites: Vec<String> = self
+            .sites(&context.model.review.desk)
+            .into_iter()
+            .map(|site| {
+                let held = match self.held.get(&site) {
+                    Some(Held::In) => "in",
+                    Some(Held::Out) => "out",
+                    None => "unknown",
+                };
+                let failed = self.failed.get(&site).map_or_else(String::new, |why| {
+                    format!(" failed={}", Quoted(why.as_str()))
+                });
+                format!("{site}={held}{failed}")
+            })
+            .collect();
+        let stage = match &self.login {
+            None => "none".to_owned(),
+            Some(login) => match &login.stage {
+                Stage::Device { authorization, .. } => format!(
+                    "{} device code={} page={}",
+                    login.site,
+                    authorization.user_code(),
+                    authorization.verification()
+                ),
+                Stage::Paste { page } => {
+                    format!("{} paste page={}", login.site, Optional(page.as_ref()))
+                }
+            },
+        };
+        lines.line(format_args!(
+            "login sites=[{}] stage={stage}",
+            sites.join(" ")
+        ));
+    }
+}
+
 impl Dump for Scrolls {
     fn dump(&self, context: &Context<'_>, lines: &mut DumpLines) {
         for (name, id) in [
@@ -318,12 +357,15 @@ impl Dump for Fields {
             let selection = field.text_selection().map_or_else(String::new, |chosen| {
                 format!(" selection={}..{}", chosen.from.get(), chosen.to.get())
             });
+            let text = match which.shown() {
+                Shown::Clear => Quoted(field.text().as_str()).to_string(),
+                Shown::Masked => format!("<{} hidden>", field.text().as_str().chars().count()),
+            };
             lines.line(format_args!(
-                "field {which:?} caret={}{selection} first={} rows={} text={}",
+                "field {which:?} caret={}{selection} first={} rows={} text={text}",
                 field.caret().get(),
                 field.first(),
                 field.rows(which.shape()).len(),
-                Quoted(field.text().as_str())
             ));
         }
     }

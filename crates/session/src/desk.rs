@@ -3,17 +3,31 @@ use std::str::FromStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use domain::{PrNumber, Root};
+use domain::{ForgeHost, Host, PrNumber, Root};
 use io_config::{PinsStore, Reach};
 use io_vcs::{RemoteUrl, Vcs};
 
 use crate::SessionError;
+use crate::access::Access;
 use crate::repo::{Repo, RepoName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PinTarget(String);
 
 impl PinTarget {
+    pub fn new(text: &str) -> Self {
+        Self(text.trim().to_owned())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoginTarget(String);
+
+impl LoginTarget {
     pub fn new(text: &str) -> Self {
         Self(text.trim().to_owned())
     }
@@ -72,10 +86,11 @@ pub struct Desk {
     here: Option<Repo>,
     pinned: Vec<Pinned>,
     working_copy: Option<Root>,
+    access: Access,
 }
 
-fn pinned(root: &Root) -> Pinned {
-    match Repo::find(root) {
+fn pinned(root: &Root, access: &Access) -> Pinned {
+    match Repo::find(root, access) {
         Ok(repo) => Pinned::Ready(repo),
         Err(error) => Pinned::Broken {
             root: root.clone(),
@@ -107,35 +122,64 @@ fn clone_place(clones: &Path, url: &PinTarget) -> PathBuf {
 impl Desk {
     pub fn load(here: Option<&Root>, reach: Reach) -> Self {
         let store = PinsStore::find(reach);
+        let access = Access::find(reach);
         let pinned: Vec<Pinned> = store
             .as_ref()
             .map(PinsStore::load)
             .unwrap_or_default()
             .iter()
-            .map(pinned)
+            .map(|root| pinned(root, &access))
             .collect();
         let working_copy = here.filter(|root| Vcs::detect(root).is_ok()).cloned();
-        let here = here.and_then(|root| Repo::find(root).ok()).filter(|repo| {
-            !pinned.iter().any(|pin| match pin {
-                Pinned::Ready(ready) => ready.name() == repo.name(),
-                Pinned::Broken { .. } => false,
-            })
-        });
+        let here = here
+            .and_then(|root| Repo::find(root, &access).ok())
+            .filter(|repo| {
+                !pinned.iter().any(|pin| match pin {
+                    Pinned::Ready(ready) => ready.name() == repo.name(),
+                    Pinned::Broken { .. } => false,
+                })
+            });
         Self {
             store,
             here,
             pinned,
             working_copy,
+            access,
         }
     }
 
-    pub fn of(store: Option<PinsStore>, here: Option<Repo>, roots: &[Root]) -> Self {
+    pub fn of(
+        store: Option<PinsStore>,
+        here: Option<Repo>,
+        roots: &[Root],
+        access: Access,
+    ) -> Self {
         Self {
             working_copy: here.as_ref().map(|repo| repo.root().clone()),
             store,
             here,
-            pinned: roots.iter().map(pinned).collect(),
+            pinned: roots.iter().map(|root| pinned(root, &access)).collect(),
+            access,
         }
+    }
+
+    pub const fn access(&self) -> &Access {
+        &self.access
+    }
+
+    pub fn forge_host(&self, target: &LoginTarget) -> Result<ForgeHost, SessionError> {
+        let asked = RepoName::new(target.as_str());
+        if let Some(forge) = self
+            .repos()
+            .find(|repo| repo.name().answers_to(&asked))
+            .and_then(Repo::web)
+        {
+            return Ok(forge.forge_host());
+        }
+        let host = Host::new(target.as_str())
+            .filter(|host| host.as_str().contains('.'))
+            .ok_or_else(|| SessionError::NoSite(target.clone()))?;
+        Ok(io_forge::forge_host_of(&host)?)
     }
 
     pub const fn working_copy(&self) -> Option<&Root> {
@@ -191,7 +235,7 @@ impl Desk {
             let place = clone_place(clones, target);
             Vcs::clone_from(&RemoteUrl::new(target.as_str()), &place)?
         };
-        let repo = Repo::find(&root)?;
+        let repo = Repo::find(&root, &self.access)?;
         let name = repo.name().clone();
         if self.roots().contains(repo.root()) {
             return Err(SessionError::AlreadyPinned(name));

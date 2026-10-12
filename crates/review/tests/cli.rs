@@ -6,8 +6,13 @@
 
 use std::env;
 use std::fs;
+use std::io::Write as _;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{self, Command};
+use std::process::{self, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 macro_rules! scenarios {
     ($($scenario:ident),* $(,)?) => {$(
@@ -18,7 +23,14 @@ macro_rules! scenarios {
     )*};
 }
 
-scenarios!(offline_review, refusals, pinning, navigation, since_seen);
+scenarios!(
+    offline_review,
+    refusals,
+    pinning,
+    navigation,
+    since_seen,
+    login
+);
 
 struct Fixture {
     forge: PathBuf,
@@ -133,6 +145,170 @@ impl Fixture {
     }
 }
 
+const FAKE_CURL: &str = r#"#!/bin/sh
+PATH=/usr/bin:/bin
+here=$(dirname "$0")
+api="$here/api"
+printf '%s\n' "$*" >> "$here/curl.argv"
+config=$(cat)
+url=$(printf '%s\n' "$config" | sed -n 's/^url = "\(.*\)"$/\1/p')
+status=200
+case "$url" in
+*/login/device/code|*/oauth/authorize_device) body=$(cat "$api/device.json");;
+*/login/oauth/access_token|*/oauth/token)
+  case "$config" in
+  *grant_type=refresh_token*) body=$(cat "$api/refresh.json");;
+  *) count=$(( $(cat "$api/polls" 2>/dev/null || echo 0) + 1 )); echo "$count" > "$api/polls"
+     body=$(cat "$api/poll-$count.json"); status=$(cat "$api/poll-$count.status");;
+  esac;;
+*/merge_requests*)
+  case "$config" in
+  *"Authorization: Bearer $(cat "$api/token")\""*) body='[]';;
+  *) body='{"message":"401 Unauthorized"}'; status=401;;
+  esac;;
+*) body='{"message":"not found"}'; status=404;;
+esac
+printf '%s\n\n%s' "$body" "$status"
+"#;
+
+const FAKE_SECURITY: &str = r#"#!/bin/sh
+PATH=/usr/bin:/bin
+here=$(dirname "$0")
+store="$here/keychain"
+mkdir -p "$store"
+printf '%s\n' "$*" >> "$here/keychain.argv"
+case "$1" in
+-i) line=$(cat)
+    account=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)".*/\1/p')
+    secret=$(printf '%s' "$line" | sed -n 's/.* -w "\([^"]*\)".*/\1/p')
+    printf '%s' "$secret" > "$store/$account";;
+find-generic-password) [ -f "$store/$5" ] || { echo "security: The specified item could not be found in the keychain." >&2; exit 44; }
+    cat "$store/$5"; echo;;
+delete-generic-password) [ -f "$store/$5" ] || exit 44; rm "$store/$5";;
+*) exit 1;;
+esac
+"#;
+
+const FAKE_SECRET_TOOL: &str = r#"#!/bin/sh
+PATH=/usr/bin:/bin
+here=$(dirname "$0")
+store="$here/keychain"
+mkdir -p "$store"
+printf '%s\n' "$*" >> "$here/keychain.argv"
+case "$1" in
+store) cat > "$store/$6";;
+lookup) [ -f "$store/$5" ] || exit 1; cat "$store/$5";;
+clear) rm -f "$store/$5";;
+*) exit 1;;
+esac
+"#;
+
+const FAKE_OPENER: &str = r#"#!/bin/sh
+PATH=/usr/bin:/bin
+printf '%s\n' "$1" >> "$(dirname "$0")/opened"
+"#;
+
+fn executable(file: &Path, text: &str) {
+    fs::write(file, text).unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(file, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+struct FakeForge {
+    tools: PathBuf,
+    forges: PathBuf,
+}
+
+impl FakeForge {
+    fn new(fixture: &Fixture) -> Self {
+        let base = fixture.forge.parent().unwrap();
+        let tools = base.join("tools");
+        fs::create_dir_all(tools.join("api")).unwrap();
+        executable(&tools.join("curl"), FAKE_CURL);
+        executable(&tools.join("security"), FAKE_SECURITY);
+        executable(&tools.join("secret-tool"), FAKE_SECRET_TOOL);
+        executable(&tools.join("open"), FAKE_OPENER);
+        executable(&tools.join("xdg-open"), FAKE_OPENER);
+        Self {
+            forges: base.join("forges"),
+            tools,
+        }
+    }
+
+    fn answer(&self, name: &str, text: &str) {
+        fs::write(self.tools.join("api").join(name), text).unwrap();
+    }
+
+    fn polls(&self, answers: &[(&str, u16)]) {
+        drop(fs::remove_file(self.tools.join("api").join("polls")));
+        for (number, (body, status)) in answers.iter().enumerate() {
+            self.answer(&format!("poll-{}.json", number + 1), body);
+            self.answer(&format!("poll-{}.status", number + 1), &status.to_string());
+        }
+    }
+
+    fn read(&self, name: &str) -> String {
+        fs::read_to_string(self.tools.join(name)).unwrap_or_default()
+    }
+
+    fn read_when_written(&self, name: &str) -> String {
+        let start = Instant::now();
+        while !self.tools.join(name).exists() && start.elapsed() < Duration::from_secs(10) {
+            thread::sleep(Duration::from_millis(20));
+        }
+        self.read(name)
+    }
+
+    fn store(&self, account: &str, secret: &str) {
+        fs::create_dir_all(self.tools.join("keychain")).unwrap();
+        fs::write(self.tools.join("keychain").join(account), secret).unwrap();
+    }
+
+    fn run(
+        &self,
+        fixture: &Fixture,
+        arguments: &[&str],
+        variables: &[(&str, &str)],
+        input: &str,
+    ) -> Ran {
+        let base = fixture.forge.parent().unwrap();
+        let paths = env::var_os("PATH").unwrap_or_default();
+        let git = env::split_paths(&paths)
+            .find(|directory| directory.join("git").is_file())
+            .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_review"));
+        command
+            .args(arguments)
+            .current_dir(&fixture.local)
+            .env("REVIEW_PINS", base.join("pins"))
+            .env("REVIEW_CLONES", base.join("clones"))
+            .env("REVIEW_FORGES", &self.forges)
+            .env_remove("REVIEW_KEYCHAIN")
+            .env_remove("REVIEW_FORGE")
+            .env_remove("GITLAB_TOKEN")
+            .env_remove("FORGEJO_TOKEN")
+            .env_remove("GITEA_TOKEN")
+            .env("PATH", env::join_paths([self.tools.clone(), git]).unwrap())
+            .envs(variables.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        Ran {
+            stdout: String::from_utf8_lossy(&output.stdout).replace('\r', ""),
+            stderr: String::from_utf8_lossy(&output.stderr).replace('\r', ""),
+            code: output.status.code(),
+        }
+    }
+}
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         if let Some(base) = self.forge.parent() {
@@ -144,7 +320,7 @@ impl Drop for Fixture {
 mod scenario {
     use std::fs;
 
-    use super::{Fixture, git};
+    use super::{FakeForge, Fixture, git};
 
     pub(super) fn offline_review(fixture: &Fixture) {
         let changes = fixture.run(&["changes", "1"]);
@@ -484,5 +660,222 @@ mod scenario {
         assert!(gone.stdout.starts_with("unpinned"), "{}", gone.stderr);
         let empty = fixture.run_in(&base, &["pins"]);
         assert!(empty.stdout.contains("nothing pinned"));
+    }
+
+    const DEVICE: &str = r#"{"device_code":"devsecret","user_code":"ABCD-1234","verification_uri":"https://gitlab.test/oauth/device","verification_uri_complete":"https://gitlab.test/oauth/device?user_code=ABCD-1234","expires_in":300,"interval":0}"#;
+    const PENDING: &str = r#"{"error":"authorization_pending","error_description":"pending"}"#;
+    const GRANTED: &str = r#"{"access_token":"glaccess1","token_type":"Bearer","expires_in":7200,"refresh_token":"glrefresh1","scope":"api","created_at":1}"#;
+
+    pub(super) fn login(fixture: &Fixture) {
+        let forge = FakeForge::new(fixture);
+        git(
+            &fixture.local,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://gitlab.test/owner/repo.git",
+            ],
+        );
+        unregistered_logins(fixture, &forge);
+        device_login(fixture, &forge);
+        renewal(fixture, &forge);
+        logout_and_refusals(fixture, &forge);
+        pasted_login(fixture, &forge);
+    }
+
+    fn unregistered_logins(fixture: &Fixture, forge: &FakeForge) {
+        let run = |arguments: &[&str]| forge.run(fixture, arguments, &[], "");
+        let unregistered = run(&["login", "gitlab.test"]);
+        assert_eq!(unregistered.code, Some(2));
+        assert!(
+            unregistered.stderr.contains(
+                "no client ID is built in for it: add the line `client gitlab.test <client id>` to "
+            ),
+            "{}",
+            unregistered.stderr
+        );
+        let not_filled = run(&["login", "gitlab.com"]);
+        assert!(
+            not_filled
+                .stderr
+                .contains("its built-in client ID is not filled in yet (BUILT_IN_APPS in crates/io-forge/src/wire.rs)"),
+            "{}",
+            not_filled.stderr
+        );
+        let nowhere = run(&["login", "nowhere"]);
+        assert!(
+            nowhere
+                .stderr
+                .contains("nowhere is neither a pinned repository nor a forge's host"),
+            "{}",
+            nowhere.stderr
+        );
+    }
+
+    fn device_login(fixture: &Fixture, forge: &FakeForge) {
+        let run = |arguments: &[&str]| forge.run(fixture, arguments, &[], "");
+        fs::write(
+            &forge.forges,
+            "review forges 1\nclient gitlab.test cid123\n",
+        )
+        .unwrap();
+        forge.answer("device.json", DEVICE);
+        forge.answer("token", "glaccess1");
+        forge.polls(&[(PENDING, 400), (GRANTED, 200)]);
+        let logged = run(&["login", "repo"]);
+        assert_eq!(logged.code, Some(0), "{}", logged.stderr);
+        assert_eq!(
+            logged.stdout,
+            "to log in to gitlab.test, enter the code ABCD-1234 at https://gitlab.test/oauth/device\n\
+             the browser is opening it; waiting for the approval...\n\
+             logged in to gitlab.test; the token is in the system keychain\n"
+        );
+        assert_eq!(
+            forge.read_when_written("opened"),
+            "https://gitlab.test/oauth/device?user_code=ABCD-1234\n"
+        );
+        let stored = forge.read("keychain/gitlab.test");
+        assert!(
+            stored.starts_with("glaccess1 glrefresh1 ") && stored.ends_with(" cid123"),
+            "{stored}"
+        );
+        let arguments = forge.read("keychain.argv") + &forge.read("curl.argv");
+        for secret in ["glaccess1", "glrefresh1", "devsecret"] {
+            assert!(
+                !arguments.contains(secret),
+                "{secret} on a command line: {arguments}"
+            );
+        }
+    }
+
+    fn renewal(fixture: &Fixture, forge: &FakeForge) {
+        let run = |arguments: &[&str]| forge.run(fixture, arguments, &[], "");
+        let listed = run(&["prs"]);
+        assert_eq!(
+            listed.stdout, "no open pull requests\n",
+            "{}",
+            listed.stderr
+        );
+        let overridden = forge.run(fixture, &["prs"], &[("GITLAB_TOKEN", "glvariable")], "");
+        assert!(
+            overridden.stdout.contains("the forge answered HTTP 401"),
+            "{}",
+            overridden.stdout
+        );
+
+        forge.answer("token", "glaccess2");
+        forge.answer(
+            "refresh.json",
+            r#"{"access_token":"glaccess2","token_type":"Bearer","expires_in":7200,"refresh_token":"glrefresh2"}"#,
+        );
+        let renewed = run(&["prs"]);
+        assert_eq!(
+            renewed.stdout, "no open pull requests\n",
+            "{}",
+            renewed.stderr
+        );
+        assert!(
+            forge
+                .read("keychain/gitlab.test")
+                .starts_with("glaccess2 glrefresh2 ")
+        );
+
+        forge.store("gitlab.test", "glaccess2 glrefresh2 1 cid123");
+        forge.answer("token", "glaccess3");
+        forge.answer(
+            "refresh.json",
+            r#"{"access_token":"glaccess3","token_type":"Bearer","expires_in":7200,"refresh_token":"glrefresh3"}"#,
+        );
+        let expired = run(&["prs"]);
+        assert_eq!(
+            expired.stdout, "no open pull requests\n",
+            "{}",
+            expired.stderr
+        );
+        assert!(
+            forge
+                .read("keychain/gitlab.test")
+                .starts_with("glaccess3 glrefresh3 ")
+        );
+
+        forge.answer("token", "glaccess4");
+        forge.answer(
+            "refresh.json",
+            r#"{"error":"invalid_grant","error_description":"The provided authorization grant is invalid"}"#,
+        );
+        let unrenewable = run(&["prs"]);
+        assert!(
+            unrenewable
+                .stdout
+                .contains("the login to gitlab.test expired and could not be renewed"),
+            "{}",
+            unrenewable.stdout
+        );
+    }
+
+    fn logout_and_refusals(fixture: &Fixture, forge: &FakeForge) {
+        let run = |arguments: &[&str]| forge.run(fixture, arguments, &[], "");
+        let out = run(&["logout", "repo"]);
+        assert_eq!(
+            out.stdout,
+            "logged out of gitlab.test; its token is gone from the keychain\n"
+        );
+        let again = run(&["logout", "gitlab.test"]);
+        assert_eq!(again.code, Some(0));
+        assert_eq!(
+            again.stdout,
+            "the keychain holds no token for gitlab.test\n"
+        );
+        let anonymous = run(&["prs"]);
+        assert!(
+            anonymous.stdout.contains("the forge answered HTTP 401"),
+            "{}",
+            anonymous.stdout
+        );
+
+        forge.polls(&[(PENDING, 400), (r#"{"error":"access_denied"}"#, 400)]);
+        let denied = run(&["login", "gitlab.test"]);
+        assert_eq!(denied.code, Some(2));
+        assert!(
+            denied
+                .stderr
+                .contains("the login to gitlab.test was denied in the browser")
+        );
+        forge.polls(&[(r#"{"error":"expired_token"}"#, 400)]);
+        let late = run(&["login", "gitlab.test"]);
+        assert!(
+            late.stderr
+                .contains("the code for gitlab.test expired before it was entered")
+        );
+        assert_eq!(forge.read("keychain/gitlab.test"), "");
+    }
+
+    fn pasted_login(fixture: &Fixture, forge: &FakeForge) {
+        let pasted = forge.run(fixture, &["login", "forgejo.test"], &[], "  fjtoken \n");
+        assert_eq!(pasted.code, Some(0), "{}", pasted.stderr);
+        assert!(
+            pasted.stdout.starts_with(
+                "forgejo on forgejo.test has no device login: make an access token at https://forgejo.test/user/settings/applications"
+            ),
+            "{}",
+            pasted.stdout
+        );
+        assert!(
+            pasted
+                .stdout
+                .ends_with("logged in to forgejo.test; the token is in the system keychain\n")
+        );
+        assert_eq!(forge.read("keychain/forgejo.test"), "fjtoken");
+        assert!(!forge.read("keychain.argv").contains("fjtoken"));
+        let blank = forge.run(fixture, &["login", "forgejo.test"], &[], "\n");
+        assert_eq!(blank.code, Some(2));
+        assert!(
+            blank
+                .stderr
+                .contains("nothing that looks like a token was pasted for forgejo.test"),
+            "{}",
+            blank.stderr
+        );
     }
 }

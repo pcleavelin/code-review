@@ -18,11 +18,12 @@ pub use picture::{
     Credential, Picture, PictureFrame, PictureSource, PixelCount, Rgba, SignedPicture,
 };
 pub use review::{
-    BranchName, ChangeKind, CodePlace, Commit, CommitId, Conversation, Decision, DiffLayout,
-    DiffLine, Draft, DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount, FileRow,
-    Forge, ForgeKind, Host, Hunk, LineKind, Linked, Login, Mark, Moment, Note, NoteKind,
-    NumberedLine, Paired, Pairing, PrNumber, PrTitle, Progress, Prose, PullRequest, RefName,
-    RepoSlug, Review, Seen, Side, Spelling, Standing, Thread, ThreadId, ThreadState, WebLink,
+    BranchName, ChangeKind, ClientId, CodePlace, Commit, CommitId, Conversation, Decision,
+    DiffLayout, DiffLine, Draft, DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount,
+    FileRow, Forge, ForgeHost, ForgeKind, Grant, Host, Hunk, Lifetime, LineKind, Linked, Login,
+    Mark, Moment, Note, NoteKind, NumberedLine, OAuthApp, Paired, Pairing, PrNumber, PrTitle,
+    Progress, Prose, PullRequest, RefName, RefreshToken, Renewal, RepoSlug, Review, Seen, Side,
+    Spelling, Standing, Thread, ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
 };
 pub use settings::{BaseFontSize, FontFamily, Settings, Theme};
 pub use text::{

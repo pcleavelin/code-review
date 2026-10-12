@@ -5,6 +5,7 @@ use domain::Line;
 use platform::BUNDLED_FAMILY;
 use ui::{Count, Label};
 
+use crate::login::LoginStatus;
 use crate::model::HitsShown;
 use crate::review::ReviewStatus;
 use crate::text::{Counted, Noun};
@@ -59,6 +60,7 @@ pub(crate) enum Status {
     Reindexed(IndexCounts),
     ReindexFailed,
     Review(ReviewStatus),
+    Login(LoginStatus),
 }
 
 impl Status {
@@ -104,6 +106,7 @@ impl Status {
             | Self::RegexRefused(_)
             | Self::ReindexFailed => Tone::Problem,
             Self::Review(status) => status.tone(),
+            Self::Login(status) => status.tone(),
             _ => Tone::Plain,
         }
     }
@@ -165,6 +168,7 @@ impl fmt::Display for Status {
                 formatter.write_str("re-index failed; the index in use is the old one")
             }
             Self::Review(status) => status.fmt(formatter),
+            Self::Login(status) => status.fmt(formatter),
         }
     }
 }

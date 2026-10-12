@@ -1,14 +1,16 @@
 mod convert;
+mod login;
 mod wire;
 
 use std::collections::HashSet;
 use std::env;
 use std::fmt;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use domain::{
-    Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeKind,
-    Host, Linked, PictureSource, PrNumber, Prose, PullRequest, RefName, RepoSlug, SignedPicture,
-    WebLink,
+    Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeHost,
+    ForgeKind, Host, Linked, PictureSource, PrNumber, Prose, PullRequest, RefName, RepoSlug,
+    SignedPicture, Token, UnixTime, WebLink,
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
@@ -18,24 +20,73 @@ use crate::wire::{
     Api, Delivery, EnvVar, PendingNote, Request, WireDiffRefs, WireResponse, WireReview,
 };
 
-#[derive(Clone, PartialEq, Eq)]
-struct Token(String);
+pub use crate::login::{
+    Cancel, DeviceAuthorization, LoginMethod, MissingClient, authorize_device, built_in_client,
+    login_method, refresh,
+};
 
-impl Token {
-    fn new(text: &str) -> Option<Self> {
-        let text = text.trim();
-        (!text.is_empty()).then(|| Self(text.to_owned()))
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenSource {
+    Environment,
+    Keychain,
+    GhCli,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OAuthErrorCode(String);
+
+impl OAuthErrorCode {
+    pub fn new(text: &str) -> Self {
+        Self(text.to_owned())
     }
 
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-impl fmt::Debug for Token {
+impl fmt::Display for OAuthErrorCode {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("Token(hidden)")
+        formatter.write_str(&self.0)
     }
+}
+
+struct Sourced {
+    token: Token,
+    source: TokenSource,
+}
+
+impl Sourced {
+    const fn new(token: Token, source: TokenSource) -> Self {
+        Self { token, source }
+    }
+}
+
+fn now() -> UnixTime {
+    UnixTime::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs()),
+    )
+}
+
+fn curl(config: &Captured) -> Result<WireResponse, ForgeError> {
+    let arguments: Vec<Argument> = wire::curl_arguments()
+        .iter()
+        .map(|argument| Argument::new(argument))
+        .collect();
+    let output = Process::run_with_input(
+        &Program::new(wire::CURL),
+        &arguments,
+        &env::temp_dir(),
+        config,
+    )
+    .map_err(ForgeError::Process)?;
+    if !output.success() {
+        return Err(ForgeError::Unreachable(output.stderr));
+    }
+    let stdout = output.stdout.text();
+    wire::parse_response(&stdout).ok_or_else(|| ForgeError::Malformed(ResponseBody::new(&stdout)))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -61,6 +112,8 @@ impl fmt::Display for CommentCount {
 pub struct HttpStatus(u16);
 
 impl HttpStatus {
+    pub const UNAUTHORIZED: Self = Self(401);
+
     pub const fn new(code: u16) -> Self {
         Self(code)
     }
@@ -131,9 +184,28 @@ pub enum ForgeError {
         pending: CommentCount,
         cause: Box<ForgeError>,
     },
+    NoDeviceLogin(ForgeHost),
+    LoginDenied(ForgeHost),
+    LoginExpired(ForgeHost),
+    LoginCancelled(ForgeHost),
+    LoginRefused {
+        site: ForgeHost,
+        code: OAuthErrorCode,
+        description: ResponseBody,
+    },
 }
 
 impl ForgeError {
+    pub const fn refused_token(&self) -> bool {
+        matches!(
+            self,
+            Self::Http {
+                status: HttpStatus::UNAUTHORIZED,
+                ..
+            }
+        )
+    }
+
     pub fn sent(&self) -> &[DraftId] {
         match self {
             Self::Unfinished { sent, .. } => sent,
@@ -144,7 +216,12 @@ impl ForgeError {
             | Self::Unreachable(_)
             | Self::Http { .. }
             | Self::Malformed(_)
-            | Self::PendingLeft { .. } => &[],
+            | Self::PendingLeft { .. }
+            | Self::NoDeviceLogin(_)
+            | Self::LoginDenied(_)
+            | Self::LoginExpired(_)
+            | Self::LoginCancelled(_)
+            | Self::LoginRefused { .. } => &[],
         }
     }
 }
@@ -169,7 +246,7 @@ impl fmt::Display for ForgeError {
                     .collect();
                 write!(
                     formatter,
-                    "submitting to {kind} needs a token: set {}",
+                    "submitting to {kind} needs a token: log in with `review login <host>`, or set {}",
                     names.join(" or ")
                 )?;
                 if *kind == ForgeKind::GitHub {
@@ -220,6 +297,27 @@ impl fmt::Display for ForgeError {
                 formatter,
                 "the forge took every draft and the summary, then refused the approval: {cause}. Approve again, without a summary"
             ),
+            Self::NoDeviceLogin(site) => write!(
+                formatter,
+                "{} on {site} has no device login: paste a token instead",
+                site.kind()
+            ),
+            Self::LoginDenied(site) => {
+                write!(formatter, "the login to {site} was denied in the browser")
+            }
+            Self::LoginExpired(site) => write!(
+                formatter,
+                "the code for {site} expired before it was entered: log in again"
+            ),
+            Self::LoginCancelled(site) => write!(formatter, "the login to {site} was cancelled"),
+            Self::LoginRefused {
+                site,
+                code,
+                description,
+            } => write!(
+                formatter,
+                "{site} refused the login ({code}): {description}"
+            ),
         }
     }
 }
@@ -228,6 +326,7 @@ impl fmt::Display for ForgeError {
 pub struct ForgeClient {
     forge: Forge,
     token: Option<Token>,
+    source: Option<TokenSource>,
 }
 
 fn variable(name: EnvVar) -> Option<Token> {
@@ -246,15 +345,29 @@ fn gh_token(host: &Host) -> Option<Token> {
         .flatten()
 }
 
-fn token(kind: ForgeKind, host: &Host) -> Option<Token> {
+fn token(forge: &Forge, stored: impl FnOnce(&Forge) -> Option<Token>) -> Option<Sourced> {
+    let kind = forge.kind();
     EnvVar::tokens(kind)
         .iter()
         .find_map(|name| variable(*name))
+        .map(|token| Sourced::new(token, TokenSource::Environment))
+        .or_else(|| stored(forge).map(|token| Sourced::new(token, TokenSource::Keychain)))
         .or_else(|| {
             (kind == ForgeKind::GitHub)
-                .then(|| gh_token(host))
+                .then(|| gh_token(forge.host()))
                 .flatten()
+                .map(|token| Sourced::new(token, TokenSource::GhCli))
         })
+}
+
+pub fn forge_host_of(host: &Host) -> Result<ForgeHost, ForgeError> {
+    let chosen = env::var(EnvVar::ReviewForge.name())
+        .ok()
+        .and_then(|name| wire::forge_named(&name));
+    chosen
+        .or_else(|| wire::detect(host.as_str()))
+        .map(|kind| ForgeHost::new(kind, host.clone()))
+        .ok_or_else(|| ForgeError::UnknownHost(host.clone()))
 }
 
 fn every_page(
@@ -287,13 +400,8 @@ pub fn forge_of(url: &RemoteUrl) -> Result<Forge, ForgeError> {
     let remote = wire::parse_remote(url.as_str()).ok_or_else(unreadable)?;
     let host = Host::new(&remote.host).ok_or_else(unreadable)?;
     let slug = RepoSlug::new(&remote.path).ok_or_else(unreadable)?;
-    let chosen = env::var(EnvVar::ReviewForge.name())
-        .ok()
-        .and_then(|name| wire::forge_named(&name));
-    let kind = chosen
-        .or_else(|| wire::detect(host.as_str()))
-        .ok_or_else(|| ForgeError::UnknownHost(host.clone()))?;
-    Ok(Forge::new(kind, host, slug))
+    let site = forge_host_of(&host)?;
+    Ok(Forge::new(site.kind(), host, slug))
 }
 
 pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink> {
@@ -306,14 +414,25 @@ pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink> {
 }
 
 impl ForgeClient {
-    pub fn connect(url: &RemoteUrl) -> Result<Self, ForgeError> {
+    pub fn connect(
+        url: &RemoteUrl,
+        stored: impl FnOnce(&Forge) -> Option<Token>,
+    ) -> Result<Self, ForgeError> {
         let forge = forge_of(url)?;
-        let token = token(forge.kind(), forge.host());
-        Ok(Self { forge, token })
+        let sourced = token(&forge, stored);
+        Ok(Self {
+            forge,
+            source: sourced.as_ref().map(|sourced| sourced.source),
+            token: sourced.map(|sourced| sourced.token),
+        })
     }
 
     pub fn forge(&self) -> &Forge {
         &self.forge
+    }
+
+    pub const fn token_source(&self) -> Option<TokenSource> {
+        self.source
     }
 
     pub fn head_ref(&self, number: PrNumber) -> RefName {
@@ -335,23 +454,7 @@ impl ForgeClient {
 
     fn exchange(&self, api: &Api, request: &Request) -> Result<WireResponse, ForgeError> {
         let config = api.config(request, self.token.as_ref().map(Token::as_str));
-        let arguments: Vec<Argument> = wire::curl_arguments()
-            .iter()
-            .map(|argument| Argument::new(argument))
-            .collect();
-        let output = Process::run_with_input(
-            &Program::new(wire::CURL),
-            &arguments,
-            &env::temp_dir(),
-            &Captured::of(config.as_bytes()),
-        )
-        .map_err(ForgeError::Process)?;
-        if !output.success() {
-            return Err(ForgeError::Unreachable(output.stderr));
-        }
-        let stdout = output.stdout.text();
-        let response = wire::parse_response(&stdout)
-            .ok_or_else(|| ForgeError::Malformed(ResponseBody::new(&stdout)))?;
+        let response = curl(&Captured::of(config.as_bytes()))?;
         let status = HttpStatus::new(response.status);
         if status.success() {
             Ok(response)

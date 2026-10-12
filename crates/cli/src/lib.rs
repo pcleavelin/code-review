@@ -4,7 +4,8 @@ mod failure;
 mod output;
 mod wire;
 
-use session::Desk;
+use domain::Token;
+use session::{Cancel, Desk, StartedLogin};
 
 use crate::convert::Request;
 use crate::exec::Run;
@@ -79,6 +80,37 @@ impl Invocation {
             })
             .map_err(ParseFailure)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PastedToken(String);
+
+impl PastedToken {
+    pub fn new(text: &str) -> Self {
+        Self(text.to_owned())
+    }
+}
+
+pub fn finish_login(
+    desk: &Desk,
+    started: &StartedLogin,
+    pasted: Option<&PastedToken>,
+    output: &mut Output,
+) -> Result<(), Failure> {
+    let site = match started {
+        StartedLogin::Device(authorization) => {
+            desk.access().finish(authorization, &Cancel::new())?
+        }
+        StartedLogin::Paste { site, .. } => {
+            let token = pasted
+                .and_then(|pasted| Token::new(&pasted.0))
+                .ok_or_else(|| Failure::NoToken(site.clone()))?;
+            desk.access().keep(site, token)?;
+            site.clone()
+        }
+    };
+    wire::logged_in(output, &site);
+    Ok(())
 }
 
 pub fn help() -> Output {

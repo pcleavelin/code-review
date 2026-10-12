@@ -7,6 +7,7 @@ mod field;
 mod grid;
 mod ids;
 mod keys;
+mod login;
 mod markdown;
 mod model;
 mod nav;

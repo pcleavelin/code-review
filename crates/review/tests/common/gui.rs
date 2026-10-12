@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped }
+        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login }
     };
 }
 
@@ -312,5 +312,51 @@ dump
 quit
 ",
         shows: &["open=None", "/local files=4"],
+    }
+}
+
+pub(crate) fn login() -> Scenario {
+    Scenario {
+        script: "idle
+wait 2
+dump
+shot {shots}/forges.png
+click-id login@forgejo.test
+wait 2
+dump
+text fjtoken123
+dump
+shot {shots}/paste.png
+key enter
+idle
+wait 2
+dump
+shot {shots}/pasted.png
+click-id cmd
+text login gitlab.test
+key enter
+wait 3
+dump
+shot {shots}/code.png
+pause 5000
+idle
+wait 2
+dump
+shot {shots}/logged-in.png
+click-id logout@forgejo.test
+idle
+wait 2
+dump
+quit
+",
+        shows: &[
+            "DUMP login sites=[forgejo.test=out] stage=none",
+            "DUMP login sites=[forgejo.test=out] stage=forgejo.test paste page=Some(https://forgejo.test/user/settings/applications)",
+            "field Token caret=10 first=0 rows=1 text=<10 hidden>",
+            "DUMP login sites=[forgejo.test=in] stage=none",
+            "stage=gitlab.test device code=ABCD-1234 page=https://gitlab.test/oauth/device",
+            "DUMP login sites=[gitlab.test=in forgejo.test=in] stage=none",
+            "DUMP login sites=[gitlab.test=in forgejo.test=out] stage=none",
+        ],
     }
 }

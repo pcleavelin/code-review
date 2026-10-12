@@ -4,7 +4,7 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cli::{Argument, Channel, Invocation, Output};
+use cli::{Argument, Channel, Invocation, Output, Touched};
 use domain::Root;
 use session::{Desk, Reach};
 use strum::VariantArray;
@@ -66,6 +66,19 @@ fn run(root: &Root, arguments: &[Argument]) -> Status {
     let mut report = Output::new();
     let done = cli::exec(&mut desk, invocation, &mut report);
     output::text(Channel::Stdout, &report);
+    let done = match done {
+        Ok(Touched::LoginStarted(started)) => {
+            let pasted = match &started {
+                session::StartedLogin::Paste { .. } => output::pasted_line(),
+                session::StartedLogin::Device(_) => None,
+            };
+            let mut finished = Output::new();
+            let result = cli::finish_login(&desk, &started, pasted.as_ref(), &mut finished);
+            output::text(Channel::Stdout, &finished);
+            result.map(|()| Touched::Nothing)
+        }
+        other => other,
+    };
     match done {
         Ok(_) => Status::Done,
         Err(failure) => {

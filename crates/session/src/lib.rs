@@ -1,18 +1,23 @@
+mod access;
 mod desk;
 mod repo;
 
 use std::fmt;
 use std::io;
+use std::path::PathBuf;
 
-use domain::{CommitId, PrNumber, RelativePath};
-use io_forge::ForgeError;
+use domain::{CommitId, ForgeHost, Host, PrNumber, RelativePath};
+use io_forge::{ForgeError, MissingClient};
+use io_keychain::KeychainError;
 use io_review::ReviewError;
 use io_vcs::VcsError;
 
-pub use crate::desk::{Desk, PinTarget, Pinned, PullAddress, Why};
+pub use crate::access::{Access, StartedLogin};
+pub use crate::desk::{Desk, LoginTarget, PinTarget, Pinned, PullAddress, Why};
 pub use crate::repo::{Entry, Opened, Repo, RepoName};
 pub use io_config::Reach;
-pub use io_forge::Submitted;
+pub use io_forge::{Cancel, DeviceAuthorization, Submitted};
+pub use io_keychain::Forgotten;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -38,6 +43,22 @@ pub enum SessionError {
     AlreadyPinned(RepoName),
     NoSuchRepo(RepoName, Vec<RepoName>),
     Ambiguous(PrNumber, Vec<RepoName>),
+    Keychain(KeychainError),
+    NoKeychain,
+    NoClient {
+        host: Host,
+        gap: MissingClient,
+        file: Option<PathBuf>,
+    },
+    Renewal {
+        site: ForgeHost,
+        cause: ForgeError,
+    },
+    TokenRefused {
+        site: ForgeHost,
+        cause: ForgeError,
+    },
+    NoSite(LoginTarget),
 }
 
 struct Listed<'names>(&'names [RepoName]);
@@ -101,6 +122,33 @@ impl fmt::Display for SessionError {
                 formatter,
                 "#{number} could be in {}: write it as <repository>#{number}",
                 Listed(known)
+            ),
+            Self::Keychain(error) => write!(formatter, "{error}"),
+            Self::NoKeychain => formatter.write_str(
+                "a script or screenshot run keeps away from the login keychain: set REVIEW_KEYCHAIN to a scratch keychain",
+            ),
+            Self::NoClient { host, gap, file } => {
+                write!(
+                    formatter,
+                    "logging in to {host} needs the client ID of an OAuth app registered on {host} with the device flow enabled, and {gap}: add the line `client {host} <client id>` to "
+                )?;
+                match file {
+                    Some(file) => write!(formatter, "{}", file.display()),
+                    None => formatter.write_str("the forges file (set REVIEW_FORGES)"),
+                }
+            }
+            Self::Renewal { site, cause } => write!(
+                formatter,
+                "the login to {site} expired and could not be renewed ({cause}): log in again with 'review login {site}'"
+            ),
+            Self::TokenRefused { site, cause } => write!(
+                formatter,
+                "{cause}: the forge refused the token the keychain holds for {site}; log in again with 'review login {site}'"
+            ),
+            Self::NoSite(target) => write!(
+                formatter,
+                "{} is neither a pinned repository nor a forge's host",
+                target.as_str()
             ),
         }
     }

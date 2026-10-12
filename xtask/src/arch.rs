@@ -129,7 +129,7 @@ const EXPECTS: [Allowance; 28] = [
     },
 ];
 
-const DEPENDENCIES: [Allowed; 21] = [
+const DEPENDENCIES: [Allowed; 22] = [
     Allowed {
         package: Literal::new("xtask"),
         dependencies: &[
@@ -169,6 +169,10 @@ const DEPENDENCIES: [Allowed; 21] = [
             Literal::new("io-vcs"),
             Literal::new("serde_json"),
         ],
+    },
+    Allowed {
+        package: Literal::new("io-keychain"),
+        dependencies: &[Literal::new("domain"), Literal::new("io-process")],
     },
     Allowed {
         package: Literal::new("io-picture"),
@@ -243,6 +247,7 @@ const DEPENDENCIES: [Allowed; 21] = [
         dependencies: &[
             Literal::new("domain"),
             Literal::new("io-config"),
+            Literal::new("io-keychain"),
             Literal::new("io-process"),
             Literal::new("io-vcs"),
             Literal::new("io-forge"),
@@ -257,6 +262,7 @@ const DEPENDENCIES: [Allowed; 21] = [
             Literal::new("index"),
             Literal::new("io-review"),
             Literal::new("io-forge"),
+            Literal::new("io-process"),
             Literal::new("session"),
             Literal::new("io-vcs"),
             Literal::new("clap"),

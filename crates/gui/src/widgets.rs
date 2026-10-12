@@ -9,7 +9,7 @@ use ui::{
 use crate::action::Action;
 use crate::element_tip::{AttachedTip, ElementTip};
 use crate::field::{
-    Attention, Field, FieldAct, FieldShape, FieldWindow, Piece, Pointing, Tint, Which,
+    Attention, Field, FieldAct, FieldShape, FieldWindow, Piece, Pointing, Shown, Tint, Which,
 };
 use crate::grid::Grids;
 use crate::ids::{Control, Target};
@@ -170,6 +170,22 @@ fn marked(selected: Chosen) -> Style {
             Sides::NONE
         },
         border_color: ACCENT,
+    }
+}
+
+fn masked(which: Which, pieces: Vec<Piece>) -> Vec<Piece> {
+    match which.shown() {
+        Shown::Clear => pieces,
+        Shown::Masked => pieces
+            .into_iter()
+            .map(|piece| match piece.tint {
+                Tint::Caret => piece,
+                Tint::Plain | Tint::Selected => Piece {
+                    text: Label::new("*".repeat(piece.text.as_str().chars().count())),
+                    tint: piece.tint,
+                },
+            })
+            .collect(),
     }
 }
 
@@ -982,11 +998,16 @@ impl Frame<'_> {
                     None,
                 );
             }
-            Attention::Idle => self.field_pieces(vec![Piece {
-                text: field.idle_text(room),
-                tint: Tint::Plain,
-            }]),
-            Attention::Focused => self.field_pieces(field.pieces(field.whole(), attention)),
+            Attention::Idle => self.field_pieces(masked(
+                which,
+                vec![Piece {
+                    text: field.idle_text(room),
+                    tint: Tint::Plain,
+                }],
+            )),
+            Attention::Focused => {
+                self.field_pieces(masked(which, field.pieces(field.whole(), attention)));
+            }
         }
         self.ui.close();
         if clicked {

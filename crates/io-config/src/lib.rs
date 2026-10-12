@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use domain::{LayoutTree, Root, Settings};
+use domain::{LayoutTree, OAuthApp, Root, Settings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reach {
@@ -40,6 +40,11 @@ const SETTINGS_FILE: UserFile = UserFile {
 const PINS_FILE: UserFile = UserFile {
     name: FileName("pins"),
     override_variable: Variable("REVIEW_PINS"),
+};
+
+const FORGES_FILE: UserFile = UserFile {
+    name: FileName("forges"),
+    override_variable: Variable("REVIEW_FORGES"),
 };
 
 const CLONES: UserFile = UserFile {
@@ -176,6 +181,33 @@ impl PinsStore {
 
     pub fn save(&self, pins: &[Root]) -> io::Result<()> {
         save_text(&self.path, wire::print_pins(&convert::wire_pins(pins)))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgesStore {
+    path: PathBuf,
+}
+
+impl ForgesStore {
+    pub const fn at(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn find(reach: Reach) -> Option<Self> {
+        user_file(FORGES_FILE, reach).map(Self::at)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn load(&self) -> Vec<OAuthApp> {
+        fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|text| wire::parse_forges(&text))
+            .map(|forges| convert::apps(&forges))
+            .unwrap_or_default()
     }
 }
 

@@ -73,6 +73,7 @@ pub(crate) enum Which {
     Summary,
     Inbox,
     Pin,
+    Token,
 }
 
 impl Which {
@@ -91,6 +92,7 @@ impl Which {
             Self::Summary => ids::SUMMARY_FIELD,
             Self::Inbox => ids::INBOX_FIELD,
             Self::Pin => ids::PIN_FIELD,
+            Self::Token => ids::TOKEN_FIELD,
         }
     }
 
@@ -103,9 +105,31 @@ impl Which {
             | Self::ViewSearch
             | Self::Palette
             | Self::Inbox
-            | Self::Pin => FieldShape::Single,
+            | Self::Pin
+            | Self::Token => FieldShape::Single,
         }
     }
+
+    pub(crate) const fn shown(self) -> Shown {
+        match self {
+            Self::Token => Shown::Masked,
+            Self::Search
+            | Self::Command
+            | Self::SymbolFilter
+            | Self::ViewSearch
+            | Self::Palette
+            | Self::Draft
+            | Self::Summary
+            | Self::Inbox
+            | Self::Pin => Shown::Clear,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shown {
+    Clear,
+    Masked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -755,6 +779,7 @@ pub(crate) struct Fields {
     summary: Field,
     inbox: Field,
     pin: Field,
+    token: Field,
     focused: Option<Holding>,
 }
 
@@ -776,6 +801,7 @@ impl Fields {
             Which::Summary => &self.summary,
             Which::Inbox => &self.inbox,
             Which::Pin => &self.pin,
+            Which::Token => &self.token,
         }
     }
 
@@ -790,6 +816,7 @@ impl Fields {
             Which::Summary => &mut self.summary,
             Which::Inbox => &mut self.inbox,
             Which::Pin => &mut self.pin,
+            Which::Token => &mut self.token,
         }
     }
 

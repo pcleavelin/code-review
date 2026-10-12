@@ -2,7 +2,7 @@ use domain::{
     BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft, DraftId,
     DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login, Moment,
     NoteKind, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SignedPicture,
-    SourceLine, Span, ThreadId, ThreadState, WebLink,
+    SourceLine, Span, ThreadId, ThreadState, Token, WebLink,
 };
 use serde_json::{Value, json};
 
@@ -12,8 +12,8 @@ use crate::wire::{
     detect, forge_named, parse_items, parse_remote, parse_response,
 };
 use crate::{
-    ForgeClient, ForgeError, HttpStatus, ResponseBody, Token, Unsent, every_page, send_gitlab,
-    send_in_turn,
+    ForgeClient, ForgeError, HttpStatus, ResponseBody, TokenSource, Unsent, every_page,
+    send_gitlab, send_in_turn,
 };
 
 const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -171,13 +171,13 @@ fn a_get_config_carries_url_accept_auth_and_status_but_no_method_or_data() {
 }
 
 #[test]
-fn each_forge_sends_the_token_in_its_own_header() {
+fn gitlab_takes_its_oauth_and_personal_tokens_as_bearer_like_github_and_forgejo_its_own_header() {
     let header = |kind| {
         let api = Api::new(kind, "example.org", "owner/repo");
         api.config(&api.list(), Some("tok"))
     };
     assert!(header(ForgeKind::GitHub).contains("header = \"Authorization: Bearer tok\"\n"));
-    assert!(header(ForgeKind::GitLab).contains("header = \"PRIVATE-TOKEN: tok\"\n"));
+    assert!(header(ForgeKind::GitLab).contains("header = \"Authorization: Bearer tok\"\n"));
     assert!(header(ForgeKind::Forgejo).contains("header = \"Authorization: token tok\"\n"));
 }
 
@@ -875,6 +875,7 @@ fn client(token: Option<&str>) -> ForgeClient {
             RepoSlug::new("owner/repo").unwrap(),
         ),
         token: token.and_then(Token::new),
+        source: token.map(|_| TokenSource::Environment),
     }
 }
 
@@ -1512,6 +1513,7 @@ fn forge_client(kind: ForgeKind, host: &str, slug: &str, token: Option<&str>) ->
     ForgeClient {
         forge: Forge::new(kind, Host::new(host).unwrap(), RepoSlug::new(slug).unwrap()),
         token: token.and_then(Token::new),
+        source: token.map(|_| TokenSource::Environment),
     }
 }
 
@@ -1540,7 +1542,7 @@ fn a_gitlab_upload_is_fetched_through_the_uploads_api_with_the_token() {
         ),
         (
             "https://gitlab.com/api/v4/projects/group%2Frepo/uploads/0123abcd/shot.png".to_owned(),
-            Some("PRIVATE-TOKEN: tok".to_owned())
+            Some("Authorization: Bearer tok".to_owned())
         )
     );
     assert_eq!(
@@ -1551,7 +1553,7 @@ fn a_gitlab_upload_is_fetched_through_the_uploads_api_with_the_token() {
         ),
         (
             "https://gitlab.com/api/v4/projects/278964/uploads/0123abcd/shot.png".to_owned(),
-            Some("PRIVATE-TOKEN: tok".to_owned())
+            Some("Authorization: Bearer tok".to_owned())
         )
     );
 }

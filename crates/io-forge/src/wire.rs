@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use domain::{Decision, DraftId, ForgeKind, Linked, NoteKind, Side, Span, ThreadState};
+use io_process::Captured;
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
 
@@ -1001,8 +1003,7 @@ impl Api {
 
     pub(crate) fn authorization(&self, token: &str) -> String {
         match self.kind {
-            ForgeKind::GitHub => format!("Authorization: Bearer {token}"),
-            ForgeKind::GitLab => format!("PRIVATE-TOKEN: {token}"),
+            ForgeKind::GitHub | ForgeKind::GitLab => format!("Authorization: Bearer {token}"),
             ForgeKind::Forgejo => format!("Authorization: token {token}"),
         }
     }
@@ -1313,4 +1314,222 @@ impl PendingNote {
     const fn id(self) -> u64 {
         self.0
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BuiltInApp {
+    pub(crate) host: &'static str,
+    pub(crate) client: &'static str,
+}
+
+pub(crate) const BUILT_IN_APPS: [BuiltInApp; 2] = [
+    BuiltInApp {
+        host: "github.com",
+        client: "Ov23libeQuW6oeJLiwjn",
+    },
+    BuiltInApp {
+        host: "gitlab.com",
+        client: "",
+    },
+];
+
+pub(crate) const BUILT_IN_APPS_PLACE: &str = "BUILT_IN_APPS in crates/io-forge/src/wire.rs";
+
+const DEFAULT_INTERVAL: u64 = 5;
+pub(crate) const SLOW_DOWN_STEP: u64 = 5;
+const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+const REFRESH_GRANT: &str = "refresh_token";
+const ACCEPT_FORM_ANSWER: &str = "Accept: application/json";
+const SEND_FORM: &str = "Content-Type: application/x-www-form-urlencoded";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, VariantArray)]
+pub(crate) enum OAuthError {
+    Pending,
+    SlowDown,
+    Expired,
+    Denied,
+}
+
+impl OAuthError {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Pending => "authorization_pending",
+            Self::SlowDown => "slow_down",
+            Self::Expired => "expired_token",
+            Self::Denied => "access_denied",
+        }
+    }
+
+    fn read(text: &str) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|error| error.name() == text)
+    }
+}
+
+pub(crate) fn device_url(kind: ForgeKind, host: &str) -> Option<String> {
+    match kind {
+        ForgeKind::GitHub => Some(format!("https://{host}/login/device/code")),
+        ForgeKind::GitLab => Some(format!("https://{host}/oauth/authorize_device")),
+        ForgeKind::Forgejo => None,
+    }
+}
+
+pub(crate) fn token_url(kind: ForgeKind, host: &str) -> Option<String> {
+    match kind {
+        ForgeKind::GitHub => Some(format!("https://{host}/login/oauth/access_token")),
+        ForgeKind::GitLab => Some(format!("https://{host}/oauth/token")),
+        ForgeKind::Forgejo => None,
+    }
+}
+
+pub(crate) fn token_page(kind: ForgeKind, host: &str) -> String {
+    match kind {
+        ForgeKind::GitHub => format!("https://{host}/settings/tokens"),
+        ForgeKind::GitLab => format!("https://{host}/-/user_settings/personal_access_tokens"),
+        ForgeKind::Forgejo => format!("https://{host}/user/settings/applications"),
+    }
+}
+
+const fn scope(kind: ForgeKind) -> &'static str {
+    match kind {
+        ForgeKind::GitHub => "repo",
+        ForgeKind::GitLab => "api",
+        ForgeKind::Forgejo => "",
+    }
+}
+
+fn form_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            escaped.push(char::from(byte));
+        } else {
+            write!(escaped, "%{byte:02X}").unwrap_or_default();
+        }
+    }
+    escaped
+}
+
+fn form(fields: &[(&str, &str)]) -> String {
+    fields
+        .iter()
+        .map(|(name, value)| format!("{name}={}", form_escape(value)))
+        .collect::<Vec<String>>()
+        .join("&")
+}
+
+pub(crate) fn device_form(kind: ForgeKind, client: &str) -> String {
+    form(&[("client_id", client), ("scope", scope(kind))])
+}
+
+pub(crate) fn poll_form(client: &str, device_code: &str) -> String {
+    form(&[
+        ("client_id", client),
+        ("device_code", device_code),
+        ("grant_type", DEVICE_GRANT),
+    ])
+}
+
+pub(crate) fn refresh_form(client: &str, refresh: &str) -> String {
+    form(&[
+        ("client_id", client),
+        ("grant_type", REFRESH_GRANT),
+        ("refresh_token", refresh),
+    ])
+}
+
+pub(crate) fn form_config(url: &str, body: &str) -> String {
+    let mut config = setting(Setting::Url, url);
+    config.push_str(&setting(Setting::Header, ACCEPT_FORM_ANSWER));
+    config.push_str(&setting(Setting::Header, SEND_FORM));
+    config.push_str(&setting(Setting::Data, body));
+    config.push_str(&setting(Setting::WriteOut, PAGING_THEN_STATUS));
+    config
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireDevice {
+    pub(crate) device_code: String,
+    pub(crate) user_code: String,
+    pub(crate) verification: String,
+    pub(crate) verification_complete: Option<String>,
+    pub(crate) expires_in: u64,
+    pub(crate) interval: u64,
+}
+
+pub(crate) fn parse_device(text: &str) -> Option<WireDevice> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    Some(WireDevice {
+        device_code: text_at(&value, "/device_code")?,
+        user_code: text_at(&value, "/user_code")?,
+        verification: text_at(&value, "/verification_uri")?,
+        verification_complete: text_at(&value, "/verification_uri_complete"),
+        expires_in: value.pointer("/expires_in")?.as_u64()?,
+        interval: value
+            .pointer("/interval")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_INTERVAL),
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireGrant {
+    pub(crate) access: String,
+    pub(crate) refresh: Option<String>,
+    pub(crate) expires_in: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum WirePolled {
+    Granted(WireGrant),
+    Said(OAuthError, Option<u64>),
+    Refused { error: String, description: String },
+}
+
+pub(crate) fn parse_polled(text: &str) -> Option<WirePolled> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    if let Some(access) = text_at(&value, "/access_token") {
+        return Some(WirePolled::Granted(WireGrant {
+            access,
+            refresh: text_at(&value, "/refresh_token"),
+            expires_in: value.pointer("/expires_in").and_then(Value::as_u64),
+        }));
+    }
+    let error = text_at(&value, "/error")?;
+    let interval = value.pointer("/interval").and_then(Value::as_u64);
+    Some(match OAuthError::read(&error) {
+        Some(known) => WirePolled::Said(known, interval),
+        None => WirePolled::Refused {
+            description: text_at(&value, "/error_description").unwrap_or_default(),
+            error,
+        },
+    })
+}
+
+fn form_request(url: Option<String>, body: &str) -> Option<Captured> {
+    url.map(|url| Captured::of(form_config(&url, body).as_bytes()))
+}
+
+pub(crate) fn device_request(kind: ForgeKind, host: &str, client: &str) -> Option<Captured> {
+    form_request(device_url(kind, host), &device_form(kind, client))
+}
+
+pub(crate) fn poll_request(
+    kind: ForgeKind,
+    host: &str,
+    client: &str,
+    device_code: &str,
+) -> Option<Captured> {
+    form_request(token_url(kind, host), &poll_form(client, device_code))
+}
+
+pub(crate) fn refresh_request(
+    kind: ForgeKind,
+    host: &str,
+    client: &str,
+    refresh: &str,
+) -> Option<Captured> {
+    form_request(token_url(kind, host), &refresh_form(client, refresh))
 }

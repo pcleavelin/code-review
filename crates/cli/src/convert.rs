@@ -2,7 +2,7 @@ use domain::{
     Decision, Depth, DraftId, DraftOn, DraftText, Line, RelativePath, Side, SymbolName, ThreadId,
 };
 use regex::Regex;
-use session::{PinTarget, PullAddress, RepoName};
+use session::{LoginTarget, PinTarget, PullAddress, RepoName};
 
 use crate::failure::{Failure, Given};
 use crate::wire::{Command, CommentArguments, FilesArguments, OldSide};
@@ -64,6 +64,8 @@ pub(crate) enum Request {
     Pins,
     Pin(PinTarget),
     Unpin(RepoName),
+    Login(LoginTarget),
+    Logout(LoginTarget),
     Pulls(Filter),
     Open(PullAddress),
     Discussion(PullAddress),
@@ -126,6 +128,8 @@ pub(crate) fn request(command: Command) -> Result<Request, Failure> {
         Command::Pins => Request::Pins,
         Command::Pin(arguments) => Request::Pin(PinTarget::new(&arguments.target)),
         Command::Unpin(arguments) => Request::Unpin(RepoName::new(&arguments.repository)),
+        Command::Login(arguments) => Request::Login(LoginTarget::new(&arguments.target)),
+        Command::Logout(arguments) => Request::Logout(LoginTarget::new(&arguments.target)),
         Command::Prs(arguments) => Request::Pulls(Filter::of(&arguments.filter)),
         Command::Open(arguments) => Request::Open(arguments.pr),
         Command::Discussion(arguments) => Request::Discussion(arguments.pr),

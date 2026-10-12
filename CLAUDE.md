@@ -99,6 +99,7 @@ rule applies.
 | **Thread** | A conversation on the forge: on a line of the code (open, resolved, outdated) or on the pull request itself. An outdated one, written on a line the pull request has changed since, is listed in the Review tab only and not drawn in the code. Read on open and on refresh, never stored; a reply is a draft that names its thread. Every note, the description and every draft is drawn as markdown: links, `#12`, `!12`, `@user` and commit hashes link to the forge, pictures are fetched once into a temporary cache and drawn in place. |
 | **Commit** | One commit of the pull request (`git log base..head`). The Commits view lists them; picking one shows its own changes against its parent, unified or split; comments stay on the whole pull request's changes. |
 | **Link** | Where an entity lives on the forge: the pull request, a comment, an author, a commit, a file at a commit with the selected lines. Every one has a button that opens it in the browser and one that copies it; `io-forge` spells each forge's URLs. |
+| **Forge login** | A forge's token kept in the system keychain (service `code-review`, account the host), from `login <host or repository>`: GitHub and GitLab by the device flow (a code entered in the browser, no server of our own), Forgejo by pasting a token. A token that comes with a refresh token (GitLab's, two hours) is renewed when it expires or the forge answers 401. The device flow needs the client ID of an OAuth app registered on the host: built in for github.com and gitlab.com (`BUILT_IN_APPS` in `crates/io-forge/src/wire.rs`), else `client <host> <id>` in the forges file (`REVIEW_FORGES`, else `<config>/code-review/forges`). `REVIEW_KEYCHAIN` names a scratch keychain; a script or screenshot run uses no other. |
 | **Xref** | Symbol A calls or references symbol B. Xrefs to a symbol are its callers, xrefs from it its callees. |
 
 ## Why it is built this way
@@ -107,8 +108,9 @@ rule applies.
   request's head as a git ref (`refs/pull/<n>/head`, GitLab `refs/merge-requests/<n>/head`),
   so fetching, diffing and reading code are plain git and need no token. Only listing pull
   requests and submitting a review talk to a forge's API, in `io-forge`, through `curl` with
-  the token on curl's stdin and never on a command line. Tokens come from `GITHUB_TOKEN`/
-  `GH_TOKEN` (else `gh auth token`), `GITLAB_TOKEN`, `FORGEJO_TOKEN`/`GITEA_TOKEN`.
+  the token on curl's stdin and never on a command line. A forge's token comes from its
+  variable first (`GITHUB_TOKEN`/`GH_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN`/`GITEA_TOKEN`), then
+  from a login kept in the system keychain, then (GitHub) from `gh auth token`.
 - **Review state is local and written at once.** It is one reviewer's working state, not part
   of the code: it lives in the git common directory, so every worktree of the repo sees it
   and no commit carries it, and every mark and draft is written immediately, so nothing is
@@ -151,7 +153,8 @@ rule applies.
 
 `domain` (the model, no I/O), `io-*` (one crate per outside format or program: `io-vcs` git,
 `io-forge` forge APIs through curl, `io-review` the review files, `io-cache` the index cache,
-`io-config` the user's layout and settings, `io-fonts` installed fonts, `io-lsp`, `io-source`,
+`io-config` the user's layout, settings, pins and forges file, `io-keychain` the system keychain
+(macOS `security`, the Secret Service's `secret-tool`), `io-fonts` installed fonts, `io-lsp`, `io-source`,
 `io-process` (also the browser opener), `io-store`, `io-clipboard` the system clipboard,
 `io-picture` pictures fetched through curl, cached in the temporary folder and decoded), `index` (tree-sitter resolvers,
 server orchestration), `session` (the pinned repositories and their reviews: the inbox,

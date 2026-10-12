@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use domain::{
-    BaseFontSize, FontFamily, LayoutPanel, LayoutSplit, LayoutTree, Root, Settings, Share,
-    SplitDirection, Theme, ViewKey,
+    BaseFontSize, ClientId, FontFamily, Host, LayoutPanel, LayoutSplit, LayoutTree, OAuthApp, Root,
+    Settings, Share, SplitDirection, Theme, ViewKey,
 };
 
 use crate::wire::{
-    WireDirection, WirePins, WireSetting, WireSettings, WireTheme, WireTree, WireView,
+    WireDirection, WireForges, WirePins, WireSetting, WireSettings, WireTheme, WireTree, WireView,
 };
 
 pub(crate) fn layout(wire: &WireTree) -> Option<LayoutTree> {
@@ -115,4 +115,16 @@ pub(crate) fn wire_pins(pins: &[Root]) -> WirePins {
             .map(|root| root.as_path().to_string_lossy().into_owned())
             .collect(),
     }
+}
+
+pub(crate) fn apps(wire: &WireForges) -> Vec<OAuthApp> {
+    wire.apps
+        .iter()
+        .filter_map(|app| {
+            Some(OAuthApp {
+                host: Host::new(&app.host)?,
+                client: ClientId::new(&app.client)?,
+            })
+        })
+        .collect()
 }

@@ -5,11 +5,12 @@ use domain::{
     Commit, CommitId, Conversation, Decision, Draft, DraftText, FileChange, FileText, Forge, Mark,
     PrNumber, Progress, PullRequest, RelativePath, Review, Root, Seen, Standing,
 };
-use io_forge::{ForgeClient, Submitted};
+use io_forge::{ForgeClient, ForgeError, Submitted, TokenSource};
 use io_review::ReviewStore;
 use io_vcs::{Remote, RemoteUrl, Vcs};
 
 use crate::SessionError;
+use crate::access::Access;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Word(&'static str);
@@ -103,10 +104,11 @@ pub struct Repo {
     store: ReviewStore,
     remote: Remote,
     url: RemoteUrl,
+    access: Access,
 }
 
 impl Repo {
-    pub fn find(root: &Root) -> Result<Self, SessionError> {
+    pub fn find(root: &Root, access: &Access) -> Result<Self, SessionError> {
         let vcs = Vcs::detect(root)?;
         let store = ReviewStore::new(root)?;
         let (remote, url) = REMOTES
@@ -121,6 +123,7 @@ impl Repo {
             store,
             remote,
             url,
+            access: access.clone(),
         })
     }
 
@@ -141,11 +144,41 @@ impl Repo {
     }
 
     pub fn forge(&self) -> Result<ForgeClient, SessionError> {
-        Ok(ForgeClient::connect(&self.url)?)
+        let mut trouble = None;
+        let client = ForgeClient::connect(&self.url, |forge| {
+            self.access.token(forge).unwrap_or_else(|error| {
+                trouble = Some(error);
+                None
+            })
+        })?;
+        match trouble {
+            Some(error) if client.token_source().is_none() => Err(error),
+            _ => Ok(client),
+        }
+    }
+
+    fn with_forge<T>(
+        &self,
+        ask: impl Fn(&ForgeClient) -> Result<T, ForgeError>,
+    ) -> Result<T, SessionError> {
+        let client = self.forge()?;
+        match ask(&client) {
+            Err(cause)
+                if cause.refused_token()
+                    && client.token_source() == Some(TokenSource::Keychain) =>
+            {
+                let site = client.forge().forge_host();
+                if self.access.renew(&site)?.is_none() {
+                    return Err(SessionError::TokenRefused { site, cause });
+                }
+                Ok(ask(&self.forge()?)?)
+            }
+            answered => Ok(answered?),
+        }
     }
 
     pub fn pulls(&self) -> Result<Vec<PullRequest>, SessionError> {
-        Ok(self.forge()?.open_pulls()?)
+        self.with_forge(ForgeClient::open_pulls)
     }
 
     pub fn inbox(&self) -> Result<Vec<Entry>, SessionError> {
@@ -173,11 +206,11 @@ impl Repo {
     }
 
     pub fn pull(&self, number: PrNumber) -> Result<PullRequest, SessionError> {
-        Ok(self.forge()?.pull(number)?)
+        self.with_forge(|forge| forge.pull(number))
     }
 
     pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, SessionError> {
-        Ok(self.forge()?.conversation(pull)?)
+        self.with_forge(|forge| forge.conversation(pull))
     }
 
     pub fn fetch(&self, pull: &PullRequest) -> Result<Opened, SessionError> {
@@ -276,8 +309,8 @@ impl Repo {
         if opened.review.drafts().is_empty() && body.is_none() && decision == Decision::Comment {
             return Err(SessionError::NothingToSubmit(opened.number));
         }
-        let forge = self.forge()?;
-        let pull = forge.pull(opened.number)?;
+        let (forge, pull) =
+            self.with_forge(|forge| Ok((forge.clone(), forge.pull(opened.number)?)))?;
         if pull.head_commit != opened.head {
             return Err(SessionError::Moved {
                 number: opened.number,

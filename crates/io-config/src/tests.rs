@@ -131,3 +131,32 @@ fn pins_round_trip() {
     assert_eq!(store.load(), pins);
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn the_forges_file_gives_each_hosts_client_id_and_skips_lines_it_cannot_read() {
+    let folder = scratch("forges");
+    fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("forges");
+    let store = ForgesStore::at(path.clone());
+    assert!(store.load().is_empty());
+    io_store::write(
+        &path,
+        "review forges 1\nclient gitlab.example.org 8e1f2a\nclient github.com\nclient a b c\ntheme dark\nclient GitHub.com Iv23override\n",
+    )
+    .unwrap();
+    let apps: Vec<(String, String)> = store
+        .load()
+        .iter()
+        .map(|app| (app.host.to_string(), app.client.to_string()))
+        .collect();
+    assert_eq!(
+        apps,
+        [
+            ("gitlab.example.org".to_owned(), "8e1f2a".to_owned()),
+            ("github.com".to_owned(), "Iv23override".to_owned()),
+        ]
+    );
+    io_store::write(&path, "review settings 1\nclient github.com x\n").unwrap();
+    assert!(store.load().is_empty());
+    fs::remove_dir_all(folder).unwrap();
+}

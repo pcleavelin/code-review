@@ -5,11 +5,11 @@ use std::path::Path;
 
 use clap::{Args, CommandFactory, Parser};
 use domain::{
-    ChangeKind, Conversation, Decision, Depth, Draft, FileChange, Index, Line, LineKind, Location,
-    Mark, NoteKind, PrNumber, Program, Progress, Review, Seen, Side, SourceFile, SourceLine, Span,
-    Standing, Symbol, SymbolId, Thread, ThreadState,
+    ChangeKind, Conversation, Decision, Depth, Draft, FileChange, ForgeHost, Index, Line, LineKind,
+    Location, Mark, NoteKind, PrNumber, Program, Progress, Review, Seen, Side, SourceFile,
+    SourceLine, Span, Standing, Symbol, SymbolId, Thread, ThreadState, WebLink,
 };
-use session::{Entry, Opened, Pinned, PullAddress, RepoName};
+use session::{DeviceAuthorization, Entry, Forgotten, Opened, Pinned, PullAddress, RepoName};
 
 use crate::failure::Failure;
 use crate::output::{Output, write_line};
@@ -31,6 +31,14 @@ pub(crate) enum Command {
     Pin(PinArguments),
     #[command(about = "<repository>                     unpin a repository; its reviews stay")]
     Unpin(RepoArguments),
+    #[command(
+        about = "<host or repository>             log in to the forge: a code to enter in the browser (GitHub, GitLab) or a pasted token (Forgejo), kept in the system keychain"
+    )]
+    Login(LoginArguments),
+    #[command(
+        about = "<host or repository>             forget the forge's token kept in the system keychain"
+    )]
+    Logout(LoginArguments),
     #[command(
         about = "[filter]                         every open pull request of the pinned repositories, newest first"
     )]
@@ -165,6 +173,11 @@ fn parse_pr(text: &str) -> Result<PullAddress, String> {
 
 #[derive(Args, Debug)]
 pub(crate) struct PinArguments {
+    pub(crate) target: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct LoginArguments {
     pub(crate) target: String,
 }
 
@@ -384,6 +397,57 @@ pub(crate) fn pins(output: &mut Output, here: Option<&RepoName>, pinned: &[Pinne
 
 pub(crate) fn pinned(output: &mut Output, name: &RepoName) {
     write_line!(output, "pinned {name}");
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Browser {
+    Opened,
+    NotOpened,
+}
+
+pub(crate) fn login_code(
+    output: &mut Output,
+    authorization: &DeviceAuthorization,
+    browser: Browser,
+) {
+    write_line!(
+        output,
+        "to log in to {}, enter the code {} at {}",
+        authorization.forge_host(),
+        authorization.user_code(),
+        authorization.verification()
+    );
+    let opening = match browser {
+        Browser::Opened => "the browser is opening it",
+        Browser::NotOpened => "open it in a browser",
+    };
+    write_line!(output, "{opening}; waiting for the approval...");
+}
+
+pub(crate) fn login_paste(output: &mut Output, site: &ForgeHost, page: Option<&WebLink>) {
+    let made = page.map_or_else(String::new, |page| format!(" at {page}"));
+    write_line!(
+        output,
+        "{} on {site} has no device login: make an access token{made} that may read and write repositories and issues, paste it here and press enter",
+        site.kind()
+    );
+}
+
+pub(crate) fn logged_in(output: &mut Output, site: &ForgeHost) {
+    write_line!(
+        output,
+        "logged in to {site}; the token is in the system keychain"
+    );
+}
+
+pub(crate) fn logged_out(output: &mut Output, site: &ForgeHost, forgotten: Forgotten) {
+    match forgotten {
+        Forgotten::Removed => write_line!(
+            output,
+            "logged out of {site}; its token is gone from the keychain"
+        ),
+        Forgotten::Absent => write_line!(output, "the keychain holds no token for {site}"),
+    }
 }
 
 pub(crate) fn unpinned(output: &mut Output, name: &RepoName) {
@@ -683,6 +747,10 @@ impl fmt::Display for Failure {
                 "no symbol {symbol} in the tree; 'symbols <pr> [filter]' lists them"
             ),
             Self::BadPattern(error) => write!(formatter, "{error}"),
+            Self::NoToken(site) => write!(
+                formatter,
+                "nothing that looks like a token was pasted for {site}: paste the token alone on one line"
+            ),
         }
     }
 }

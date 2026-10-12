@@ -1,3 +1,4 @@
+mod access;
 mod diff;
 mod link;
 mod state;
@@ -7,6 +8,10 @@ use std::fmt;
 
 use strum::VariantArray;
 
+pub use access::{
+    ClientId, ForgeHost, Grant, Lifetime, OAuthApp, RefreshToken, Renewal, Token, UnixTime,
+    UserCode,
+};
 pub use diff::{
     ChangeKind, DiffLayout, DiffLine, FileChange, FileRow, Hunk, LineKind, NumberedLine, Paired,
     Pairing,
@@ -119,6 +124,10 @@ impl Forge {
 
     pub const fn slug(&self) -> &RepoSlug {
         &self.slug
+    }
+
+    pub fn forge_host(&self) -> ForgeHost {
+        ForgeHost::new(self.kind, self.host.clone())
     }
 }
 

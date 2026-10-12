@@ -1,11 +1,12 @@
 use domain::{
-    BranchName, CodePlace, CommitId, Conversation, Decision, Draft, DraftText, FileChange, Line,
-    Login, Moment, Note, PrNumber, PrTitle, Prose, PullRequest, RelativePath, SignedPicture,
-    Thread, ThreadId, WebLink,
+    BranchName, ClientId, CodePlace, CommitId, Conversation, Decision, Draft, DraftText,
+    FileChange, Grant, Lifetime, Line, Login, Moment, Note, PrNumber, PrTitle, Prose, PullRequest,
+    RefreshToken, RelativePath, Renewal, SignedPicture, Thread, ThreadId, Token, UnixTime, WebLink,
 };
 
 use crate::wire::{
-    WireComment, WireNote, WirePlace, WirePull, WireReview, WireSignedPicture, WireThread,
+    WireComment, WireGrant, WireNote, WirePlace, WirePull, WireReview, WireSignedPicture,
+    WireThread,
 };
 
 pub(crate) fn pull(wire: &WirePull) -> Option<PullRequest> {
@@ -106,4 +107,17 @@ pub(crate) fn conversation(
         threads,
         signed_pictures: signed.iter().filter_map(signed_picture).collect(),
     })
+}
+
+pub(crate) fn grant(wire: &WireGrant, client: &ClientId, now: UnixTime) -> Option<Grant> {
+    let token = Token::new(&wire.access)?;
+    let renewal = match (&wire.refresh, wire.expires_in) {
+        (Some(refresh), Some(expires_in)) => Some(Renewal {
+            refresh: RefreshToken::new(refresh)?,
+            expires: now.later_by(Lifetime::seconds(expires_in)),
+            client: client.clone(),
+        }),
+        _ => None,
+    };
+    Some(Grant { token, renewal })
 }

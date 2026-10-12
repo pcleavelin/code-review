@@ -334,6 +334,7 @@ dependencies = [
  "clap",
  "domain",
  "index",
+ "io-process",
  "regex",
  "session",
 ]
@@ -1004,6 +1005,14 @@ dependencies = [
  "io-vcs",
  "serde_json",
  "strum",
+]
+
+[[package]]
+name = "io-keychain"
+version = "0.1.0"
+dependencies = [
+ "domain",
+ "io-process",
 ]
 
 [[package]]
@@ -2135,6 +2144,7 @@ dependencies = [
  "domain",
  "io-config",
  "io-forge",
+ "io-keychain",
  "io-process",
  "io-review",
  "io-vcs",

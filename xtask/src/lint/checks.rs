@@ -228,7 +228,7 @@ const ENV_STD: Literal = Literal::new("std::env");
 const ENV_PATH: Literal = Literal::new("env::");
 const ENV_CONSTS: Literal = Literal::new("env::consts");
 
-const ENV_HOMES: [Literal; 8] = [
+const ENV_HOMES: [Literal; 9] = [
     Literal::new("crates/platform/src/script.rs"),
     Literal::new("crates/platform/src/window.rs"),
     Literal::new("crates/gui/src/app.rs"),
@@ -236,6 +236,7 @@ const ENV_HOMES: [Literal; 8] = [
     Literal::new("crates/io-config/src/lib.rs"),
     Literal::new("crates/io-fonts/src/lib.rs"),
     Literal::new("crates/review/src/main.rs"),
+    Literal::new("crates/io-keychain/src/lib.rs"),
     Literal::new("crates/io-forge/src/lib.rs"),
 ];
 

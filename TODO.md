@@ -18,6 +18,10 @@
 13. What changed since a file was seen is shown from the CLI only (`diff <pr> <file>
     --since-seen`); the window still shows the whole diff of a file changed since seen. After
     a rebase, the base's own changes to the file show as changed since too.
+14. `login` has run only against the offline fake forge: the device flow on github.com (its
+    OAuth app's client ID is built in) and a GitLab token's renewal have not met a live forge,
+    and gitlab.com has no client ID yet (`BUILT_IN_APPS` in `crates/io-forge/src/wire.rs`).
+    Log in to each once.
 
 ## Inherited from codemap
 

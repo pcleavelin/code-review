@@ -230,6 +230,7 @@ impl App {
             Which::Summary,
             Which::Inbox,
             Which::Pin,
+            Which::Token,
         ] {
             actions.push(Action::Type(which, edits.clone(), typed.clone()));
         }
@@ -251,9 +252,10 @@ impl App {
             ui: &self.ui,
             services: &self.services,
         };
-        let parts: [&dyn Dump; 10] = [
+        let parts: [&dyn Dump; 11] = [
             &model.nav,
             &model.review,
+            &model.review.logins,
             &model.scrolls,
             &model.panels,
             &model.status,
@@ -287,6 +289,7 @@ impl platform::App for App {
         self.poll_link();
         self.poll_sources();
         self.poll_review();
+        self.poll_login();
         self.model.now = input.time;
         self.model.review.pictures.wake = None;
         self.keys(input);

@@ -239,3 +239,39 @@ pub(crate) fn print_pins(pins: &WirePins) -> String {
     }
     out
 }
+
+const FORGES_HEADER: &str = "review forges 1";
+const CLIENT: &str = "client";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireApp {
+    pub(crate) host: String,
+    pub(crate) client: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WireForges {
+    pub(crate) apps: Vec<WireApp>,
+}
+
+fn app(line: &str) -> Option<WireApp> {
+    let mut words = line.split_whitespace();
+    if words.next()? != CLIENT {
+        return None;
+    }
+    let app = WireApp {
+        host: words.next()?.to_owned(),
+        client: words.next()?.to_owned(),
+    };
+    words.next().is_none().then_some(app)
+}
+
+pub(crate) fn parse_forges(text: &str) -> Option<WireForges> {
+    let mut lines = text.lines();
+    if lines.next()?.trim() != FORGES_HEADER {
+        return None;
+    }
+    Some(WireForges {
+        apps: lines.filter_map(app).collect(),
+    })
+}
