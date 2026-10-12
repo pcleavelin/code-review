@@ -17,7 +17,7 @@ pub use diff::{
     ChangeKind, DiffLayout, DiffLine, FileChange, FileRow, Hunk, LineKind, NumberedLine, Paired,
     Pairing,
 };
-pub use link::{Linked, WebLink};
+pub use link::{Linked, LinkedFile, Revision, WebLink};
 pub use rights::{Content, Refusal, Rights};
 pub use state::{
     Draft, DraftError, DraftId, DraftOn, DraftText, FileCount, Mark, Progress, Review, Seen, Side,

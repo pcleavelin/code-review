@@ -192,6 +192,12 @@ pub(crate) const INBOX_STATE: Control = Control::new(
     Element::new("inbox-state"),
     Words::new("show only the pull requests in this state"),
 );
+pub(crate) const INBOX_REQUESTED: Control = Control::new(
+    Element::new("inbox-requested"),
+    Words::new(
+        "show only the pull requests whose review is requested from you, teams included; needs a login to their forge",
+    ),
+);
 pub(crate) const PULL_ROW: Control = Control::new(
     Element::new("pull"),
     Words::new("open this pull request: fetch it, check out its head and index it"),
@@ -305,6 +311,12 @@ pub(crate) const MARKDOWN: Control = Control::new(
 pub(crate) const MD_LINK: Control = Control::new(
     Element::new("md-link"),
     Words::new("open this link in the browser"),
+);
+pub(crate) const MD_SOURCE: Control = Control::new(
+    Element::new("md-source"),
+    Words::new(
+        "open this file of the pull request in the Source view, at its head, with the linked lines selected",
+    ),
 );
 pub(crate) const MD_CODE: Control = Control::new(
     Element::new("md-code"),
@@ -458,6 +470,7 @@ pub(crate) const CONTROLS: &[Control] = &[
     HIT_FILE_ROW,
     INBOX_FIELD,
     INBOX_STATE,
+    INBOX_REQUESTED,
     PULL_ROW,
     PULLS_REFRESH,
     PIN_FIELD,
@@ -478,6 +491,7 @@ pub(crate) const CONTROLS: &[Control] = &[
     WHOLE_FILE,
     MARKDOWN,
     MD_LINK,
+    MD_SOURCE,
     MD_CODE,
     PICTURE,
     TABLE,

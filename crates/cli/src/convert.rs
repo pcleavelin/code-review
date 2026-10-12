@@ -2,7 +2,7 @@ use domain::{
     Decision, Depth, DraftId, DraftOn, DraftText, Line, RelativePath, Side, SymbolName, ThreadId,
 };
 use regex::Regex;
-use session::{LoginTarget, PinTarget, PullAddress, RepoName};
+use session::{LoginTarget, PinTarget, PullAddress, RepoName, RequestedFrom};
 
 use crate::failure::{Failure, Given};
 use crate::wire::{Command, CommentArguments, FilesArguments, OldSide};
@@ -66,7 +66,7 @@ pub(crate) enum Request {
     Unpin(RepoName),
     Login(LoginTarget),
     Logout(LoginTarget),
-    Pulls(Filter),
+    Pulls(Filter, RequestedFrom),
     Open(PullAddress),
     Discussion(PullAddress),
     Changes(PullAddress),
@@ -130,7 +130,14 @@ pub(crate) fn request(command: Command) -> Result<Request, Failure> {
         Command::Unpin(arguments) => Request::Unpin(RepoName::new(&arguments.repository)),
         Command::Login(arguments) => Request::Login(LoginTarget::new(&arguments.target)),
         Command::Logout(arguments) => Request::Logout(LoginTarget::new(&arguments.target)),
-        Command::Prs(arguments) => Request::Pulls(Filter::of(&arguments.filter)),
+        Command::Prs(arguments) => Request::Pulls(
+            Filter::of(&arguments.filter),
+            if arguments.requested {
+                RequestedFrom::You
+            } else {
+                RequestedFrom::Any
+            },
+        ),
         Command::Open(arguments) => Request::Open(arguments.pr),
         Command::Discussion(arguments) => Request::Discussion(arguments.pr),
         Command::Changes(arguments) => Request::Changes(arguments.pr),

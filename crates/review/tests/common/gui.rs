@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login, submissions, confirm_submit }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, requested }
     };
 }
 
@@ -32,7 +32,7 @@ shot {shots}/changed.png
 quit
 ",
         shows: &[
-            "DUMP entry owner/repo#1 New drafts=0 \"Square the inputs\"",
+            "DUMP entry owner/repo#1 New drafts=0 requested=false \"Square the inputs\"",
             "DUMP change old.txt Deleted +0 -400 Unseen",
             "DUMP change src/lib.rs Modified +1 -1 Unseen",
             "DUMP change notes.md Modified +1 -1 Unseen",
@@ -414,10 +414,123 @@ shot {shots}/sent.png
 quit
 ",
         shows: &[
-            "DUMP rights Some(Rights { comment: None, approve: None, request_changes: None })",
+            "DUMP rights Some(Ok(Rights { comment: None, approve: None, request_changes: None }))",
             "tip=Some(\"there are no draft comments and no summary to send\")",
             "submitting=Asking(Approve)",
             "status=\"approved with 0 inline comments\"",
+        ],
+    }
+}
+
+pub(crate) fn submit_logged_out() -> Scenario {
+    Scenario {
+        script: "OPEN
+hover-id submit-approve
+wait 80
+dump
+shot {shots}/logged-out.png
+quit
+",
+        shows: &[
+            "DUMP rights Some(Err(Label(\"submitting to forgejo.test needs a login: `review login forgejo.test`, or set FORGEJO_TOKEN or GITEA_TOKEN\")))",
+            "tip=Some(\"submitting to forgejo.test needs a login: `review login forgejo.test`, or set FORGEJO_TOKEN or GITEA_TOKEN\")",
+        ],
+    }
+}
+
+pub(crate) fn linked_file() -> Scenario {
+    Scenario {
+        script: "OPEN
+hover-id md-source@description/0/7
+wait 60
+shot {shots}/tip.png
+click-id md-source@description/0/7
+wait 3
+idle
+wait 2
+dump
+shot {shots}/head.png
+click-id link-open@file
+wait 2
+dump
+click-id tab@Review
+wait 2
+click-id md-source@description/1/8
+wait 3
+idle
+wait 2
+dump
+shot {shots}/main.png
+click-id tab@Review
+wait 2
+click-id md-link@description/2/9
+wait 2
+dump
+quit
+",
+        shows: &[
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((4, 6))",
+            "status=\"src/lib.rs from the link\"",
+            "status=\"opened https://forgejo.test/owner/repo/src/commit/",
+            "/src/lib.rs#L5-L7\"",
+            "file=Some(\"src/shapes.rs\") gone=None sel=Some((1, 1))",
+            "status=\"src/shapes.rs from the link, shown at the head of the pull request: the link points at main\"",
+            "status=\"opened https://forgejo.test/owner/repo/src/branch/feature/gone.rs\"",
+        ],
+    }
+}
+
+pub(crate) fn requested() -> Scenario {
+    Scenario {
+        script: "idle
+wait 2
+dump
+shot {shots}/out.png
+click-id inbox-requested
+wait 2
+rect pull/0
+dump
+shot {shots}/out-on.png
+click-id login@forgejo.test
+wait 2
+text fjtoken123
+key enter
+idle
+wait 2
+rect pull/0
+rect pull/1
+dump
+shot {shots}/in-on.png
+click-id inbox-requested
+wait 2
+rect pull/1
+dump
+shot {shots}/in-off.png
+rect inbox-requested
+mouse <<DUMP rect inbox-requested>>
+wait 2
+click <<DUMP rect inbox-requested>>
+wait 1
+click <<DUMP rect inbox-requested>>
+wait 1
+click <<DUMP rect inbox-requested>>
+wait 2
+rect inbox-requested
+absent pull/1
+rect pull/0
+dump
+quit
+",
+        shows: &[
+            "DUMP requests chip=\"requested: log in\" answered=0 pulls=[] unanswered=[owner/repo:LogIn:\"log in to see the review requests on forgejo.test",
+            "requested=You",
+            "DUMP rect pull/0 = None",
+            "DUMP requests chip=\"requested 1\" answered=1 pulls=[owner/repo#1] unanswered=[]",
+            "DUMP entry owner/repo#1 New drafts=0 requested=true \"Square the inputs\"",
+            "DUMP entry owner/repo#2 New drafts=0 requested=false \"Rename the notes\"",
+            "DUMP rect pull/0 = Some(",
+            "DUMP rect pull/1 = None",
+            "DUMP rect pull/1 = Some(",
         ],
     }
 }

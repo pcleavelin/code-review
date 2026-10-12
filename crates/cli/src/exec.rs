@@ -6,7 +6,10 @@ use domain::{
 };
 use index::Servers;
 use io_process::{Argument, Opener};
-use session::{Desk, LoginTarget, Pinned, PullAddress, Repo, RepoName, SessionError, StartedLogin};
+use session::{
+    Desk, LoginTarget, Pinned, PullAddress, Repo, RepoName, RequestedFrom, SessionError,
+    StartedLogin,
+};
 
 use crate::convert::{Files, Filter, Marking, Navigation, Request};
 use crate::failure::Failure;
@@ -66,7 +69,7 @@ impl Run<'_> {
             }
             Request::Login(target) => self.login(&target),
             Request::Logout(target) => self.logout(&target),
-            Request::Pulls(filter) => self.pulls(&filter).map(|()| Touched::Nothing),
+            Request::Pulls(filter, from) => self.pulls(&filter, from).map(|()| Touched::Nothing),
             Request::Open(address) => {
                 let repo = self.repo(&address)?;
                 let pull = repo.pull(address.number)?;
@@ -173,7 +176,7 @@ impl Run<'_> {
         Ok(Touched::Keychain)
     }
 
-    fn pulls(&mut self, filter: &Filter) -> Result<(), Failure> {
+    fn pulls(&mut self, filter: &Filter, from: RequestedFrom) -> Result<(), Failure> {
         let mut entries = Vec::new();
         let mut broken: Vec<(String, String)> = self
             .desk
@@ -191,15 +194,46 @@ impl Run<'_> {
         if repos.is_empty() && broken.is_empty() {
             return Err(Failure::Session(SessionError::NoPins));
         }
+        let mut logged_out = Vec::new();
+        let mut answered = false;
         for repo in &repos {
+            let requested = match from {
+                RequestedFrom::Any => None,
+                RequestedFrom::You => match repo.requested() {
+                    Ok(numbers) => Some(numbers),
+                    Err(error) => {
+                        if error.lacks_token() {
+                            logged_out.push((repo.name().to_string(), error));
+                        } else {
+                            broken.push((repo.name().to_string(), error.to_string()));
+                        }
+                        continue;
+                    }
+                },
+            };
             match repo.inbox() {
-                Ok(found) => entries.extend(found),
+                Ok(found) => {
+                    answered = true;
+                    entries.extend(found.into_iter().filter(|entry| {
+                        requested
+                            .as_ref()
+                            .is_none_or(|numbers| numbers.contains(&entry.pull.number))
+                    }));
+                }
                 Err(error) => broken.push((repo.name().to_string(), error.to_string())),
             }
         }
+        if !answered && let Some((_, refused)) = logged_out.pop() {
+            return Err(Failure::Session(refused));
+        }
+        broken.extend(
+            logged_out
+                .into_iter()
+                .map(|(name, error)| (name, error.to_string())),
+        );
         entries.retain(|entry| filter.keeps(&wire::entry_text(entry)));
         entries.sort_by(|left, right| right.pull.updated.cmp(&left.pull.updated));
-        wire::inbox(self.output, &entries, &broken);
+        wire::inbox(self.output, &entries, &broken, from);
         Ok(())
     }
 

@@ -1,5 +1,5 @@
 use domain::Standing;
-use session::{Entry, Pinned};
+use session::{Entry, Pinned, RequestedFrom};
 use ui::{Count, Label, Run};
 
 use crate::action::Action;
@@ -7,7 +7,7 @@ use crate::field::Which;
 use crate::ids;
 use crate::login::{Held, Login, LoginAct, Stage};
 use crate::model::Model;
-use crate::review::{Broken, Inbox, Pinning, ReviewAct};
+use crate::review::{Broken, Cure, Inbox, Pinning, Requests, ReviewAct};
 use crate::text::Needle;
 use crate::theme::{
     ACCENT, FORGE_STATE, GREEN, INBOX_FIELD, ORANGE, PIN_FIELD, RED, SELECTED, TEXT, TOKEN_FIELD,
@@ -65,7 +65,7 @@ fn kept(model: &Model, entry: &Entry) -> bool {
         .all(|word| Needle::new(word).found_in(text.as_str()))
 }
 
-fn toolbar(model: &Model, frame: &mut Frame<'_>, entries: &[Entry]) {
+fn toolbar(model: &Model, frame: &mut Frame<'_>, entries: &[Entry], requests: &Requests) {
     frame.start(Container::ToolbarSmall);
     frame.field(
         &model.fields,
@@ -105,6 +105,7 @@ fn toolbar(model: &Model, frame: &mut Frame<'_>, entries: &[Entry]) {
         }
         frame.attach_tip(target);
     }
+    requested(model, frame, entries, requests);
     frame.grow();
     let refresh = ids::PULLS_REFRESH.target();
     if frame.small_button("refresh", refresh).clicked() {
@@ -112,6 +113,26 @@ fn toolbar(model: &Model, frame: &mut Frame<'_>, entries: &[Entry]) {
     }
     frame.attach_tip(refresh);
     frame.finish();
+}
+
+fn requested(model: &Model, frame: &mut Frame<'_>, entries: &[Entry], requests: &Requests) {
+    let chosen = model.review.requested;
+    let target = ids::INBOX_REQUESTED.target();
+    if frame
+        .button(
+            requests.chip(entries),
+            target,
+            Chosen::of(&chosen, &RequestedFrom::You),
+        )
+        .clicked()
+    {
+        let next = match chosen {
+            RequestedFrom::Any => RequestedFrom::You,
+            RequestedFrom::You => RequestedFrom::Any,
+        };
+        frame.push(Action::Review(ReviewAct::ShowRequested(next)));
+    }
+    frame.attach_tip(target);
 }
 
 fn pins(model: &Model, frame: &mut Frame<'_>) {
@@ -315,11 +336,17 @@ fn row(model: &Model, frame: &mut Frame<'_>, position: Count, entry: &Entry) {
 }
 
 pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
-    let (entries, broken): (&[Entry], &[Broken]) = match &model.review.inbox {
-        Inbox::Listed { entries, broken } => (entries, broken),
-        Inbox::Asking => (&[], &[]),
+    let none = Requests::default();
+    let (entries, broken, requests): (&[Entry], &[Broken], &Requests) = match &model.review.inbox {
+        Inbox::Listed {
+            entries,
+            broken,
+            requests,
+        } => (entries, broken, requests),
+        Inbox::Asking => (&[], &[], &none),
     };
-    toolbar(model, frame, entries);
+    let only_requested = model.review.requested == RequestedFrom::You;
+    toolbar(model, frame, entries, requests);
     pins(model, frame);
     forges(model, frame);
     let id = ids::inbox();
@@ -338,6 +365,23 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
             Padding::Step,
         );
     }
+    if only_requested {
+        for unanswered in &requests.unanswered {
+            let color = match unanswered.cure {
+                Cure::LogIn => ORANGE,
+                Cure::Unknown => RED,
+            };
+            frame.note(
+                format!(
+                    "{}: {}",
+                    unanswered.broken.place.as_str(),
+                    unanswered.broken.why.as_str()
+                ),
+                color,
+                Padding::Step,
+            );
+        }
+    }
     if model.review.desk.repos().next().is_none() {
         frame.note(
             "nothing pinned yet: type a clone's path or a repository's URL in the field above and press enter. Starting the app inside a clone shows that one too.",
@@ -353,6 +397,7 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
                 .review
                 .standing
                 .is_none_or(|standing| entry.standing == standing)
+                && (!only_requested || requests.of(entry))
                 && kept(model, entry)
         })
         .collect();

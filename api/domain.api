@@ -257,12 +257,14 @@ review::diff::pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow>
 review::link::pub struct WebLink(String);
 review::link::pub fn new(text: &str) -> Option<Self>
 review::link::pub fn as_str(&self) -> &str
-review::link::pub enum Linked { Pull(PrNumber), Issue(PrNumber), Commit(CommitId), File { commit: CommitId, path: RelativePath, lines: Option<Span>, }, User(Login), }
-review::rights::pub enum Refusal { LoggedOut(ForgeHost), OwnPullRequest, NotApprover, ApprovedAlready, NothingToSend, }
+review::link::pub enum Linked { Pull(PrNumber), Issue(PrNumber), Commit(CommitId), File(LinkedFile), User(Login), }
+review::link::pub struct LinkedFile { pub at: Revision, pub path: RelativePath, pub lines: Option<Span>, }
+review::link::pub enum Revision { Commit(CommitId), Named(RefName), }
+review::link::pub fn is_head(&self, branch: &BranchName, commit: &CommitId) -> bool
+review::rights::pub enum Refusal { OwnPullRequest, NotApprover, ApprovedAlready, NothingToSend, }
 review::rights::pub enum Content { Something, Nothing, }
 review::rights::pub const fn of(drafts: &[Draft], summary: Option<&DraftText>) -> Self
 review::rights::pub struct Rights { pub comment: Option<Refusal>, pub approve: Option<Refusal>, pub request_changes: Option<Refusal>, }
-review::rights::pub fn logged_out(host: &ForgeHost) -> Self
 review::rights::pub fn refusal(&self, decision: Decision, content: Content) -> Option<Refusal>
 review::state::pub enum Side { Old, New, }
 review::state::pub const fn name(self) -> Spelling
@@ -404,9 +406,6 @@ text::pub fn hash(&self, span: Span) -> Option<TextHash>
 text::pub fn count(&self) -> LineCount
 text::pub fn span(&self) -> Option<Span>
 text::pub fn whole_hash(&self) -> TextHash
-text::pub struct Revision(String);
-text::pub fn new(revision: &str) -> Self
-text::pub fn as_str(&self) -> &str
 text::pub struct RelativePath(String);
 text::pub fn new(path: &str) -> Self
 text::pub fn as_str(&self) -> &str

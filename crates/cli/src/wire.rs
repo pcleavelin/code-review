@@ -9,7 +9,9 @@ use domain::{
     LineKind, Location, Mark, PrNumber, Program, Progress, Review, Seen, Side, SourceFile,
     SourceLine, Span, Standing, Symbol, SymbolId, Thread, ThreadState, WebLink,
 };
-use session::{DeviceAuthorization, Entry, Forgotten, Opened, Pinned, PullAddress, RepoName};
+use session::{
+    DeviceAuthorization, Entry, Forgotten, Opened, Pinned, PullAddress, RepoName, RequestedFrom,
+};
 
 use crate::failure::Failure;
 use crate::output::{Output, write_line};
@@ -40,7 +42,7 @@ pub(crate) enum Command {
     )]
     Logout(LoginArguments),
     #[command(
-        about = "[filter]                         every open pull request of the pinned repositories, newest first"
+        about = "[filter] [--requested]            every open pull request of the pinned repositories, newest first; --requested only those whose review is requested from you, teams included (needs a login)"
     )]
     Prs(FilterArguments),
     #[command(
@@ -189,6 +191,8 @@ pub(crate) struct RepoArguments {
 #[derive(Args, Debug)]
 pub(crate) struct FilterArguments {
     pub(crate) filter: Vec<String>,
+    #[arg(long)]
+    pub(crate) requested: bool,
 }
 
 #[derive(Args, Debug)]
@@ -344,12 +348,25 @@ fn local(entry: &Entry) -> String {
     format!("{}{progress}{drafts}", standing_word(entry.standing))
 }
 
-pub(crate) fn inbox(output: &mut Output, entries: &[Entry], broken: &[(String, String)]) {
+pub(crate) fn inbox(
+    output: &mut Output,
+    entries: &[Entry],
+    broken: &[(String, String)],
+    from: RequestedFrom,
+) {
     for (place, why) in broken {
         write_line!(output, "! {place}: {why}");
     }
     if entries.is_empty() {
-        write_line!(output, "no open pull requests");
+        match from {
+            RequestedFrom::Any => write_line!(output, "no open pull requests"),
+            RequestedFrom::You => {
+                write_line!(
+                    output,
+                    "no open pull request has a review requested from you"
+                );
+            }
+        }
     }
     for entry in entries {
         let pull = &entry.pull;

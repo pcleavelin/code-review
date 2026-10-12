@@ -1,10 +1,9 @@
 use std::fmt;
 
-use crate::review::{Decision, Draft, DraftText, ForgeHost};
+use crate::review::{Decision, Draft, DraftText};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
-    LoggedOut(ForgeHost),
     OwnPullRequest,
     NotApprover,
     ApprovedAlready,
@@ -14,10 +13,6 @@ pub enum Refusal {
 impl fmt::Display for Refusal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LoggedOut(host) => write!(
-                formatter,
-                "not logged in to {host}: log in with `review login {host}`"
-            ),
             Self::OwnPullRequest => formatter.write_str(
                 "you opened this pull request, and the forge takes no approval or request for changes from its author",
             ),
@@ -56,14 +51,6 @@ pub struct Rights {
 }
 
 impl Rights {
-    pub fn logged_out(host: &ForgeHost) -> Self {
-        Self {
-            comment: Some(Refusal::LoggedOut(host.clone())),
-            approve: Some(Refusal::LoggedOut(host.clone())),
-            request_changes: Some(Refusal::LoggedOut(host.clone())),
-        }
-    }
-
     pub fn refusal(&self, decision: Decision, content: Content) -> Option<Refusal> {
         let forge = match decision {
             Decision::Comment => &self.comment,

@@ -4,6 +4,7 @@ use std::iter;
 
 use domain::{Block, Conversation};
 use platform::ScriptLine;
+use session::Entry;
 use ui::{Axis, Id, Px, Ui};
 
 use crate::field::{Fields, Shown, Which};
@@ -14,7 +15,7 @@ use crate::nav::Nav;
 use crate::palette::Palette;
 use crate::panels::Panels;
 use crate::peek::{Peek, Probe, Queries};
-use crate::review::{Inbox, Reviewing, Talk};
+use crate::review::{Inbox, Requests, Reviewing, Talk};
 use crate::settings::{SettingsMenu, ShownFont, ThemeName};
 use crate::status::Status;
 use crate::work::{Services, WorkState};
@@ -138,11 +139,40 @@ fn dump_conversation(conversation: &Conversation, lines: &mut DumpLines) {
     }
 }
 
+fn dump_requests(requests: &Requests, entries: &[Entry], lines: &mut DumpLines) {
+    let pulls: Vec<String> = requests
+        .pulls
+        .iter()
+        .flat_map(|(repo, numbers)| numbers.iter().map(move |number| format!("{repo}#{number}")))
+        .collect();
+    let unanswered: Vec<String> = requests
+        .unanswered
+        .iter()
+        .map(|unanswered| {
+            format!(
+                "{}:{:?}:{:?}",
+                unanswered.broken.place.as_str(),
+                unanswered.cure,
+                unanswered.broken.why.as_str()
+            )
+        })
+        .collect();
+    lines.line(format_args!(
+        "requests chip={} answered={} pulls=[{}] unanswered=[{}]",
+        Quoted(requests.chip(entries).as_str()),
+        requests.answered,
+        pulls.join(" "),
+        unanswered.join(" ")
+    ));
+}
+
 impl Dump for Reviewing {
     fn dump(&self, _: &Context<'_>, lines: &mut DumpLines) {
         let inbox = match &self.inbox {
             Inbox::Asking => "asking".to_owned(),
-            Inbox::Listed { entries, broken } => {
+            Inbox::Listed {
+                entries, broken, ..
+            } => {
                 format!("{} broken={}", entries.len(), broken.len())
             }
         };
@@ -152,9 +182,10 @@ impl Dump for Reviewing {
             .map(|repo| repo.name().to_string())
             .collect();
         lines.line(format_args!(
-            "review inbox={inbox} repos=[{}] standing={:?} opening={} open={} draft={} submitting={:?}",
+            "review inbox={inbox} repos=[{}] standing={:?} requested={:?} opening={} open={} draft={} submitting={:?}",
             pins.join(" "),
             self.standing,
+            self.requested,
             Optional(self.opening),
             Optional(self.opened().map(|opened| opened.number)),
             Optional(
@@ -164,14 +195,19 @@ impl Dump for Reviewing {
             ),
             self.submitting
         ));
-        if let Inbox::Listed { entries, .. } = &self.inbox {
+        if let Inbox::Listed {
+            entries, requests, ..
+        } = &self.inbox
+        {
+            dump_requests(requests, entries, lines);
             for entry in entries {
                 lines.line(format_args!(
-                    "entry {}#{} {:?} drafts={} {}",
+                    "entry {}#{} {:?} drafts={} requested={} {}",
                     entry.repo,
                     entry.pull.number,
                     entry.standing,
                     entry.drafts.len(),
+                    requests.of(entry),
                     Quoted(entry.pull.title.as_str())
                 ));
             }

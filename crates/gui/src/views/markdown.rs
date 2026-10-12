@@ -13,7 +13,7 @@ use crate::grid::{self, Gutter};
 use crate::ids;
 use crate::markdown::{self, Align, Block, Cell, Goal, Lead, Piece, Row, Tone};
 use crate::model::Model;
-use crate::review::ReviewAct;
+use crate::review::{LinkTarget, ReviewAct};
 use crate::theme::{
     ACCENT, BLOCK_GAP, BORDER, CODE_TEXT, EMPHASIS_TEXT, FIELD, LABEL_PADDING, MARKDOWN_GUESS,
     PICTURE_TALLEST, PIXEL, RED, STRONG_TEXT, TEXT, WEAK,
@@ -41,6 +41,7 @@ enum Fence {
     Header,
     Cpp,
     Odin,
+    Sql,
 }
 
 impl Fence {
@@ -60,6 +61,7 @@ impl Fence {
             Self::Header => "h",
             Self::Cpp => "cpp",
             Self::Odin => "odin",
+            Self::Sql => "sql",
         })
     }
 
@@ -71,6 +73,7 @@ impl Fence {
             Self::TypeScript | Self::Ts | Self::Tsx => "ts",
             Self::Clang | Self::Header | Self::Cpp => "c",
             Self::Odin => "odin",
+            Self::Sql => "sql",
         })
     }
 }
@@ -356,16 +359,21 @@ impl Writer<'_> {
             }
             match goal.and_then(|goal| goals.get(goal.get())) {
                 Some(found) => {
-                    let target = ids::MD_LINK.with(&Label::new(format!(
+                    let key = Label::new(format!(
                         "{}/{}/{}",
                         self.key.as_str(),
                         goal.map_or(0, Count::get),
                         number.get()
-                    )));
-                    if frame.inline_button(runs, target).clicked()
-                        && let Some(link) = resolve(self.model, found)
+                    ));
+                    let target = resolve(self.model, found).map(|web| self.model.link_target(web));
+                    let control = match target {
+                        Some(LinkTarget::Source(..)) => ids::MD_SOURCE,
+                        Some(LinkTarget::Browser(_)) | None => ids::MD_LINK,
+                    };
+                    if frame.inline_button(runs, control.with(&key)).clicked()
+                        && let Some(target) = target
                     {
-                        frame.push(Action::Review(ReviewAct::OpenLink(link)));
+                        frame.push(Action::Review(target.act()));
                     }
                 }
                 None => frame.text_line(runs),

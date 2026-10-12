@@ -4,14 +4,17 @@ use std::time::{Duration, Instant};
 
 use domain::{
     CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn, DraftText,
-    FileChange, FileRow, FileText, Forge, ForgeHost, Hunk, Index, Line, LineKind, Linked, PrNumber,
-    PullRequest, RelativePath, Rights, Root, Seen, Side, Span, Standing, WebLink,
+    FileChange, FileRow, FileText, Forge, ForgeHost, Hunk, Index, Line, LineKind, Linked,
+    LinkedFile, PrNumber, PullRequest, RelativePath, Revision, Rights, Root, Seen, Side, Span,
+    Standing, WebLink,
 };
 use index::Indexed;
 use io_process::{Argument, Opener};
 use io_review::ReviewStamp;
 use platform::ClipboardRequest;
-use session::{Access, Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName};
+use session::{
+    Access, Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName, RequestedFrom,
+};
 use ui::{Count, Label, Typed};
 
 use crate::app::App;
@@ -37,12 +40,57 @@ pub(crate) struct Broken {
     pub(crate) why: Label,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cure {
+    LogIn,
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Unanswered {
+    pub(crate) broken: Broken,
+    pub(crate) cure: Cure,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Requests {
+    pub(crate) pulls: BTreeMap<RepoName, BTreeSet<PrNumber>>,
+    pub(crate) answered: Count,
+    pub(crate) unanswered: Vec<Unanswered>,
+}
+
+impl Requests {
+    pub(crate) fn of(&self, entry: &Entry) -> bool {
+        self.pulls
+            .get(&entry.repo)
+            .is_some_and(|numbers| numbers.contains(&entry.pull.number))
+    }
+
+    pub(crate) fn locked(&self) -> bool {
+        self.answered == Count::ZERO
+            && self
+                .unanswered
+                .iter()
+                .any(|unanswered| unanswered.cure == Cure::LogIn)
+    }
+
+    pub(crate) fn chip(&self, entries: &[Entry]) -> Label {
+        if self.locked() {
+            Label::new("requested: log in")
+        } else {
+            let count = entries.iter().filter(|entry| self.of(entry)).count();
+            Label::new(format!("requested {count}"))
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Inbox {
     Asking,
     Listed {
         entries: Vec<Entry>,
         broken: Vec<Broken>,
+        requests: Requests,
     },
 }
 
@@ -53,12 +101,26 @@ pub(crate) enum Talk {
     Failed(Label),
 }
 
+pub(crate) enum LinkTarget {
+    Browser(WebLink),
+    Source(LinkedFile, WebLink),
+}
+
+impl LinkTarget {
+    pub(crate) fn act(self) -> ReviewAct {
+        match self {
+            Self::Browser(web) => ReviewAct::OpenLink(web),
+            Self::Source(file, web) => ReviewAct::ShowLinkedFile(file, web),
+        }
+    }
+}
+
 pub(crate) struct OpenReview {
     pub(crate) repo: Repo,
     pub(crate) pull: PullRequest,
     pub(crate) opened: Opened,
     pub(crate) talk: Talk,
-    pub(crate) rights: Option<Rights>,
+    pub(crate) rights: Option<Result<Rights, Label>>,
     pub(crate) web: Option<Forge>,
 }
 
@@ -67,6 +129,13 @@ impl OpenReview {
         self.web
             .as_ref()
             .and_then(|forge| io_forge::web_link(forge, linked))
+    }
+
+    fn linked_file(&self, link: &WebLink) -> Option<LinkedFile> {
+        let branches = [self.pull.head.clone(), self.pull.base.clone()];
+        self.web
+            .as_ref()
+            .and_then(|forge| io_forge::linked_file(forge, link, &branches))
     }
 
     pub(crate) fn conversation(&self) -> Option<&Conversation> {
@@ -93,6 +162,7 @@ pub(crate) struct Submitted {
 pub(crate) struct Listed {
     entries: Vec<Entry>,
     broken: Vec<Broken>,
+    requests: Requests,
     held: BTreeMap<ForgeHost, Held>,
 }
 
@@ -173,6 +243,7 @@ pub(crate) struct Reviewing {
     pub(crate) desk: Desk,
     pub(crate) inbox: Inbox,
     pub(crate) standing: Option<Standing>,
+    pub(crate) requested: RequestedFrom,
     pub(crate) open: Option<OpenReview>,
     pub(crate) opening: Option<PrNumber>,
     pub(crate) pinning: Pinning,
@@ -198,6 +269,7 @@ impl Reviewing {
             desk,
             inbox: Inbox::Asking,
             standing: None,
+            requested: RequestedFrom::Any,
             open: None,
             opening: None,
             pinning: Pinning::Idle,
@@ -395,6 +467,7 @@ pub(crate) enum ReviewAct {
     Pin,
     Unpin(RepoName),
     ShowStanding(Option<Standing>),
+    ShowRequested(RequestedFrom),
     OpenChange(RelativePath),
     OpenPlace(CodePlace),
     ToggleSeen(RelativePath),
@@ -417,6 +490,7 @@ pub(crate) enum ReviewAct {
     CancelSubmit,
     Submit(Decision),
     OpenLink(WebLink),
+    ShowLinkedFile(LinkedFile, WebLink),
     CopyLink(WebLink),
     ViewCommit(Option<CommitId>),
     NeedPicture(WebLink),
@@ -432,10 +506,16 @@ pub(crate) enum ReviewStatus {
     Unpinned(RepoName),
     PinFailed(Label),
     Opening(PrNumber),
-    Opened { number: PrNumber, files: Count },
+    Opened {
+        number: PrNumber,
+        files: Count,
+    },
     OpenFailed(Label),
     TalkFailed(Label),
-    Marked { path: RelativePath, seen: Seen },
+    Marked {
+        path: RelativePath,
+        seen: Seen,
+    },
     AllSeen,
     LastChange,
     NotOpened,
@@ -448,10 +528,18 @@ pub(crate) enum ReviewStatus {
     NotSaved(Label),
     Busy,
     Submitting,
-    Submitted { decision: Decision, comments: Count },
+    Submitted {
+        decision: Decision,
+        comments: Count,
+    },
     SubmitFailed(Label),
     Reloaded,
     LinkOpened(WebLink),
+    LinkedFileShown(RelativePath),
+    LinkedFileShownAtHead {
+        path: RelativePath,
+        linked: Revision,
+    },
     LinkCopied(WebLink),
     LinkFailed(Label),
     CommitComment,
@@ -472,6 +560,7 @@ impl ReviewStatus {
             | Self::DraftRemoved(_)
             | Self::Submitted { .. }
             | Self::LinkOpened(_)
+            | Self::LinkedFileShown(_)
             | Self::LinkCopied(_)
             | Self::LinesCopied(_)
             | Self::Reloaded => Tone::Done,
@@ -483,6 +572,7 @@ impl ReviewStatus {
             | Self::EmptyDraft
             | Self::LastChange
             | Self::CommitComment
+            | Self::LinkedFileShownAtHead { .. }
             | Self::Busy => Tone::Warning,
             Self::PinFailed(_)
             | Self::OpenFailed(_)
@@ -546,6 +636,11 @@ impl fmt::Display for ReviewStatus {
             Self::SubmitFailed(why) => write!(formatter, "submit failed: {}", why.as_str()),
             Self::Reloaded => formatter.write_str("review reloaded (changed outside the window)"),
             Self::LinkOpened(link) => write!(formatter, "opened {link}"),
+            Self::LinkedFileShown(path) => write!(formatter, "{path} from the link"),
+            Self::LinkedFileShownAtHead { path, linked } => write!(
+                formatter,
+                "{path} from the link, shown at the head of the pull request: the link points at {linked}"
+            ),
             Self::CommitComment => formatter.write_str(
                 "comments go on the whole pull request's changes: pick 'all changes' first",
             ),
@@ -572,9 +667,13 @@ fn list(repos: &[Repo], pinned: &[Pinned], access: &Access, sites: &BTreeSet<For
             Pinned::Ready(_) => None,
         })
         .collect();
+    let mut requests = Requests::default();
     for repo in repos {
         match repo.inbox() {
-            Ok(found) => entries.extend(found),
+            Ok(found) => {
+                entries.extend(found);
+                ask_requests(repo, &mut requests);
+            }
             Err(error) => broken.push(Broken {
                 place: Label::new(repo.name().as_str()),
                 why: Label::new(error.to_string()),
@@ -585,7 +684,32 @@ fn list(repos: &[Repo], pinned: &[Pinned], access: &Access, sites: &BTreeSet<For
     Listed {
         entries,
         broken,
+        requests,
         held,
+    }
+}
+
+fn ask_requests(repo: &Repo, requests: &mut Requests) {
+    match repo.requested() {
+        Ok(numbers) => {
+            requests.answered += Count::new(1);
+            requests
+                .pulls
+                .entry(repo.name().clone())
+                .or_default()
+                .extend(numbers);
+        }
+        Err(error) => requests.unanswered.push(Unanswered {
+            broken: Broken {
+                place: Label::new(repo.name().as_str()),
+                why: Label::new(error.to_string()),
+            },
+            cure: if error.lacks_token() {
+                Cure::LogIn
+            } else {
+                Cure::Unknown
+            },
+        }),
     }
 }
 
@@ -621,6 +745,19 @@ fn submit(
 impl Model {
     fn say(&mut self, status: ReviewStatus) {
         self.status = Status::Review(status);
+    }
+
+    pub(crate) fn link_target(&self, link: WebLink) -> LinkTarget {
+        match self
+            .review
+            .open
+            .as_ref()
+            .and_then(|open| open.linked_file(&link))
+            .filter(|file| self.index.find_file(&file.path).is_some())
+        {
+            Some(file) => LinkTarget::Source(file, link),
+            None => LinkTarget::Browser(link),
+        }
     }
 
     pub(crate) fn shown_path(&self) -> Option<RelativePath> {
@@ -835,6 +972,43 @@ impl Model {
 }
 
 impl App {
+    fn open_link(&mut self, link: WebLink) {
+        match Opener::open(&Argument::new(link.as_str())) {
+            Ok(()) => self.model.say(ReviewStatus::LinkOpened(link)),
+            Err(error) => self
+                .model
+                .say(ReviewStatus::LinkFailed(Label::new(format!("{error:?}")))),
+        }
+    }
+
+    fn show_linked_file(&mut self, linked: LinkedFile, link: WebLink) {
+        let Some(file) = self.model.index.find_file(&linked.path) else {
+            self.open_link(link);
+            return;
+        };
+        let lines = linked
+            .lines
+            .map_or(LineSelection::one(Line::new(0)), |span| LineSelection {
+                from: span.start(),
+                to: span.end(),
+            });
+        self.model.open_lines(file, lines);
+        let at_head = self
+            .model
+            .review
+            .open
+            .as_ref()
+            .is_some_and(|open| linked.at.is_head(&open.pull.head, &open.opened.head));
+        self.model.say(if at_head {
+            ReviewStatus::LinkedFileShown(linked.path)
+        } else {
+            ReviewStatus::LinkedFileShownAtHead {
+                path: linked.path,
+                linked: linked.at,
+            }
+        });
+    }
+
     pub(crate) fn review(&mut self, act: ReviewAct) {
         match act {
             ReviewAct::RefreshPulls => self.list_pulls(),
@@ -842,6 +1016,7 @@ impl App {
             ReviewAct::Pin => self.pin(),
             ReviewAct::Unpin(name) => self.unpin(&name),
             ReviewAct::ShowStanding(standing) => self.model.review.standing = standing,
+            ReviewAct::ShowRequested(requested) => self.model.review.requested = requested,
             ReviewAct::OpenChange(path) => self.model.open_change(&path),
             ReviewAct::OpenPlace(place) => self.model.open_place(&place),
             ReviewAct::ToggleSeen(path) => self.toggle_seen(&path),
@@ -890,12 +1065,8 @@ impl App {
             }
             ReviewAct::CancelSubmit => self.model.review.submitting = Submitting::Idle,
             ReviewAct::Submit(decision) => self.submit(decision),
-            ReviewAct::OpenLink(link) => match Opener::open(&Argument::new(link.as_str())) {
-                Ok(()) => self.model.say(ReviewStatus::LinkOpened(link)),
-                Err(error) => self
-                    .model
-                    .say(ReviewStatus::LinkFailed(Label::new(format!("{error:?}")))),
-            },
+            ReviewAct::OpenLink(link) => self.open_link(link),
+            ReviewAct::ShowLinkedFile(file, link) => self.show_linked_file(file, link),
             ReviewAct::ViewCommit(commit) => self.view_commit(commit),
             ReviewAct::NeedPicture(link) => self.need_picture(link),
             ReviewAct::PictureWake(at) => self.model.review.pictures.wake_at(at),
@@ -935,6 +1106,7 @@ impl App {
             self.model.review.inbox = Inbox::Listed {
                 entries: Vec::new(),
                 broken: Vec::new(),
+                requests: Requests::default(),
             };
         }
         self.jobs.list = Some(Job::start(move || list(&repos, &pinned, &access, &sites)));
@@ -1035,7 +1207,7 @@ impl App {
         let Some(open) = self.model.review.open.as_mut() else {
             return;
         };
-        open.rights = result.ok();
+        open.rights = Some(result);
     }
 
     fn save_review(&mut self) {
@@ -1156,6 +1328,7 @@ impl App {
                     place: Label::new("inbox"),
                     why: Label::new("the listing thread failed"),
                 }],
+                requests: Requests::default(),
                 held: BTreeMap::new(),
             },
         };
@@ -1180,6 +1353,7 @@ impl App {
         self.model.review.inbox = Inbox::Listed {
             entries: listed.entries,
             broken: listed.broken,
+            requests: listed.requests,
         };
     }
 

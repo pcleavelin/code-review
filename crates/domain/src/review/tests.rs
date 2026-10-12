@@ -1,8 +1,8 @@
 use crate::review::{
-    Block, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision, DiffLayout, DiffLine,
-    DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login, Moment, Note, Pairing,
-    PrNumber, Prose, Refusal, RepoSlug, Review, Rights, Seen, Side, Standing, Submission,
-    SubmissionId, Thread, ThreadId, ThreadState,
+    Block, BranchName, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision,
+    DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login,
+    Moment, Note, Pairing, PrNumber, Prose, RefName, Refusal, RepoSlug, Review, Revision, Rights,
+    Seen, Side, Standing, Submission, SubmissionId, Thread, ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -494,4 +494,19 @@ fn an_empty_review_may_only_approve_and_a_forge_refusal_comes_before_the_empty_o
         Some(Refusal::OwnPullRequest)
     );
     assert_eq!(author.refusal(Decision::Comment, Content::Something), None);
+}
+
+#[test]
+fn a_revision_is_the_head_by_its_branch_or_a_prefix_of_its_commit() {
+    let branch = BranchName::new("ann/feature");
+    let head = CommitId::new("0123456789abcdef0123456789abcdef01234567").unwrap();
+    let is_head = |revision: Revision| revision.is_head(&branch, &head);
+    assert!(is_head(Revision::Named(RefName::new("ann/feature"))));
+    assert!(!is_head(Revision::Named(RefName::new("main"))));
+    assert!(!is_head(Revision::Named(RefName::new("ann"))));
+    assert!(is_head(Revision::Commit(commit())));
+    assert!(is_head(Revision::Commit(head.clone())));
+    assert!(!is_head(Revision::Commit(
+        CommitId::new("0123456789abcdee").unwrap()
+    )));
 }

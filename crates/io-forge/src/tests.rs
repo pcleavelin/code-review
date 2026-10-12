@@ -1,8 +1,9 @@
 use domain::{
     Block, BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft,
-    DraftId, DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login,
-    Moment, PrNumber, PrTitle, Prose, PullRequest, Refusal, RelativePath, RepoSlug, Rights, Side,
-    SignedPicture, SourceLine, Span, ThreadId, ThreadState, Token, WebLink,
+    DraftId, DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked,
+    LinkedFile, Login, Moment, PrNumber, PrTitle, Prose, PullRequest, RefName, Refusal,
+    RelativePath, RepoSlug, Revision, Rights, Side, SignedPicture, SourceLine, Span, ThreadId,
+    ThreadState, Token, WebLink,
 };
 use serde_json::{Value, json};
 
@@ -12,7 +13,7 @@ use crate::wire::{
     WireSubmission, WireThread, detect, forge_named, parse_items, parse_remote, parse_response,
 };
 use crate::{
-    ForgeClient, ForgeError, HttpStatus, ResponseBody, TokenSource, Unsent, every_page,
+    ForgeClient, ForgeError, HttpStatus, ResponseBody, TokenFor, TokenSource, Unsent, every_page,
     send_gitlab, send_in_turn,
 };
 
@@ -896,8 +897,15 @@ fn submitting_without_a_token_names_the_variables_to_set_before_any_request() {
             None,
         )
         .unwrap_err();
-    assert!(matches!(error, ForgeError::NoToken(ForgeKind::GitHub)));
+    assert!(matches!(
+        error,
+        ForgeError::NoToken(_, TokenFor::Submitting)
+    ));
     let message = error.to_string();
+    assert!(
+        message.starts_with("submitting to github.com needs a login: `review login github.com`"),
+        "{message}"
+    );
     assert!(message.contains("GITHUB_TOKEN"), "{message}");
     assert!(message.contains("GH_TOKEN"), "{message}");
 }
@@ -1440,10 +1448,12 @@ fn a_forgejo_reply_is_a_review_comment_on_its_own_line() {
 #[test]
 fn each_forge_spells_its_own_web_links() {
     let commit = CommitId::new("0123456789abcdef").unwrap();
-    let file = |lines: Option<Span>| Linked::File {
-        commit: commit.clone(),
-        path: RelativePath::new("src/a b.rs"),
-        lines,
+    let file = |lines: Option<Span>| {
+        Linked::File(LinkedFile {
+            at: Revision::Commit(commit.clone()),
+            path: RelativePath::new("src/a b.rs"),
+            lines,
+        })
     };
     let range = Span::new(Line::new(9), Line::new(11));
     let url = |kind: ForgeKind, linked: &Linked| wire::web_url(kind, "h.org", "o/r", linked);
@@ -1484,6 +1494,146 @@ fn each_forge_spells_its_own_web_links() {
         url(ForgeKind::GitHub, &Linked::User(Login::new("ann"))),
         "https://h.org/ann"
     );
+}
+
+const PERMALINK: &str = "0123456789abcdef0123456789abcdef01234567";
+
+fn file_at(at: Revision, path: &str, lines: Option<(u32, u32)>) -> LinkedFile {
+    LinkedFile {
+        at,
+        path: RelativePath::new(path),
+        lines: lines.and_then(|(first, last)| Span::new(Line::new(first), Line::new(last))),
+    }
+}
+
+fn named(name: &str) -> Revision {
+    Revision::Named(RefName::new(name))
+}
+
+fn permalink() -> Revision {
+    Revision::Commit(CommitId::new(PERMALINK).unwrap())
+}
+
+#[test]
+fn a_github_link_to_a_file_of_the_repository_names_the_file_and_its_lines() {
+    let read = |url: &str| {
+        wire::linked_file(
+            ForgeKind::GitHub,
+            "github.com",
+            "ann/repo",
+            url,
+            &["ann/fix"],
+        )
+    };
+    assert_eq!(
+        read(&format!(
+            "https://github.com/ann/repo/blob/{PERMALINK}/src/lib.rs#L10-L20"
+        )),
+        Some(file_at(permalink(), "src/lib.rs", Some((9, 19))))
+    );
+    assert_eq!(
+        read("https://github.com/Ann/Repo/blob/main/src/a%20b.rs#L5"),
+        Some(file_at(named("main"), "src/a b.rs", Some((4, 4))))
+    );
+    assert_eq!(
+        read("https://github.com/ann/repo/blob/ann/fix/src/lib.rs#L3C2-L4C9"),
+        Some(file_at(named("ann/fix"), "src/lib.rs", Some((2, 3))))
+    );
+    assert_eq!(
+        read("https://github.com/ann/repo/blob/main/README.md?plain=1#L7"),
+        Some(file_at(named("main"), "README.md", Some((6, 6))))
+    );
+    assert_eq!(
+        read("https://github.com/ann/repo/blob/main/README.md#usage"),
+        Some(file_at(named("main"), "README.md", None))
+    );
+    for elsewhere in [
+        "https://github.com/bob/repo/blob/main/src/lib.rs#L1",
+        "https://github.com/ann/repository/blob/main/src/lib.rs",
+        "https://gitlab.com/ann/repo/-/blob/main/src/lib.rs",
+        "https://github.com/ann/repo/pull/3",
+        "https://github.com/ann/repo/tree/main/src",
+        "https://github.com/ann/repo/blob/main",
+        "https://github.com/ann/repo",
+    ] {
+        assert_eq!(read(elsewhere), None, "{elsewhere}");
+    }
+}
+
+#[test]
+fn a_gitlab_link_to_a_file_spells_its_lines_without_a_second_l() {
+    let read = |url: &str| {
+        wire::linked_file(
+            ForgeKind::GitLab,
+            "gitlab.com",
+            "group/sub/project",
+            url,
+            &[],
+        )
+    };
+    assert_eq!(
+        read("https://gitlab.com/group/sub/project/-/blob/main/src/lib.rs#L10-20"),
+        Some(file_at(named("main"), "src/lib.rs", Some((9, 19))))
+    );
+    assert_eq!(
+        read(&format!(
+            "https://gitlab.com/group/sub/project/-/blob/{PERMALINK}/a.py#L2"
+        )),
+        Some(file_at(permalink(), "a.py", Some((1, 1))))
+    );
+    for elsewhere in [
+        "https://gitlab.com/group/sub/project/blob/main/src/lib.rs",
+        "https://gitlab.com/group/sub/-/blob/main/project/src/lib.rs",
+        "https://gitlab.com/group/sub/project/-/merge_requests/4",
+    ] {
+        assert_eq!(read(elsewhere), None, "{elsewhere}");
+    }
+}
+
+#[test]
+fn a_forgejo_link_to_a_file_names_whether_it_is_at_a_commit_a_branch_or_a_tag() {
+    let read =
+        |url: &str| wire::linked_file(ForgeKind::Forgejo, "codeberg.org", "ann/repo", url, &[]);
+    assert_eq!(
+        read(&format!(
+            "https://codeberg.org/ann/repo/src/commit/{PERMALINK}/src/lib.rs#L2-L3"
+        )),
+        Some(file_at(permalink(), "src/lib.rs", Some((1, 2))))
+    );
+    assert_eq!(
+        read("https://codeberg.org/ann/repo/src/branch/main/src/lib.rs"),
+        Some(file_at(named("main"), "src/lib.rs", None))
+    );
+    assert_eq!(
+        read("https://codeberg.org/ann/repo/src/tag/v1.0/docs/a.md#L4"),
+        Some(file_at(named("v1.0"), "docs/a.md", Some((3, 3))))
+    );
+    for elsewhere in [
+        "https://codeberg.org/ann/repo/blob/main/src/lib.rs",
+        "https://codeberg.org/ann/repo/issues/4",
+        "https://codeberg.org/ann/other/src/branch/main/src/lib.rs",
+    ] {
+        assert_eq!(read(elsewhere), None, "{elsewhere}");
+    }
+}
+
+#[test]
+fn a_file_link_each_forge_spells_reads_back_as_the_same_file() {
+    let files = [
+        file_at(permalink(), "src/a b.rs", Some((9, 11))),
+        file_at(named("main"), "src/lib.rs", Some((0, 0))),
+        file_at(named("main"), "notes 100%.md", None),
+    ];
+    for kind in [ForgeKind::GitHub, ForgeKind::GitLab, ForgeKind::Forgejo] {
+        for file in &files {
+            let url = wire::web_url(kind, "h.org", "o/r", &Linked::File(file.clone()));
+            assert_eq!(
+                wire::linked_file(kind, "h.org", "o/r", &url, &[]).as_ref(),
+                Some(file),
+                "{url}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1882,6 +2032,7 @@ fn the_logged_in_user_is_asked_at_the_root_of_each_forges_api() {
         (ForgeKind::GitHub, "github.com"),
         (ForgeKind::GitHub, "git.corp"),
         (ForgeKind::Forgejo, "codeberg.org"),
+        (ForgeKind::GitLab, "gitlab.com"),
     ]
     .into_iter()
     .map(|(kind, host)| Api::new(kind, host, "owner/repo").user().url)
@@ -1892,11 +2043,41 @@ fn the_logged_in_user_is_asked_at_the_root_of_each_forges_api() {
             "https://api.github.com/user",
             "https://git.corp/api/v3/user",
             "https://codeberg.org/api/v1/user",
+            "https://gitlab.com/api/v4/user",
         ]
     );
+}
+
+#[test]
+fn each_forge_names_the_logged_in_user_in_its_own_field() {
+    let user = |kind: ForgeKind, text: &str| {
+        Api::new(kind, "example.org", "owner/repo")
+            .parse_user(text)
+            .map(|user| (user.id, user.login))
+    };
+    let github = r#"{"login": "octo", "id": 1}"#;
+    let gitlab = r#"{"id": 77, "username": "ann", "name": "Ann"}"#;
     assert_eq!(
-        Api::parse_login(r#"{"login": "octo", "id": 1}"#),
-        Some(Login::new("octo"))
+        user(ForgeKind::GitHub, github),
+        Some((1, "octo".to_owned()))
+    );
+    assert_eq!(
+        user(ForgeKind::Forgejo, github),
+        Some((1, "octo".to_owned()))
+    );
+    assert_eq!(
+        user(ForgeKind::GitLab, gitlab),
+        Some((77, "ann".to_owned()))
+    );
+    assert_eq!(user(ForgeKind::GitHub, gitlab), None);
+}
+
+#[test]
+fn the_rights_without_a_token_ask_for_a_login_before_any_request() {
+    let error = client(None).rights(&expected_pull()).unwrap_err();
+    assert!(
+        matches!(&error, ForgeError::NoToken(_, TokenFor::Submitting)),
+        "{error:?}"
     );
 }
 
@@ -1924,4 +2105,115 @@ fn the_author_may_only_comment_and_gitlab_says_who_approves() {
         approvals(r#"{"user_can_approve": true, "user_has_approved": false}"#),
         None
     );
+}
+
+const GITHUB_SEARCH: &str = r#"{
+    "total_count": 2, "incomplete_results": false,
+    "items": [
+        {"id": 3001, "number": 41, "title": "Teach the parser", "state": "open",
+         "repository_url": "https://api.github.com/repos/owner/repo",
+         "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/41"}},
+        {"id": 3002, "number": 7, "title": "Bump", "state": "open",
+         "repository_url": "https://api.github.com/repos/owner/repo",
+         "pull_request": {"url": "https://api.github.com/repos/owner/repo/pulls/7"}}
+    ]
+}"#;
+
+const GITLAB_REQUESTED: &str = r#"[
+    {"id": 9001, "iid": 41, "project_id": 5, "title": "Teach the parser", "state": "opened",
+     "reviewers": [{"id": 77, "username": "ann"}]}
+]"#;
+
+const FORGEJO_SEARCH: &str = r#"[
+    {"id": 501, "number": 41, "title": "Teach the parser", "state": "open",
+     "repository": {"id": 5, "name": "repo", "owner": "owner", "full_name": "Owner/Repo"},
+     "pull_request": {"merged": false}},
+    {"id": 502, "number": 9, "title": "Elsewhere", "state": "open",
+     "repository": {"id": 6, "name": "other", "owner": "owner", "full_name": "owner/other"},
+     "pull_request": {"merged": false}}
+]"#;
+
+fn requested_numbers(kind: ForgeKind, text: &str) -> Option<Vec<u64>> {
+    Api::new(kind, "example.org", "owner/repo").parse_requested(&parse_items(text)?)
+}
+
+#[test]
+fn each_forge_asks_for_the_review_requests_of_the_logged_in_user_in_its_own_way() {
+    let gitlab = Api::new(ForgeKind::GitLab, "gitlab.com", "group/repo");
+    let user = gitlab
+        .parse_user(r#"{"id": 77, "username": "ann", "name": "Ann"}"#)
+        .unwrap();
+    let cases = [
+        (
+            Api::new(ForgeKind::GitHub, "github.com", "owner/repo").github_requested(),
+            "https://api.github.com/search/issues?q=repo%3Aowner/repo+is%3Apr+is%3Aopen+review-requested%3A%40me&per_page=100",
+        ),
+        (
+            Api::new(ForgeKind::GitHub, "ghe.example.com", "owner/repo").github_requested(),
+            "https://ghe.example.com/api/v3/search/issues?q=repo%3Aowner/repo+is%3Apr+is%3Aopen+review-requested%3A%40me&per_page=100",
+        ),
+        (
+            gitlab.gitlab_requested(&user),
+            "https://gitlab.com/api/v4/projects/group%2Frepo/merge_requests?state=opened&reviewer_id=77&per_page=100",
+        ),
+        (
+            Api::new(ForgeKind::Forgejo, "codeberg.org", "owner/repo").forgejo_requested(),
+            "https://codeberg.org/api/v1/repos/issues/search?type=pulls&state=open&review_requested=true&owner=owner&limit=50",
+        ),
+    ];
+    for (request, expected) in cases {
+        assert_eq!(request.method, Method::Get);
+        assert_eq!(request.url, expected);
+    }
+}
+
+#[test]
+fn a_github_search_result_gives_the_numbers_of_its_items() {
+    assert_eq!(
+        requested_numbers(ForgeKind::GitHub, GITHUB_SEARCH),
+        Some(vec![41, 7])
+    );
+}
+
+#[test]
+fn a_gitlab_reviewer_list_gives_the_iids_not_the_global_ids() {
+    assert_eq!(
+        requested_numbers(ForgeKind::GitLab, GITLAB_REQUESTED),
+        Some(vec![41])
+    );
+}
+
+#[test]
+fn a_forgejo_search_keeps_only_the_pulls_of_this_repository() {
+    assert_eq!(
+        requested_numbers(ForgeKind::Forgejo, FORGEJO_SEARCH),
+        Some(vec![41])
+    );
+}
+
+#[test]
+fn a_search_answer_without_items_is_malformed() {
+    assert_eq!(parse_items(r#"{"total_count": 0}"#), None);
+    assert_eq!(parse_items(r#"{"items": {"number": 1}}"#), None);
+    assert_eq!(
+        requested_numbers(ForgeKind::GitHub, r#"{"items": [{"title": "no number"}]}"#),
+        None
+    );
+}
+
+#[test]
+fn review_requests_without_a_token_ask_for_a_login_before_any_request() {
+    let error = client(None).requested().unwrap_err();
+    assert!(
+        matches!(&error, ForgeError::NoToken(site, TokenFor::ReviewRequests) if site.host().as_str() == "github.com"),
+        "{error:?}"
+    );
+    let message = error.to_string();
+    assert!(
+        message.starts_with(
+            "log in to see the review requests on github.com: `review login github.com`"
+        ),
+        "{message}"
+    );
+    assert!(message.contains("GH_TOKEN"), "{message}");
 }

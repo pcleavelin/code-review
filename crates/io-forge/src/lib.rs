@@ -8,16 +8,16 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use domain::{
-    Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeHost,
-    ForgeKind, Host, Linked, PictureSource, PrNumber, Prose, PullRequest, RefName, RepoSlug,
-    Rights, SignedPicture, Token, UnixTime, WebLink,
+    BranchName, Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge,
+    ForgeHost, ForgeKind, Host, Linked, LinkedFile, Login, PictureSource, PrNumber, Prose,
+    PullRequest, RefName, RepoSlug, Rights, SignedPicture, Token, UnixTime, WebLink,
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
 use serde_json::Value;
 
 use crate::wire::{
-    Api, Delivery, EnvVar, PendingNote, Request, WireDiffRefs, WireResponse, WireReview,
+    Api, Delivery, EnvVar, PendingNote, Request, WireDiffRefs, WireResponse, WireReview, WireUser,
 };
 
 pub use crate::login::{
@@ -178,11 +178,17 @@ pub enum Unsent {
     Approval,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenFor {
+    Submitting,
+    ReviewRequests,
+}
+
 #[derive(Debug)]
 pub enum ForgeError {
     UnknownHost(Host),
     UnreadableUrl(RemoteUrl),
-    NoToken(ForgeKind),
+    NoToken(ForgeHost, TokenFor),
     Process(ProcessError),
     Unreachable(Captured),
     Http {
@@ -230,7 +236,7 @@ impl ForgeError {
             Self::Unfinished { sent, .. } => sent,
             Self::UnknownHost(_)
             | Self::UnreadableUrl(_)
-            | Self::NoToken(_)
+            | Self::NoToken(..)
             | Self::Process(_)
             | Self::Unreachable(_)
             | Self::Http { .. }
@@ -246,6 +252,29 @@ impl ForgeError {
     }
 }
 
+fn no_token(formatter: &mut fmt::Formatter<'_>, site: &ForgeHost, wanted: TokenFor) -> fmt::Result {
+    match wanted {
+        TokenFor::Submitting => write!(formatter, "submitting to {site} needs a login")?,
+        TokenFor::ReviewRequests => {
+            write!(formatter, "log in to see the review requests on {site}")?;
+        }
+    }
+    let kind = site.kind();
+    let names: Vec<&str> = EnvVar::tokens(kind)
+        .iter()
+        .map(|variable| variable.name())
+        .collect();
+    write!(
+        formatter,
+        ": `review login {site}`, or set {}",
+        names.join(" or ")
+    )?;
+    if kind == ForgeKind::GitHub {
+        write!(formatter, ", or `{} auth login`", wire::GH)?;
+    }
+    Ok(())
+}
+
 impl fmt::Display for ForgeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -259,21 +288,7 @@ impl fmt::Display for ForgeError {
                 "cannot read a host and repository from the remote URL {}",
                 url.as_str()
             ),
-            Self::NoToken(kind) => {
-                let names: Vec<&str> = EnvVar::tokens(*kind)
-                    .iter()
-                    .map(|variable| variable.name())
-                    .collect();
-                write!(
-                    formatter,
-                    "submitting to {kind} needs a token: log in with `review login <host>`, or set {}",
-                    names.join(" or ")
-                )?;
-                if *kind == ForgeKind::GitHub {
-                    write!(formatter, ", or log in with `{} auth login`", wire::GH)?;
-                }
-                Ok(())
-            }
+            Self::NoToken(site, wanted) => no_token(formatter, site, *wanted),
             Self::Process(ProcessError::Missing(program)) => {
                 write!(formatter, "{program} is not on PATH: install it")
             }
@@ -437,6 +452,17 @@ pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink> {
     ))
 }
 
+pub fn linked_file(forge: &Forge, link: &WebLink, branches: &[BranchName]) -> Option<LinkedFile> {
+    let names: Vec<&str> = branches.iter().map(BranchName::as_str).collect();
+    wire::linked_file(
+        forge.kind(),
+        forge.host().as_str(),
+        forge.slug().as_str(),
+        link.as_str(),
+        &names,
+    )
+}
+
 impl ForgeClient {
     pub fn connect(
         url: &RemoteUrl,
@@ -516,11 +542,38 @@ impl ForgeClient {
         parse(&body).ok_or(ForgeError::Malformed(body))
     }
 
+    fn logged_in(&self, wanted: TokenFor) -> Result<(), ForgeError> {
+        match self.token {
+            Some(_) => Ok(()),
+            None => Err(ForgeError::NoToken(self.forge.forge_host(), wanted)),
+        }
+    }
+
+    fn user(&self, api: &Api) -> Result<WireUser, ForgeError> {
+        self.read(api, &api.user(), |body| api.parse_user(body.as_str()))
+    }
+
     pub fn open_pulls(&self) -> Result<Vec<PullRequest>, ForgeError> {
         let api = self.api();
         self.read_pages(&api, &api.list(), |items| {
             api.parse_pulls(items)
                 .and_then(|pulls| pulls.iter().map(convert::pull).collect())
+        })
+    }
+
+    pub fn requested(&self) -> Result<Vec<PrNumber>, ForgeError> {
+        self.logged_in(TokenFor::ReviewRequests)?;
+        let api = self.api();
+        let request = match self.forge.kind() {
+            ForgeKind::GitHub => api.github_requested(),
+            ForgeKind::Forgejo => api.forgejo_requested(),
+            ForgeKind::GitLab => api.gitlab_requested(&self.user(&api)?),
+        };
+        self.read_pages(&api, &request, |items| {
+            api.parse_requested(items)?
+                .into_iter()
+                .map(PrNumber::new)
+                .collect()
         })
     }
 
@@ -646,9 +699,7 @@ impl ForgeClient {
         body: Option<&DraftText>,
     ) -> Result<Submitted, ForgeError> {
         let kind = self.forge.kind();
-        if self.token.is_none() {
-            return Err(ForgeError::NoToken(kind));
-        }
+        self.logged_in(TokenFor::Submitting)?;
         let api = self.api();
         let number = pull.number.get();
         let review = convert::review(pull, drafts, changes, decision, body);
@@ -676,13 +727,11 @@ impl ForgeClient {
     }
 
     pub fn rights(&self, pull: &PullRequest) -> Result<Rights, ForgeError> {
-        if self.token.is_none() {
-            return Ok(Rights::logged_out(&self.forge.forge_host()));
-        }
+        self.logged_in(TokenFor::Submitting)?;
         let api = self.api();
         match self.forge.kind() {
             ForgeKind::GitHub | ForgeKind::Forgejo => {
-                let me = self.read(&api, &api.user(), |body| Api::parse_login(body.as_str()))?;
+                let me = Login::new(&self.user(&api)?.login);
                 Ok(convert::rights(pull, Some(&me), None))
             }
             ForgeKind::GitLab => {

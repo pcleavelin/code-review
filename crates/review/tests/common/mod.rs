@@ -74,7 +74,9 @@ pub(crate) const DESCRIPTION: &str = "Squares the inputs before adding them.
 
 | input | squared | notes |
 |---|---:|---|
-| 3 | 9 | the square grows faster than the sum once the input passes two, which is the point of this change; measured on the shapes benchmark, see https://example.com/bench |";
+| 3 | 9 | the square grows faster than the sum once the input passes two, which is the point of this change; measured on the shapes benchmark, see https://example.com/bench |
+
+The sum is in https://forgejo.test/owner/repo/src/branch/feature/src/lib.rs#L5-L7, the side in https://forgejo.test/owner/repo/src/branch/main/src/shapes.rs#L2, and https://forgejo.test/owner/repo/src/branch/feature/gone.rs is not in the tree.";
 
 const ISSUE_COMMENTS: &str = r#"[
     {"id": 501, "user": {"login": "carol"}, "body": "Can this land before the release?",
@@ -105,6 +107,8 @@ const REVIEW_21_COMMENTS: &str = r#"[
      "path": "src/lib.rs", "position": 10, "original_position": 0, "resolver": null,
      "pull_request_review_id": 21, "created_at": "2026-01-02T11:00:00Z"}
 ]"#;
+
+const REQUESTED: &str = r#"[{"number":1,"title":"Square the inputs","repository":{"full_name":"owner/repo"}},{"number":2,"title":"Elsewhere","repository":{"full_name":"owner/other"}}]"#;
 
 pub(crate) const FORGES: &str = "review forges 1\nclient gitlab.test cid123\n";
 const DEVICE: &str = r#"{"device_code":"devsecret","user_code":"ABCD-1234","verification_uri":"https://gitlab.test/oauth/device","expires_in":300,"interval":1}"#;
@@ -189,6 +193,12 @@ fn pull_json(head: &str) -> String {
     )
 }
 
+fn other_pull_json(head: &str) -> String {
+    format!(
+        r#"{{"number":2,"title":"Rename the notes","user":{{"login":"bob"}},"base":{{"ref":"main"}},"head":{{"ref":"notes","sha":"{head}"}},"body":"","updated_at":"2025-12-01T00:00:00Z"}}"#
+    )
+}
+
 fn json_text(text: &str) -> String {
     let mut quoted = String::from("\"");
     for character in text.chars() {
@@ -216,6 +226,7 @@ case "$url" in
   count=$(( $(cat "{api}/polls" 2>/dev/null || echo 0) + 1 )); echo "$count" > "{api}/polls"
   [ -f "{api}/poll-$count.json" ] || count=granted
   cat "{api}/poll-$count.json"; status=$(cat "{api}/poll-$count.status");;
+*/api/v1/repos/issues/search\?*) cat "{api}/requested.json"; status=200;;
 *)
   rest=${{url#https://{HOST}/api/v1/repos/{SLUG}/}}
   rest=${{rest%%\?*}}
@@ -337,14 +348,18 @@ pub(crate) fn fixture(name: &str) -> Fixture {
     put(
         &api,
         &[
-            ("pulls.json", &format!("[{pull}]")),
+            (
+                "pulls.json",
+                &format!("[{pull},{}]", other_pull_json(&head)),
+            ),
+            ("requested.json", REQUESTED),
             ("pulls-1.json", &pull),
             ("issues-1-comments.json", ISSUE_COMMENTS),
             ("pulls-1-reviews.json", REVIEWS),
             ("pulls-1-reviews-20-comments.json", REVIEW_20_COMMENTS),
             ("pulls-1-reviews-21-comments.json", REVIEW_21_COMMENTS),
             ("device.json", DEVICE),
-            ("user.json", r#"{"login": "zed"}"#),
+            ("user.json", r#"{"id": 9, "login": "zed"}"#),
             ("poll-1.json", PENDING),
             ("poll-1.status", "400"),
             ("poll-2.json", PENDING),

@@ -16,18 +16,21 @@ pub fn new(text: &str) -> Self
 pub fn as_str(&self) -> &str
 pub struct Submitted { pub comments: CommentCount, }
 pub enum Unsent { Drafts, Approval, }
-pub enum ForgeError { UnknownHost(Host), UnreadableUrl(RemoteUrl), NoToken(ForgeKind), Process(ProcessError), Unreachable(Captured), Http { status: HttpStatus, body: ResponseBody, }, Malformed(ResponseBody), Unfinished { sent: Vec<DraftId>, unsent: Unsent, cause: Box<ForgeError>, }, PendingLeft { pending: CommentCount, cause: Box<ForgeError>, }, NotPermitted { slug: RepoSlug, body: ResponseBody, }, NoDeviceLogin(ForgeHost), LoginDenied(ForgeHost), LoginExpired(ForgeHost), LoginCancelled(ForgeHost), LoginRefused { site: ForgeHost, code: OAuthErrorCode, description: ResponseBody, }, }
+pub enum TokenFor { Submitting, ReviewRequests, }
+pub enum ForgeError { UnknownHost(Host), UnreadableUrl(RemoteUrl), NoToken(ForgeHost, TokenFor), Process(ProcessError), Unreachable(Captured), Http { status: HttpStatus, body: ResponseBody, }, Malformed(ResponseBody), Unfinished { sent: Vec<DraftId>, unsent: Unsent, cause: Box<ForgeError>, }, PendingLeft { pending: CommentCount, cause: Box<ForgeError>, }, NotPermitted { slug: RepoSlug, body: ResponseBody, }, NoDeviceLogin(ForgeHost), LoginDenied(ForgeHost), LoginExpired(ForgeHost), LoginCancelled(ForgeHost), LoginRefused { site: ForgeHost, code: OAuthErrorCode, description: ResponseBody, }, }
 pub const fn refused_token(&self) -> bool
 pub fn sent(&self) -> &[DraftId]
 pub struct ForgeClient { forge: Forge, token: Option<Token>, source: Option<TokenSource>, }
 pub fn forge_host_of(host: &Host) -> Result<ForgeHost, ForgeError>
 pub fn forge_of(url: &RemoteUrl) -> Result<Forge, ForgeError>
 pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink>
+pub fn linked_file(forge: &Forge, link: &WebLink, branches: &[BranchName]) -> Option<LinkedFile>
 pub fn connect( url: &RemoteUrl, stored: impl FnOnce(&Forge) -> Option<Token>, ) -> Result<Self, ForgeError>
 pub fn forge(&self) -> &Forge
 pub const fn token_source(&self) -> Option<TokenSource>
 pub fn head_ref(&self, number: PrNumber) -> RefName
 pub fn open_pulls(&self) -> Result<Vec<PullRequest>, ForgeError>
+pub fn requested(&self) -> Result<Vec<PrNumber>, ForgeError>
 pub fn pull(&self, number: PrNumber) -> Result<PullRequest, ForgeError>
 pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, ForgeError>
 pub fn picture_source(&self, link: &WebLink, signed: &[SignedPicture]) -> PictureSource

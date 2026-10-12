@@ -999,3 +999,50 @@ fn a_file_with_an_unanswered_request_is_left_out_so_it_stays_pending() {
         .collect();
     assert_eq!(targets, [1, 0]);
 }
+
+const SQL: &str = "-- people\nCREATE TABLE users (\n    name TEXT DEFAULT 'x'\n);\nCREATE VIEW adults AS SELECT * FROM users WHERE age >= 18;\nCREATE INDEX users_name ON users (name);\nSELECT count(*), 1.5 FROM adults;\nINSERT INTO users (name) VALUES ('a');\n";
+
+#[test]
+fn sql_is_highlighted_with_later_patterns_winning() {
+    let file = Parsers::default().parse(RelativePath::new("schema.sql"), &Contents::new(SQL));
+    let class_of = |line: usize, word: &str| {
+        let text = SQL.lines().nth(line).unwrap_or_default();
+        file.highlights()[line]
+            .iter()
+            .find(|span| {
+                text.get(span.start.value() as usize..span.end.value() as usize) == Some(word)
+            })
+            .map(|span| span.class)
+    };
+    assert_eq!(class_of(0, "-- people"), Some(HighlightClass::Comment));
+    assert_eq!(class_of(1, "CREATE"), Some(HighlightClass::Keyword));
+    assert_eq!(class_of(2, "'x'"), Some(HighlightClass::String));
+    assert_eq!(class_of(4, "18"), Some(HighlightClass::Constant));
+    assert_eq!(class_of(6, "1.5"), Some(HighlightClass::Constant));
+    assert_eq!(class_of(6, "count"), Some(HighlightClass::Function));
+    assert_eq!(class_of(6, "adults"), Some(HighlightClass::Type));
+}
+
+#[test]
+fn sql_symbols_are_the_objects_its_statements_create() {
+    let file = Parsers::default().parse(RelativePath::new("schema.sql"), &Contents::new(SQL));
+    let symbols: Vec<(&str, &str, u32, u32)> = file
+        .symbols()
+        .map(|symbol| {
+            (
+                symbol.name().as_str(),
+                symbol.kind().as_str(),
+                symbol.span().start().number(),
+                symbol.span().end().number(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        symbols,
+        [
+            ("users", "create_table", 2, 4),
+            ("adults", "create_view", 5, 5),
+            ("users_name", "create_index", 6, 6),
+        ]
+    );
+}

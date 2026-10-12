@@ -1,6 +1,6 @@
 use domain::{
     Block, ChangeKind, Content, Conversation, Decision, Draft, DraftOn, DraftText, Login, Note,
-    RelativePath, Seen, Side, Span, Submission, Thread, ThreadState,
+    RelativePath, Rights, Seen, Side, Span, Submission, Thread, ThreadState,
 };
 use ui::{Color, Count, Icon, Label, Run};
 
@@ -822,7 +822,7 @@ fn summary_text(model: &Model) -> Option<DraftText> {
 fn submit_buttons(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     let summary = summary_text(model);
     let content = Content::of(open.opened.review.drafts(), summary.as_ref());
-    let rights = open.rights.clone().unwrap_or_default();
+    let asking = Rights::default();
     for decision in [
         Decision::Comment,
         Decision::Approve,
@@ -834,7 +834,15 @@ fn submit_buttons(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
             tint,
         } = submit_button(decision);
         let target = control.target();
-        let refusal = rights.refusal(decision, content);
+        let refusal = match &open.rights {
+            Some(Err(unknown)) => Some(unknown.clone()),
+            known => known
+                .as_ref()
+                .and_then(|rights| rights.as_ref().ok())
+                .unwrap_or(&asking)
+                .refusal(decision, content)
+                .map(|refusal| Label::new(refusal.to_string())),
+        };
         let enabled = if refusal.is_some() {
             Enabled::Disabled
         } else {
@@ -844,7 +852,7 @@ fn submit_buttons(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
             frame.push(Action::Review(ReviewAct::AskSubmit(decision)));
         }
         match refusal {
-            Some(refusal) => frame.attach_tip_text(target, Label::new(refusal.to_string())),
+            Some(refusal) => frame.attach_tip_text(target, refusal),
             None => frame.attach_tip(target),
         }
     }

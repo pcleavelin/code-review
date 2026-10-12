@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::str;
 
-use domain::{Decision, DraftId, ForgeKind, Linked, Login, Side, Span, ThreadState};
+use domain::{
+    CommitId, Decision, DraftId, ForgeKind, Line, Linked, LinkedFile, RefName, RelativePath,
+    Revision, Side, Span, ThreadState,
+};
 use io_process::Captured;
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
@@ -303,6 +307,12 @@ pub(crate) struct WirePull {
     pub(crate) updated: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireUser {
+    pub(crate) id: u64,
+    pub(crate) login: String,
+}
+
 struct PullFields {
     number: &'static str,
     title: &'static str,
@@ -342,6 +352,8 @@ const SUBMITTED: &str = "/submitted_at";
 const UPDATED: &str = "/updated_at";
 const ID: &str = "/id";
 const REVIEW_ID: &str = "/pull_request_review_id";
+const REPOSITORY_NAME: &str = "/repository/full_name";
+const FOUND_ITEMS: &str = "items";
 
 fn text_at(value: &Value, pointer: &str) -> Option<String> {
     value.pointer(pointer)?.as_str().map(str::to_owned)
@@ -627,6 +639,129 @@ fn url_path(path: &str) -> String {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, VariantArray)]
+enum FileRoute {
+    GitHubBlob,
+    GitLabBlob,
+    ForgejoCommit,
+    ForgejoBranch,
+    ForgejoTag,
+}
+
+impl FileRoute {
+    const fn spelled(self) -> &'static str {
+        match self {
+            Self::GitHubBlob => "blob/",
+            Self::GitLabBlob => "-/blob/",
+            Self::ForgejoCommit => "src/commit/",
+            Self::ForgejoBranch => "src/branch/",
+            Self::ForgejoTag => "src/tag/",
+        }
+    }
+
+    const fn kind(self) -> ForgeKind {
+        match self {
+            Self::GitHubBlob => ForgeKind::GitHub,
+            Self::GitLabBlob => ForgeKind::GitLab,
+            Self::ForgejoCommit | Self::ForgejoBranch | Self::ForgejoTag => ForgeKind::Forgejo,
+        }
+    }
+
+    const fn for_revision(kind: ForgeKind, at: &Revision) -> Self {
+        match (kind, at) {
+            (ForgeKind::GitHub, _) => Self::GitHubBlob,
+            (ForgeKind::GitLab, _) => Self::GitLabBlob,
+            (ForgeKind::Forgejo, Revision::Commit(_)) => Self::ForgejoCommit,
+            (ForgeKind::Forgejo, Revision::Named(_)) => Self::ForgejoBranch,
+        }
+    }
+}
+
+pub(crate) fn linked_file(
+    kind: ForgeKind,
+    host: &str,
+    slug: &str,
+    url: &str,
+    branches: &[&str],
+) -> Option<LinkedFile> {
+    let (address, fragment) = url
+        .split_once('#')
+        .map_or((url, None), |(address, fragment)| (address, Some(fragment)));
+    let address = address
+        .split_once('?')
+        .map_or(address, |(address, _)| address);
+    let rest = [Scheme::Https, Scheme::Http]
+        .into_iter()
+        .find_map(|scheme| address.strip_prefix(scheme.name()))?;
+    let repo = format!("{host}/{slug}/");
+    let rest = rest
+        .get(..repo.len())
+        .filter(|named| named.eq_ignore_ascii_case(&repo))
+        .and_then(|_| rest.get(repo.len()..))?;
+    let tail = FileRoute::VARIANTS
+        .iter()
+        .filter(|route| route.kind() == kind)
+        .find_map(|route| rest.strip_prefix(route.spelled()))?;
+    let (revision, path) = branches
+        .iter()
+        .filter_map(|branch| {
+            tail.strip_prefix(branch)
+                .and_then(|after| after.strip_prefix('/'))
+                .map(|path| (*branch, path))
+        })
+        .max_by_key(|(branch, _)| branch.len())
+        .or_else(|| tail.split_once('/'))?;
+    let path = percent_decoded(path);
+    if revision.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(LinkedFile {
+        at: CommitId::new(revision)
+            .map_or_else(|| Revision::Named(RefName::new(revision)), Revision::Commit),
+        path: RelativePath::new(&path),
+        lines: fragment.and_then(line_span),
+    })
+}
+
+fn revision_text(at: &Revision) -> &str {
+    match at {
+        Revision::Commit(commit) => commit.as_str(),
+        Revision::Named(name) => name.as_str(),
+    }
+}
+
+fn line_span(fragment: &str) -> Option<Span> {
+    let (first, last) = fragment.split_once('-').unwrap_or((fragment, fragment));
+    let line = |text: &str| -> Option<u32> {
+        let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse::<u32>().ok()?.checked_sub(1)
+    };
+    let first = line(first.strip_prefix('L')?)?;
+    let last = line(last.strip_prefix('L').unwrap_or(last))?;
+    Span::new(Line::new(first.min(last)), Line::new(first.max(last)))
+}
+
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        let escaped = (byte == b'%')
+            .then(|| bytes.get(at + 1..at + 3))
+            .flatten()
+            .and_then(|hex| str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        if let Some(value) = escaped {
+            decoded.push(value);
+            at += 3;
+        } else {
+            decoded.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 pub(crate) fn web_url(kind: ForgeKind, host: &str, slug: &str, linked: &Linked) -> String {
     let repo = format!("https://{host}/{slug}");
     let lines = |lines: &Option<Span>| match (kind, lines) {
@@ -653,26 +788,13 @@ pub(crate) fn web_url(kind: ForgeKind, host: &str, slug: &str, linked: &Linked) 
         (ForgeKind::GitHub | ForgeKind::Forgejo, Linked::Commit(commit)) => {
             format!("{repo}/commit/{}", commit.as_str())
         }
-        (
-            kind,
-            Linked::File {
-                commit,
-                path,
-                lines: span,
-            },
-        ) => {
-            let at = match kind {
-                ForgeKind::GitHub => "blob",
-                ForgeKind::GitLab => "-/blob",
-                ForgeKind::Forgejo => "src/commit",
-            };
-            format!(
-                "{repo}/{at}/{}/{}{}",
-                commit.as_str(),
-                url_path(path.as_str()),
-                lines(span)
-            )
-        }
+        (kind, Linked::File(file)) => format!(
+            "{repo}/{}{}/{}{}",
+            FileRoute::for_revision(kind, &file.at).spelled(),
+            revision_text(&file.at),
+            url_path(file.path.as_str()),
+            lines(&file.lines)
+        ),
         (_, Linked::User(login)) => format!("https://{host}/{login}"),
     }
 }
@@ -688,7 +810,14 @@ fn on_pull(id: String, note: WireNote) -> WireThread {
 }
 
 pub(crate) fn parse_items(text: &str) -> Option<Vec<Value>> {
-    serde_json::from_str(text).ok()
+    match serde_json::from_str(text).ok()? {
+        Value::Array(items) => Some(items),
+        Value::Object(mut found) => match found.remove(FOUND_ITEMS)? {
+            Value::Array(items) => Some(items),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 pub(crate) fn parse_issue_comments(items: &[Value]) -> Option<Vec<WireThread>> {
@@ -1102,9 +1231,16 @@ impl Api {
         }
     }
 
-    pub(crate) fn parse_login(text: &str) -> Option<Login> {
+    pub(crate) fn parse_user(&self, text: &str) -> Option<WireUser> {
         let value: Value = serde_json::from_str(text).ok()?;
-        text_at(&value, "/login").map(|login| Login::new(&login))
+        let login = match self.kind {
+            ForgeKind::GitHub | ForgeKind::Forgejo => "/login",
+            ForgeKind::GitLab => "/username",
+        };
+        Some(WireUser {
+            id: value.pointer(ID)?.as_u64()?,
+            login: text_at(&value, login)?,
+        })
     }
 
     pub(crate) fn gitlab_approvals(&self, number: u64) -> Request {
@@ -1117,6 +1253,54 @@ impl Api {
             can_approve: value.pointer("/user_can_approve")?.as_bool()?,
             has_approved: value.pointer("/user_has_approved")?.as_bool()?,
         })
+    }
+
+    fn repos_root(&self) -> &str {
+        self.repo
+            .strip_suffix(&format!("repos/{}", self.slug))
+            .unwrap_or(&self.origin)
+    }
+
+    pub(crate) fn github_requested(&self) -> Request {
+        Request::get(format!(
+            "{}search/issues?q=repo%3A{}+is%3Apr+is%3Aopen+review-requested%3A%40me&{}",
+            self.repos_root(),
+            self.slug,
+            self.page_size()
+        ))
+    }
+
+    pub(crate) fn gitlab_requested(&self, user: &WireUser) -> Request {
+        Request::get(format!(
+            "{}?state=opened&reviewer_id={}&{}",
+            self.pulls_url(),
+            user.id,
+            self.page_size()
+        ))
+    }
+
+    pub(crate) fn forgejo_requested(&self) -> Request {
+        let owner = self.slug.split('/').next().unwrap_or_default();
+        Request::get(format!(
+            "{}repos/issues/search?type=pulls&state=open&review_requested=true&owner={owner}&{}",
+            self.repos_root(),
+            self.page_size()
+        ))
+    }
+
+    pub(crate) fn parse_requested(&self, items: &[Value]) -> Option<Vec<u64>> {
+        let number = self.fields().number;
+        items
+            .iter()
+            .filter(|item| {
+                self.kind != ForgeKind::Forgejo
+                    || item
+                        .pointer(REPOSITORY_NAME)
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.eq_ignore_ascii_case(&self.slug))
+            })
+            .map(|item| item.pointer(number)?.as_u64())
+            .collect()
     }
 
     pub(crate) fn parse_diff_refs(text: &str) -> Option<WireDiffRefs> {
