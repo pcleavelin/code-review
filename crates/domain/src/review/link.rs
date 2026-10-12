@@ -2,7 +2,7 @@ use std::fmt;
 
 use strum::VariantArray;
 
-use crate::review::{CommitId, Login, PrNumber, Spelling};
+use crate::review::{BranchName, CommitId, Login, PrNumber, RefName, Spelling};
 use crate::text::{RelativePath, Span};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -48,10 +48,37 @@ pub enum Linked {
     Pull(PrNumber),
     Issue(PrNumber),
     Commit(CommitId),
-    File {
-        commit: CommitId,
-        path: RelativePath,
-        lines: Option<Span>,
-    },
+    File(LinkedFile),
     User(Login),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedFile {
+    pub at: Revision,
+    pub path: RelativePath,
+    pub lines: Option<Span>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Revision {
+    Commit(CommitId),
+    Named(RefName),
+}
+
+impl Revision {
+    pub fn is_head(&self, branch: &BranchName, commit: &CommitId) -> bool {
+        match self {
+            Self::Commit(named) => commit.as_str().starts_with(named.as_str()),
+            Self::Named(name) => name.as_str() == branch.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for Revision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Commit(commit) => commit.fmt(formatter),
+            Self::Named(name) => name.fmt(formatter),
+        }
+    }
 }

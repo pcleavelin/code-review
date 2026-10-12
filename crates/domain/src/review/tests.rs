@@ -1,7 +1,7 @@
 use crate::review::{
-    ChangeKind, CodePlace, CommitId, Conversation, DiffLayout, DiffLine, DraftId, DraftOn,
-    DraftText, FileChange, FileRow, Hunk, LineKind, Moment, Pairing, PrNumber, Prose, RepoSlug,
-    Review, Seen, Side, Standing, Thread, ThreadId, ThreadState,
+    BranchName, ChangeKind, CodePlace, CommitId, Conversation, DiffLayout, DiffLine, DraftId,
+    DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Moment, Pairing, PrNumber, Prose,
+    RefName, RepoSlug, Review, Revision, Seen, Side, Standing, Thread, ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -390,4 +390,19 @@ fn a_file_draws_its_open_and_resolved_threads_but_not_outdated_ones() {
         .map(|thread| thread.id.as_str())
         .collect();
     assert_eq!(drawn, vec!["open", "settled"]);
+}
+
+#[test]
+fn a_revision_is_the_head_by_its_branch_or_a_prefix_of_its_commit() {
+    let branch = BranchName::new("ann/feature");
+    let head = CommitId::new("0123456789abcdef0123456789abcdef01234567").unwrap();
+    let is_head = |revision: Revision| revision.is_head(&branch, &head);
+    assert!(is_head(Revision::Named(RefName::new("ann/feature"))));
+    assert!(!is_head(Revision::Named(RefName::new("main"))));
+    assert!(!is_head(Revision::Named(RefName::new("ann"))));
+    assert!(is_head(Revision::Commit(commit())));
+    assert!(is_head(Revision::Commit(head.clone())));
+    assert!(!is_head(Revision::Commit(
+        CommitId::new("0123456789abcdee").unwrap()
+    )));
 }

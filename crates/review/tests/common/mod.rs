@@ -74,7 +74,9 @@ pub(crate) const DESCRIPTION: &str = "Squares the inputs before adding them.
 
 | input | squared | notes |
 |---|---:|---|
-| 3 | 9 | the square grows faster than the sum once the input passes two, which is the point of this change; measured on the shapes benchmark, see https://example.com/bench |";
+| 3 | 9 | the square grows faster than the sum once the input passes two, which is the point of this change; measured on the shapes benchmark, see https://example.com/bench |
+
+The sum is in https://forgejo.test/owner/repo/src/branch/feature/src/lib.rs#L5-L7, the side in https://forgejo.test/owner/repo/src/branch/main/src/shapes.rs#L2, and https://forgejo.test/owner/repo/src/branch/feature/gone.rs is not in the tree.";
 
 pub(crate) const FORGES: &str = "review forges 1\nclient gitlab.test cid123\n";
 const DEVICE: &str = r#"{"device_code":"devsecret","user_code":"ABCD-1234","verification_uri":"https://gitlab.test/oauth/device","expires_in":300,"interval":1}"#;

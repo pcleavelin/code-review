@@ -23,6 +23,7 @@ pub struct ForgeClient { forge: Forge, token: Option<Token>, source: Option<Toke
 pub fn forge_host_of(host: &Host) -> Result<ForgeHost, ForgeError>
 pub fn forge_of(url: &RemoteUrl) -> Result<Forge, ForgeError>
 pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink>
+pub fn linked_file(forge: &Forge, link: &WebLink, branches: &[BranchName]) -> Option<LinkedFile>
 pub fn connect( url: &RemoteUrl, stored: impl FnOnce(&Forge) -> Option<Token>, ) -> Result<Self, ForgeError>
 pub fn forge(&self) -> &Forge
 pub const fn token_source(&self) -> Option<TokenSource>

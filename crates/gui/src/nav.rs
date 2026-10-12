@@ -283,12 +283,16 @@ impl Model {
     }
 
     pub(crate) fn open_line(&mut self, file: FileId, line: Line) {
+        self.open_lines(file, LineSelection::one(line));
+    }
+
+    pub(crate) fn open_lines(&mut self, file: FileId, lines: LineSelection) {
         self.nav.moving = Move::Jump;
         self.nav.file = Some(file);
         self.nav.gone = None;
         self.nav.focus = None;
-        self.nav.lines = Some(LineSelection::one(line));
-        self.nav.scroll_to_line(line);
+        self.nav.lines = Some(lines);
+        self.nav.scroll_to_line(lines.low());
         self.nav.show(Tab::Source);
     }
 

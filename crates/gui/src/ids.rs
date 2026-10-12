@@ -306,6 +306,12 @@ pub(crate) const MD_LINK: Control = Control::new(
     Element::new("md-link"),
     Words::new("open this link in the browser"),
 );
+pub(crate) const MD_SOURCE: Control = Control::new(
+    Element::new("md-source"),
+    Words::new(
+        "open this file of the pull request in the Source view, at its head, with the linked lines selected",
+    ),
+);
 pub(crate) const MD_CODE: Control = Control::new(
     Element::new("md-code"),
     Words::new("code quoted in the text"),
@@ -470,6 +476,7 @@ pub(crate) const CONTROLS: &[Control] = &[
     WHOLE_FILE,
     MARKDOWN,
     MD_LINK,
+    MD_SOURCE,
     MD_CODE,
     PICTURE,
     TABLE,

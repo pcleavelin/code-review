@@ -1,8 +1,8 @@
 use domain::{
     BranchName, ChangeKind, CodePlace, CommitId, Conversation, Decision, DiffLine, Draft, DraftId,
-    DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, Login, Moment,
-    NoteKind, PrNumber, PrTitle, Prose, PullRequest, RelativePath, RepoSlug, Side, SignedPicture,
-    SourceLine, Span, ThreadId, ThreadState, Token, WebLink,
+    DraftText, FileChange, Forge, ForgeKind, Host, Hunk, Line, LineKind, Linked, LinkedFile, Login,
+    Moment, NoteKind, PrNumber, PrTitle, Prose, PullRequest, RefName, RelativePath, RepoSlug,
+    Revision, Side, SignedPicture, SourceLine, Span, ThreadId, ThreadState, Token, WebLink,
 };
 use serde_json::{Value, json};
 
@@ -1376,10 +1376,12 @@ fn a_forgejo_reply_is_a_review_comment_on_its_own_line() {
 #[test]
 fn each_forge_spells_its_own_web_links() {
     let commit = CommitId::new("0123456789abcdef").unwrap();
-    let file = |lines: Option<Span>| Linked::File {
-        commit: commit.clone(),
-        path: RelativePath::new("src/a b.rs"),
-        lines,
+    let file = |lines: Option<Span>| {
+        Linked::File(LinkedFile {
+            at: Revision::Commit(commit.clone()),
+            path: RelativePath::new("src/a b.rs"),
+            lines,
+        })
     };
     let range = Span::new(Line::new(9), Line::new(11));
     let url = |kind: ForgeKind, linked: &Linked| wire::web_url(kind, "h.org", "o/r", linked);
@@ -1420,6 +1422,146 @@ fn each_forge_spells_its_own_web_links() {
         url(ForgeKind::GitHub, &Linked::User(Login::new("ann"))),
         "https://h.org/ann"
     );
+}
+
+const PERMALINK: &str = "0123456789abcdef0123456789abcdef01234567";
+
+fn file_at(at: Revision, path: &str, lines: Option<(u32, u32)>) -> LinkedFile {
+    LinkedFile {
+        at,
+        path: RelativePath::new(path),
+        lines: lines.and_then(|(first, last)| Span::new(Line::new(first), Line::new(last))),
+    }
+}
+
+fn named(name: &str) -> Revision {
+    Revision::Named(RefName::new(name))
+}
+
+fn permalink() -> Revision {
+    Revision::Commit(CommitId::new(PERMALINK).unwrap())
+}
+
+#[test]
+fn a_github_link_to_a_file_of_the_repository_names_the_file_and_its_lines() {
+    let read = |url: &str| {
+        wire::linked_file(
+            ForgeKind::GitHub,
+            "github.com",
+            "ann/repo",
+            url,
+            &["ann/fix"],
+        )
+    };
+    assert_eq!(
+        read(&format!(
+            "https://github.com/ann/repo/blob/{PERMALINK}/src/lib.rs#L10-L20"
+        )),
+        Some(file_at(permalink(), "src/lib.rs", Some((9, 19))))
+    );
+    assert_eq!(
+        read("https://github.com/Ann/Repo/blob/main/src/a%20b.rs#L5"),
+        Some(file_at(named("main"), "src/a b.rs", Some((4, 4))))
+    );
+    assert_eq!(
+        read("https://github.com/ann/repo/blob/ann/fix/src/lib.rs#L3C2-L4C9"),
+        Some(file_at(named("ann/fix"), "src/lib.rs", Some((2, 3))))
+    );
+    assert_eq!(
+        read("https://github.com/ann/repo/blob/main/README.md?plain=1#L7"),
+        Some(file_at(named("main"), "README.md", Some((6, 6))))
+    );
+    assert_eq!(
+        read("https://github.com/ann/repo/blob/main/README.md#usage"),
+        Some(file_at(named("main"), "README.md", None))
+    );
+    for elsewhere in [
+        "https://github.com/bob/repo/blob/main/src/lib.rs#L1",
+        "https://github.com/ann/repository/blob/main/src/lib.rs",
+        "https://gitlab.com/ann/repo/-/blob/main/src/lib.rs",
+        "https://github.com/ann/repo/pull/3",
+        "https://github.com/ann/repo/tree/main/src",
+        "https://github.com/ann/repo/blob/main",
+        "https://github.com/ann/repo",
+    ] {
+        assert_eq!(read(elsewhere), None, "{elsewhere}");
+    }
+}
+
+#[test]
+fn a_gitlab_link_to_a_file_spells_its_lines_without_a_second_l() {
+    let read = |url: &str| {
+        wire::linked_file(
+            ForgeKind::GitLab,
+            "gitlab.com",
+            "group/sub/project",
+            url,
+            &[],
+        )
+    };
+    assert_eq!(
+        read("https://gitlab.com/group/sub/project/-/blob/main/src/lib.rs#L10-20"),
+        Some(file_at(named("main"), "src/lib.rs", Some((9, 19))))
+    );
+    assert_eq!(
+        read(&format!(
+            "https://gitlab.com/group/sub/project/-/blob/{PERMALINK}/a.py#L2"
+        )),
+        Some(file_at(permalink(), "a.py", Some((1, 1))))
+    );
+    for elsewhere in [
+        "https://gitlab.com/group/sub/project/blob/main/src/lib.rs",
+        "https://gitlab.com/group/sub/-/blob/main/project/src/lib.rs",
+        "https://gitlab.com/group/sub/project/-/merge_requests/4",
+    ] {
+        assert_eq!(read(elsewhere), None, "{elsewhere}");
+    }
+}
+
+#[test]
+fn a_forgejo_link_to_a_file_names_whether_it_is_at_a_commit_a_branch_or_a_tag() {
+    let read =
+        |url: &str| wire::linked_file(ForgeKind::Forgejo, "codeberg.org", "ann/repo", url, &[]);
+    assert_eq!(
+        read(&format!(
+            "https://codeberg.org/ann/repo/src/commit/{PERMALINK}/src/lib.rs#L2-L3"
+        )),
+        Some(file_at(permalink(), "src/lib.rs", Some((1, 2))))
+    );
+    assert_eq!(
+        read("https://codeberg.org/ann/repo/src/branch/main/src/lib.rs"),
+        Some(file_at(named("main"), "src/lib.rs", None))
+    );
+    assert_eq!(
+        read("https://codeberg.org/ann/repo/src/tag/v1.0/docs/a.md#L4"),
+        Some(file_at(named("v1.0"), "docs/a.md", Some((3, 3))))
+    );
+    for elsewhere in [
+        "https://codeberg.org/ann/repo/blob/main/src/lib.rs",
+        "https://codeberg.org/ann/repo/issues/4",
+        "https://codeberg.org/ann/other/src/branch/main/src/lib.rs",
+    ] {
+        assert_eq!(read(elsewhere), None, "{elsewhere}");
+    }
+}
+
+#[test]
+fn a_file_link_each_forge_spells_reads_back_as_the_same_file() {
+    let files = [
+        file_at(permalink(), "src/a b.rs", Some((9, 11))),
+        file_at(named("main"), "src/lib.rs", Some((0, 0))),
+        file_at(named("main"), "notes 100%.md", None),
+    ];
+    for kind in [ForgeKind::GitHub, ForgeKind::GitLab, ForgeKind::Forgejo] {
+        for file in &files {
+            let url = wire::web_url(kind, "h.org", "o/r", &Linked::File(file.clone()));
+            assert_eq!(
+                wire::linked_file(kind, "h.org", "o/r", &url, &[]).as_ref(),
+                Some(file),
+                "{url}"
+            );
+        }
+    }
 }
 
 #[test]

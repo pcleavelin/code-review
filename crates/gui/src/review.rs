@@ -4,8 +4,9 @@ use std::time::{Duration, Instant};
 
 use domain::{
     CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn, DraftText,
-    FileChange, FileRow, FileText, Forge, ForgeHost, Hunk, Index, Line, LineKind, Linked, PrNumber,
-    PullRequest, RelativePath, Root, Seen, Side, Span, Standing, WebLink,
+    FileChange, FileRow, FileText, Forge, ForgeHost, Hunk, Index, Line, LineKind, Linked,
+    LinkedFile, PrNumber, PullRequest, RelativePath, Revision, Root, Seen, Side, Span, Standing,
+    WebLink,
 };
 use index::Indexed;
 use io_process::{Argument, Opener};
@@ -53,6 +54,20 @@ pub(crate) enum Talk {
     Failed(Label),
 }
 
+pub(crate) enum LinkTarget {
+    Browser(WebLink),
+    Source(LinkedFile, WebLink),
+}
+
+impl LinkTarget {
+    pub(crate) fn act(self) -> ReviewAct {
+        match self {
+            Self::Browser(web) => ReviewAct::OpenLink(web),
+            Self::Source(file, web) => ReviewAct::ShowLinkedFile(file, web),
+        }
+    }
+}
+
 pub(crate) struct OpenReview {
     pub(crate) repo: Repo,
     pub(crate) pull: PullRequest,
@@ -66,6 +81,13 @@ impl OpenReview {
         self.web
             .as_ref()
             .and_then(|forge| io_forge::web_link(forge, linked))
+    }
+
+    fn linked_file(&self, link: &WebLink) -> Option<LinkedFile> {
+        let branches = [self.pull.head.clone(), self.pull.base.clone()];
+        self.web
+            .as_ref()
+            .and_then(|forge| io_forge::linked_file(forge, link, &branches))
     }
 
     pub(crate) fn conversation(&self) -> Option<&Conversation> {
@@ -411,6 +433,7 @@ pub(crate) enum ReviewAct {
     RefreshTalk,
     Submit(Decision),
     OpenLink(WebLink),
+    ShowLinkedFile(LinkedFile, WebLink),
     CopyLink(WebLink),
     ViewCommit(Option<CommitId>),
     NeedPicture(WebLink),
@@ -426,10 +449,16 @@ pub(crate) enum ReviewStatus {
     Unpinned(RepoName),
     PinFailed(Label),
     Opening(PrNumber),
-    Opened { number: PrNumber, files: Count },
+    Opened {
+        number: PrNumber,
+        files: Count,
+    },
     OpenFailed(Label),
     TalkFailed(Label),
-    Marked { path: RelativePath, seen: Seen },
+    Marked {
+        path: RelativePath,
+        seen: Seen,
+    },
     AllSeen,
     LastChange,
     NotOpened,
@@ -442,10 +471,18 @@ pub(crate) enum ReviewStatus {
     NotSaved(Label),
     Busy,
     Submitting,
-    Submitted { decision: Decision, comments: Count },
+    Submitted {
+        decision: Decision,
+        comments: Count,
+    },
     SubmitFailed(Label),
     Reloaded,
     LinkOpened(WebLink),
+    LinkedFileShown(RelativePath),
+    LinkedFileShownAtHead {
+        path: RelativePath,
+        linked: Revision,
+    },
     LinkCopied(WebLink),
     LinkFailed(Label),
     CommitComment,
@@ -466,6 +503,7 @@ impl ReviewStatus {
             | Self::DraftRemoved(_)
             | Self::Submitted { .. }
             | Self::LinkOpened(_)
+            | Self::LinkedFileShown(_)
             | Self::LinkCopied(_)
             | Self::LinesCopied(_)
             | Self::Reloaded => Tone::Done,
@@ -477,6 +515,7 @@ impl ReviewStatus {
             | Self::EmptyDraft
             | Self::LastChange
             | Self::CommitComment
+            | Self::LinkedFileShownAtHead { .. }
             | Self::Busy => Tone::Warning,
             Self::PinFailed(_)
             | Self::OpenFailed(_)
@@ -540,6 +579,11 @@ impl fmt::Display for ReviewStatus {
             Self::SubmitFailed(why) => write!(formatter, "submit failed: {}", why.as_str()),
             Self::Reloaded => formatter.write_str("review reloaded (changed outside the window)"),
             Self::LinkOpened(link) => write!(formatter, "opened {link}"),
+            Self::LinkedFileShown(path) => write!(formatter, "{path} from the link"),
+            Self::LinkedFileShownAtHead { path, linked } => write!(
+                formatter,
+                "{path} from the link, shown at the head of the pull request: the link points at {linked}"
+            ),
             Self::CommitComment => formatter.write_str(
                 "comments go on the whole pull request's changes: pick 'all changes' first",
             ),
@@ -615,6 +659,19 @@ fn submit(
 impl Model {
     fn say(&mut self, status: ReviewStatus) {
         self.status = Status::Review(status);
+    }
+
+    pub(crate) fn link_target(&self, link: WebLink) -> LinkTarget {
+        match self
+            .review
+            .open
+            .as_ref()
+            .and_then(|open| open.linked_file(&link))
+            .filter(|file| self.index.find_file(&file.path).is_some())
+        {
+            Some(file) => LinkTarget::Source(file, link),
+            None => LinkTarget::Browser(link),
+        }
     }
 
     pub(crate) fn shown_path(&self) -> Option<RelativePath> {
@@ -829,6 +886,43 @@ impl Model {
 }
 
 impl App {
+    fn open_link(&mut self, link: WebLink) {
+        match Opener::open(&Argument::new(link.as_str())) {
+            Ok(()) => self.model.say(ReviewStatus::LinkOpened(link)),
+            Err(error) => self
+                .model
+                .say(ReviewStatus::LinkFailed(Label::new(format!("{error:?}")))),
+        }
+    }
+
+    fn show_linked_file(&mut self, linked: LinkedFile, link: WebLink) {
+        let Some(file) = self.model.index.find_file(&linked.path) else {
+            self.open_link(link);
+            return;
+        };
+        let lines = linked
+            .lines
+            .map_or(LineSelection::one(Line::new(0)), |span| LineSelection {
+                from: span.start(),
+                to: span.end(),
+            });
+        self.model.open_lines(file, lines);
+        let at_head = self
+            .model
+            .review
+            .open
+            .as_ref()
+            .is_some_and(|open| linked.at.is_head(&open.pull.head, &open.opened.head));
+        self.model.say(if at_head {
+            ReviewStatus::LinkedFileShown(linked.path)
+        } else {
+            ReviewStatus::LinkedFileShownAtHead {
+                path: linked.path,
+                linked: linked.at,
+            }
+        });
+    }
+
     pub(crate) fn review(&mut self, act: ReviewAct) {
         match act {
             ReviewAct::RefreshPulls => self.list_pulls(),
@@ -880,12 +974,8 @@ impl App {
             ReviewAct::RemoveDraft(id) => self.remove_draft(id),
             ReviewAct::RefreshTalk => self.ask_talk(),
             ReviewAct::Submit(decision) => self.submit(decision),
-            ReviewAct::OpenLink(link) => match Opener::open(&Argument::new(link.as_str())) {
-                Ok(()) => self.model.say(ReviewStatus::LinkOpened(link)),
-                Err(error) => self
-                    .model
-                    .say(ReviewStatus::LinkFailed(Label::new(format!("{error:?}")))),
-            },
+            ReviewAct::OpenLink(link) => self.open_link(link),
+            ReviewAct::ShowLinkedFile(file, link) => self.show_linked_file(file, link),
             ReviewAct::ViewCommit(commit) => self.view_commit(commit),
             ReviewAct::NeedPicture(link) => self.need_picture(link),
             ReviewAct::PictureWake(at) => self.model.review.pictures.wake_at(at),

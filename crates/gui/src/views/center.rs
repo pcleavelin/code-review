@@ -2,7 +2,7 @@ use std::mem;
 
 use domain::{
     CodePlace, DiffLayout, Draft, DraftOn, FileId, FileRow, FileText, Line, LineCount, LineKind,
-    Linked, RelativePath, Side, SourceLine, Span, Thread,
+    Linked, LinkedFile, RelativePath, Revision, Side, SourceLine, Span, Thread,
 };
 use ui::{Axis, Button, Count, Icon, Id, Label, Px, Rect, Run, Scrollbar};
 
@@ -31,19 +31,21 @@ pub(super) fn source_toolbar(model: &Model, frame: &mut Frame<'_>, path: &Relati
     frame.start(Container::Toolbar);
     frame.label(path.as_str(), TEXT);
     let link = model.review.open.as_ref().and_then(|open| {
-        open.link(&Linked::File {
-            commit: model
-                .review
-                .diffs
-                .commit()
-                .unwrap_or(&open.opened.head)
-                .clone(),
+        open.link(&Linked::File(LinkedFile {
+            at: Revision::Commit(
+                model
+                    .review
+                    .diffs
+                    .commit()
+                    .unwrap_or(&open.opened.head)
+                    .clone(),
+            ),
             path: path.clone(),
             lines: model
                 .nav
                 .lines()
                 .and_then(|lines| Span::new(lines.low(), lines.high())),
-        })
+        }))
     });
     review::link_buttons(frame, link, &Label::new("file"));
     review::change_controls(model, frame, path);

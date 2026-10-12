@@ -257,7 +257,10 @@ review::diff::pub fn rows(&self, head: Option<&FileText>) -> Vec<FileRow>
 review::link::pub struct WebLink(String);
 review::link::pub fn new(text: &str) -> Option<Self>
 review::link::pub fn as_str(&self) -> &str
-review::link::pub enum Linked { Pull(PrNumber), Issue(PrNumber), Commit(CommitId), File { commit: CommitId, path: RelativePath, lines: Option<Span>, }, User(Login), }
+review::link::pub enum Linked { Pull(PrNumber), Issue(PrNumber), Commit(CommitId), File(LinkedFile), User(Login), }
+review::link::pub struct LinkedFile { pub at: Revision, pub path: RelativePath, pub lines: Option<Span>, }
+review::link::pub enum Revision { Commit(CommitId), Named(RefName), }
+review::link::pub fn is_head(&self, branch: &BranchName, commit: &CommitId) -> bool
 review::state::pub enum Side { Old, New, }
 review::state::pub const fn name(self) -> Spelling
 review::state::pub struct DraftId(u32);
@@ -392,9 +395,6 @@ text::pub fn hash(&self, span: Span) -> Option<TextHash>
 text::pub fn count(&self) -> LineCount
 text::pub fn span(&self) -> Option<Span>
 text::pub fn whole_hash(&self) -> TextHash
-text::pub struct Revision(String);
-text::pub fn new(revision: &str) -> Self
-text::pub fn as_str(&self) -> &str
 text::pub struct RelativePath(String);
 text::pub fn new(path: &str) -> Self
 text::pub fn as_str(&self) -> &str

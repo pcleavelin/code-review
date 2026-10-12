@@ -302,25 +302,6 @@ impl FileText {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Revision(String);
-
-impl Revision {
-    pub fn new(revision: &str) -> Self {
-        Self(revision.to_owned())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for Revision {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Folder(&'static str);
 

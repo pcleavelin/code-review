@@ -8,9 +8,9 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use domain::{
-    Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge, ForgeHost,
-    ForgeKind, Host, Linked, PictureSource, PrNumber, Prose, PullRequest, RefName, RepoSlug,
-    SignedPicture, Token, UnixTime, WebLink,
+    BranchName, Conversation, Credential, Decision, Draft, DraftId, DraftText, FileChange, Forge,
+    ForgeHost, ForgeKind, Host, Linked, LinkedFile, PictureSource, PrNumber, Prose, PullRequest,
+    RefName, RepoSlug, SignedPicture, Token, UnixTime, WebLink,
 };
 use io_process::{Argument, Captured, Process, ProcessError, Program};
 use io_vcs::RemoteUrl;
@@ -435,6 +435,17 @@ pub fn web_link(forge: &Forge, linked: &Linked) -> Option<WebLink> {
         forge.slug().as_str(),
         linked,
     ))
+}
+
+pub fn linked_file(forge: &Forge, link: &WebLink, branches: &[BranchName]) -> Option<LinkedFile> {
+    let names: Vec<&str> = branches.iter().map(BranchName::as_str).collect();
+    wire::linked_file(
+        forge.kind(),
+        forge.host().as_str(),
+        forge.slug().as_str(),
+        link.as_str(),
+        &names,
+    )
 }
 
 impl ForgeClient {

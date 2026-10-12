@@ -20,13 +20,14 @@ pub use picture::{
 pub use review::{
     BranchName, ChangeKind, ClientId, CodePlace, Commit, CommitId, Conversation, Decision,
     DiffLayout, DiffLine, Draft, DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount,
-    FileRow, Forge, ForgeHost, ForgeKind, Grant, Host, Hunk, Lifetime, LineKind, Linked, Login,
-    Mark, Moment, Note, NoteKind, NumberedLine, OAuthApp, Paired, Pairing, PrNumber, PrTitle,
-    Progress, Prose, PullRequest, RefName, RefreshToken, Renewal, RepoSlug, Review, Seen, Side,
-    Spelling, Standing, Thread, ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
+    FileRow, Forge, ForgeHost, ForgeKind, Grant, Host, Hunk, Lifetime, LineKind, Linked,
+    LinkedFile, Login, Mark, Moment, Note, NoteKind, NumberedLine, OAuthApp, Paired, Pairing,
+    PrNumber, PrTitle, Progress, Prose, PullRequest, RefName, RefreshToken, Renewal, RepoSlug,
+    Review, Revision, Seen, Side, Spelling, Standing, Thread, ThreadId, ThreadState, Token,
+    UnixTime, UserCode, WebLink,
 };
 pub use settings::{BaseFontSize, FontFamily, Settings, Theme};
 pub use text::{
-    ByteOffset, Column, FileText, Line, LineCount, LineOffset, RelativePath, Revision, SourceLine,
-    Span, TextHash,
+    ByteOffset, Column, FileText, Line, LineCount, LineOffset, RelativePath, SourceLine, Span,
+    TextHash,
 };

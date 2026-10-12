@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::str;
 
-use domain::{Decision, DraftId, ForgeKind, Linked, NoteKind, Side, Span, ThreadState};
+use domain::{
+    CommitId, Decision, DraftId, ForgeKind, Line, Linked, LinkedFile, NoteKind, RefName,
+    RelativePath, Revision, Side, Span, ThreadState,
+};
 use io_process::Captured;
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
@@ -619,6 +623,129 @@ fn url_path(path: &str) -> String {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, VariantArray)]
+enum FileRoute {
+    GitHubBlob,
+    GitLabBlob,
+    ForgejoCommit,
+    ForgejoBranch,
+    ForgejoTag,
+}
+
+impl FileRoute {
+    const fn spelled(self) -> &'static str {
+        match self {
+            Self::GitHubBlob => "blob/",
+            Self::GitLabBlob => "-/blob/",
+            Self::ForgejoCommit => "src/commit/",
+            Self::ForgejoBranch => "src/branch/",
+            Self::ForgejoTag => "src/tag/",
+        }
+    }
+
+    const fn kind(self) -> ForgeKind {
+        match self {
+            Self::GitHubBlob => ForgeKind::GitHub,
+            Self::GitLabBlob => ForgeKind::GitLab,
+            Self::ForgejoCommit | Self::ForgejoBranch | Self::ForgejoTag => ForgeKind::Forgejo,
+        }
+    }
+
+    const fn for_revision(kind: ForgeKind, at: &Revision) -> Self {
+        match (kind, at) {
+            (ForgeKind::GitHub, _) => Self::GitHubBlob,
+            (ForgeKind::GitLab, _) => Self::GitLabBlob,
+            (ForgeKind::Forgejo, Revision::Commit(_)) => Self::ForgejoCommit,
+            (ForgeKind::Forgejo, Revision::Named(_)) => Self::ForgejoBranch,
+        }
+    }
+}
+
+pub(crate) fn linked_file(
+    kind: ForgeKind,
+    host: &str,
+    slug: &str,
+    url: &str,
+    branches: &[&str],
+) -> Option<LinkedFile> {
+    let (address, fragment) = url
+        .split_once('#')
+        .map_or((url, None), |(address, fragment)| (address, Some(fragment)));
+    let address = address
+        .split_once('?')
+        .map_or(address, |(address, _)| address);
+    let rest = [Scheme::Https, Scheme::Http]
+        .into_iter()
+        .find_map(|scheme| address.strip_prefix(scheme.name()))?;
+    let repo = format!("{host}/{slug}/");
+    let rest = rest
+        .get(..repo.len())
+        .filter(|named| named.eq_ignore_ascii_case(&repo))
+        .and_then(|_| rest.get(repo.len()..))?;
+    let tail = FileRoute::VARIANTS
+        .iter()
+        .filter(|route| route.kind() == kind)
+        .find_map(|route| rest.strip_prefix(route.spelled()))?;
+    let (revision, path) = branches
+        .iter()
+        .filter_map(|branch| {
+            tail.strip_prefix(branch)
+                .and_then(|after| after.strip_prefix('/'))
+                .map(|path| (*branch, path))
+        })
+        .max_by_key(|(branch, _)| branch.len())
+        .or_else(|| tail.split_once('/'))?;
+    let path = percent_decoded(path);
+    if revision.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(LinkedFile {
+        at: CommitId::new(revision)
+            .map_or_else(|| Revision::Named(RefName::new(revision)), Revision::Commit),
+        path: RelativePath::new(&path),
+        lines: fragment.and_then(line_span),
+    })
+}
+
+fn revision_text(at: &Revision) -> &str {
+    match at {
+        Revision::Commit(commit) => commit.as_str(),
+        Revision::Named(name) => name.as_str(),
+    }
+}
+
+fn line_span(fragment: &str) -> Option<Span> {
+    let (first, last) = fragment.split_once('-').unwrap_or((fragment, fragment));
+    let line = |text: &str| -> Option<u32> {
+        let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse::<u32>().ok()?.checked_sub(1)
+    };
+    let first = line(first.strip_prefix('L')?)?;
+    let last = line(last.strip_prefix('L').unwrap_or(last))?;
+    Span::new(Line::new(first.min(last)), Line::new(first.max(last)))
+}
+
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        let escaped = (byte == b'%')
+            .then(|| bytes.get(at + 1..at + 3))
+            .flatten()
+            .and_then(|hex| str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        if let Some(value) = escaped {
+            decoded.push(value);
+            at += 3;
+        } else {
+            decoded.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 pub(crate) fn web_url(kind: ForgeKind, host: &str, slug: &str, linked: &Linked) -> String {
     let repo = format!("https://{host}/{slug}");
     let lines = |lines: &Option<Span>| match (kind, lines) {
@@ -645,26 +772,13 @@ pub(crate) fn web_url(kind: ForgeKind, host: &str, slug: &str, linked: &Linked) 
         (ForgeKind::GitHub | ForgeKind::Forgejo, Linked::Commit(commit)) => {
             format!("{repo}/commit/{}", commit.as_str())
         }
-        (
-            kind,
-            Linked::File {
-                commit,
-                path,
-                lines: span,
-            },
-        ) => {
-            let at = match kind {
-                ForgeKind::GitHub => "blob",
-                ForgeKind::GitLab => "-/blob",
-                ForgeKind::Forgejo => "src/commit",
-            };
-            format!(
-                "{repo}/{at}/{}/{}{}",
-                commit.as_str(),
-                url_path(path.as_str()),
-                lines(span)
-            )
-        }
+        (kind, Linked::File(file)) => format!(
+            "{repo}/{}{}/{}{}",
+            FileRoute::for_revision(kind, &file.at).spelled(),
+            revision_text(&file.at),
+            url_path(file.path.as_str()),
+            lines(&file.lines)
+        ),
         (_, Linked::User(login)) => format!("https://{host}/{login}"),
     }
 }

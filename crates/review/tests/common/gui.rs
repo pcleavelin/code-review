@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, working_copy, dropped, login }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login }
     };
 }
 
@@ -357,6 +357,48 @@ quit
             "stage=gitlab.test device code=ABCD-1234 page=https://gitlab.test/oauth/device",
             "DUMP login sites=[gitlab.test=in forgejo.test=in] stage=none",
             "DUMP login sites=[gitlab.test=in forgejo.test=out] stage=none",
+        ],
+    }
+}
+
+pub(crate) fn linked_file() -> Scenario {
+    Scenario {
+        script: "OPEN
+hover-id md-source@description/0/7
+wait 60
+shot {shots}/tip.png
+click-id md-source@description/0/7
+wait 3
+idle
+wait 2
+dump
+shot {shots}/head.png
+click-id link-open@file
+wait 2
+dump
+click-id tab@Review
+wait 2
+click-id md-source@description/1/8
+wait 3
+idle
+wait 2
+dump
+shot {shots}/main.png
+click-id tab@Review
+wait 2
+click-id md-link@description/2/9
+wait 2
+dump
+quit
+",
+        shows: &[
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((4, 6))",
+            "status=\"src/lib.rs from the link\"",
+            "status=\"opened https://forgejo.test/owner/repo/src/commit/",
+            "/src/lib.rs#L5-L7\"",
+            "file=Some(\"src/shapes.rs\") gone=None sel=Some((1, 1))",
+            "status=\"src/shapes.rs from the link, shown at the head of the pull request: the link points at main\"",
+            "status=\"opened https://forgejo.test/owner/repo/src/branch/feature/gone.rs\"",
         ],
     }
 }
