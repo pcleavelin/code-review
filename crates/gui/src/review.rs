@@ -177,6 +177,7 @@ pub(crate) struct Reviewing {
     pub(crate) submitting: Submitting,
     pub(crate) whole: BTreeSet<RelativePath>,
     pub(crate) unfolded: BTreeMap<RelativePath, Vec<Span>>,
+    collapsed: BTreeSet<RelativePath>,
     pub(crate) diffs: Diffs,
     pub(crate) pictures: Pictures,
     pub(crate) logins: Logins,
@@ -202,6 +203,7 @@ impl Reviewing {
             submitting: Submitting::Idle,
             whole: BTreeSet::new(),
             unfolded: BTreeMap::new(),
+            collapsed: BTreeSet::new(),
             diffs: Diffs::default(),
             pictures: Pictures::default(),
             logins: Logins::default(),
@@ -245,6 +247,16 @@ impl Reviewing {
         self.opened()
             .into_iter()
             .flat_map(move |opened| opened.review.drafts_at(path))
+    }
+
+    pub(crate) fn collapsed(&self, path: &RelativePath) -> bool {
+        self.collapsed.contains(path)
+    }
+
+    fn toggle_collapsed(&mut self, path: RelativePath) {
+        if !self.collapsed.remove(&path) {
+            self.collapsed.insert(path);
+        }
     }
 
     pub(crate) fn rows(&self, path: &RelativePath, head: Option<&FileText>) -> Vec<FileRow> {
@@ -399,6 +411,9 @@ pub(crate) enum ReviewAct {
     NextHunk,
     PreviousHunk,
     ToggleWhole(RelativePath),
+    ToggleCollapsed(RelativePath),
+    Uncollapse(RelativePath),
+    ScrolledTo(RelativePath),
     Unfold(RelativePath, Span),
     PickRemoved(RelativePath, Line, Picking),
     Reveal(RelativePath, Line),
@@ -636,7 +651,7 @@ impl Model {
             .shown_change(path)
             .and_then(|change| change_starts(change).first().copied());
         match self.index.find_file(path) {
-            Some(file) => self.open_line(file, first.unwrap_or(Line::new(0))),
+            Some(file) => self.open_top(file, first.unwrap_or(Line::new(0))),
             None => self.open_gone(path.clone()),
         }
     }
@@ -811,6 +826,9 @@ impl Model {
     }
 
     fn pick_removed(&mut self, file: RelativePath, line: Line, picking: Picking) {
+        if self.shown_path().as_ref() != Some(&file) {
+            self.select_file(&file);
+        }
         let kept = self
             .review
             .picked
@@ -852,6 +870,11 @@ impl App {
                     whole.insert(path);
                 }
             }
+            ReviewAct::ToggleCollapsed(path) => self.model.review.toggle_collapsed(path),
+            ReviewAct::Uncollapse(path) => {
+                self.model.review.collapsed.remove(&path);
+            }
+            ReviewAct::ScrolledTo(path) => self.model.scrolled_to_file(&path),
             ReviewAct::Unfold(path, span) => {
                 self.model
                     .review
@@ -1249,6 +1272,7 @@ impl App {
         review.draft = None;
         review.whole.clear();
         review.unfolded.clear();
+        review.collapsed.clear();
         review.diffs.forget();
         review.open = Some(OpenReview {
             web: repo.web(),
@@ -1284,6 +1308,7 @@ impl App {
             review.draft = None;
             review.whole.clear();
             review.unfolded.clear();
+            review.collapsed.clear();
             review.diffs.forget();
             review.open = None;
             self.model.set_tab(Tab::Inbox);

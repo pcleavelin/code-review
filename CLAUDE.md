@@ -119,8 +119,11 @@ rule applies.
   it seen; one that changes it brings it back. The mark also keeps the head commit it was made
   at, so a file changed since seen shows what changed since that commit. No ref holds that
   commit: it lasts as long as git keeps the object, and `--since-seen` says so once it is gone.
-- **The diff is drawn on the head file, folded to the change.** The Source view shows the head
-  file with added lines tinted and removed lines, threads that are not outdated and drafts
+- **The diff is drawn on the head file, folded to the change.** The Source view shows every
+  changed file in one column, in the order of Changes, each under a header that marks it seen,
+  collapses it and links it; picking a file in Changes scrolls to its header, and scrolling makes
+  the file in sight the selection. A file the pull request does not change is shown alone. Each
+  file is the head file with added lines tinted and removed lines, threads that are not outdated and drafts
   inserted where they belong; lines more than three away from a change fold
   into a row that opens twenty lines at a time toward either change, or all at once, and
   "whole file" drops the folds. Every identifier on a changed line navigates like any other
@@ -212,10 +215,11 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
   line on stderr fails the run. Id names are the ones in `crates/gui/src/ids.rs`: `name`,
   `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, changed files `change/<n>`,
   commits `commit/<n>`, `all-changes` (in the Changes and Source toolbars `all-changes@changes`, `@source`), the split toggle `layout`, thread rows `thread/<n>`,
-  a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up/<first line>`,
-  `fold-down/<last line>` and `fold/<first line>`, link buttons `link-open@<key>` and
-  `link-copy@<key>` (`pull`, `file`, `<thread>/<note>`), a
-  removed line `draft-removed@<old line>`, a draft's remove button `draft-remove@<id>`, every
+  a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up@<path>:<first line>`,
+  `fold-down@<path>:<last line>` and `fold@<path>:<first line>` (lines from 0), a file's header
+  `file-header@<path>` with `collapse@<path>`, `seen@<path>`, `whole-file@<path>`, split rows
+  `table@<path>:<row>`, link buttons `link-open@<key>` and `link-copy@<key>` (`pull`, `file`,
+  `<path>`, `<thread>/<note>`), a removed line `draft-removed@<path>:<old line>`, a draft's remove button `draft-remove@<id>`, every
   view's tab `tab@<View>`). Rects come from the previous frame, so `wait 1` after anything
   that changes the layout. `dump` prints the selection, the review (pulls, the open pull
   request, the inbox entries, the open pull request, the diff layout and the commit shown, every

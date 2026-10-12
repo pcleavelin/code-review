@@ -1,4 +1,4 @@
-use domain::{Column, FileId, Language, Line, SymbolId};
+use domain::{Column, FileId, Language, Line, RelativePath, SymbolId};
 use platform::ClipboardRequest;
 use ui::{Count, Id, Label, Point, Px, Typed};
 
@@ -23,7 +23,7 @@ pub(crate) enum Action {
     Jump(SymbolId),
     GoTo(FileId, Line),
     Definition(FileId, Line, Column, Intent),
-    SelectLine(Line, LineGesture),
+    SelectLine(RelativePath, Line, LineGesture),
     ClearLineSelection,
     ClosePeek,
     ToggleDirectory(Label),
@@ -68,7 +68,7 @@ impl App {
             Action::Definition(file, line, column, intent) => {
                 self.definition(file, line, column, intent);
             }
-            Action::SelectLine(line, gesture) => model.select_line(line, gesture),
+            Action::SelectLine(path, line, gesture) => model.select_line(&path, line, gesture),
             Action::ClearLineSelection => model.clear_line_selection(),
             Action::ClosePeek => model.peek = None,
             Action::ToggleDirectory(directory) => {

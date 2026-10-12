@@ -86,6 +86,51 @@ fn lines_removed_at_the_end_of_the_file_come_after_the_last_head_line() {
 }
 
 #[test]
+fn removals_group_the_lines_removed_before_each_head_line_and_added_lines_are_new_numbers() {
+    let two = change(
+        "a.txt",
+        vec![
+            Hunk::new(
+                Line::new(0),
+                Line::new(0),
+                vec![
+                    line(LineKind::Removed, "p"),
+                    line(LineKind::Removed, "q"),
+                    line(LineKind::Context, "r"),
+                ],
+            ),
+            Hunk::new(
+                Line::new(9),
+                Line::new(7),
+                vec![
+                    line(LineKind::Context, "s"),
+                    line(LineKind::Added, "t"),
+                    line(LineKind::Removed, "u"),
+                ],
+            ),
+        ],
+    );
+    let removals: Vec<(Line, Vec<Line>)> = two
+        .removals()
+        .iter()
+        .map(|removal| {
+            (
+                removal.before,
+                removal.lines.iter().map(|removed| removed.old).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        removals,
+        vec![
+            (Line::new(0), vec![Line::new(0), Line::new(1)]),
+            (Line::new(9), vec![Line::new(10)]),
+        ]
+    );
+    assert_eq!(two.added_lines(), vec![Line::new(8)]);
+}
+
+#[test]
 fn a_deleted_file_is_all_removed_rows() {
     let rows = replace_b_with_x().rows(None);
     assert_eq!(

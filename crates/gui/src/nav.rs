@@ -22,6 +22,7 @@ impl Ticket {
 pub(crate) enum Aim {
     Line,
     Editor,
+    Top,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,6 +154,15 @@ impl Nav {
         self.asked = self.ticket();
     }
 
+    fn scroll_to_top(&mut self) {
+        let ticket = self.ticket();
+        self.scroll_to = Some(LineRequest {
+            line: Line::new(0),
+            ticket,
+            aim: Aim::Top,
+        });
+    }
+
     fn scroll_to_line(&mut self, line: Line) {
         let ticket = self.ticket();
         self.scroll_to = Some(LineRequest {
@@ -282,6 +292,25 @@ impl Model {
         self.go_to_symbol(symbol);
     }
 
+    pub(crate) fn open_top(&mut self, file: FileId, line: Line) {
+        self.open_line(file, line);
+        self.nav.scroll_to_top();
+    }
+
+    pub(crate) fn select_file(&mut self, path: &RelativePath) {
+        let file = self.index.find_file(path);
+        self.nav.gone = file.is_none().then(|| path.clone());
+        self.nav.file = file;
+        self.nav.focus = None;
+        self.clear_lines();
+    }
+
+    pub(crate) fn scrolled_to_file(&mut self, path: &RelativePath) {
+        self.select_file(path);
+        self.review.picked = None;
+        self.nav.history.last = Some(self.here());
+    }
+
     pub(crate) fn open_line(&mut self, file: FileId, line: Line) {
         self.nav.moving = Move::Jump;
         self.nav.file = Some(file);
@@ -311,7 +340,7 @@ impl Model {
         self.nav.focus = None;
         self.nav.gone = Some(path);
         self.nav.lines = None;
-        self.scrolls.set(ids::source(), Px::ZERO);
+        self.nav.scroll_to_top();
         self.nav.show(Tab::Source);
     }
 
@@ -333,7 +362,13 @@ impl Model {
         self.line_grab = None;
     }
 
-    pub(crate) fn select_line(&mut self, line: Line, gesture: LineGesture) {
+    pub(crate) fn select_line(&mut self, path: &RelativePath, line: Line, gesture: LineGesture) {
+        if self.shown_path().as_ref() != Some(path) {
+            if gesture == LineGesture::Drag {
+                return;
+            }
+            self.select_file(path);
+        }
         match (gesture, self.line_grab) {
             (LineGesture::Press, _) => {
                 self.review.picked = None;

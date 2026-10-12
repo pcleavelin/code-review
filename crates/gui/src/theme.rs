@@ -177,6 +177,7 @@ pub(crate) const ELEMENT_TIP_GAP: Px = Px::new(4);
 pub(crate) const SPLIT_LEAST: Px = Px::new(5);
 pub(crate) const GRAB_REACH: Px = Px::new(8);
 pub(crate) const SOURCE_GUESS: Px = Px::new(600);
+pub(crate) const FILE_HEADER_EXTRA: Px = Px::new(14);
 pub(crate) const COMMENT_FRAME: Px = Px::new(16);
 pub(crate) const DRAFT_ROWS: Count = Count::new(3);
 pub(crate) const DRAFT_FRAME: Px = Px::new(24);

@@ -1,3 +1,4 @@
+use domain::RelativePath;
 use ui::{Count, Id, Label};
 
 use crate::keys::{self, Chord};
@@ -294,6 +295,10 @@ pub(crate) const ALL_CHANGES: Control = Control::new(
     Element::new("all-changes"),
     Words::new("back to the whole pull request's changes"),
 );
+pub(crate) const COLLAPSE: Control = Control::new(
+    Element::new("collapse"),
+    Words::new("fold this file's diff away under its name, or show it again"),
+);
 pub(crate) const COMMIT_ROW: Control = Control::new(
     Element::new("commit"),
     Words::new("show only this commit's changes"),
@@ -475,6 +480,7 @@ pub(crate) const CONTROLS: &[Control] = &[
     TABLE,
     LAYOUT,
     ALL_CHANGES,
+    COLLAPSE,
     COMMIT_ROW,
     LINK_OPEN,
     LINK_COPY,
@@ -507,6 +513,14 @@ pub(crate) const CONTROLS: &[Control] = &[
     SETTINGS_FONT,
     ELEMENT_TIP,
 ];
+
+pub(crate) fn in_file(path: &RelativePath, at: Count) -> Label {
+    Label::new(format!("{path}:{at}"))
+}
+
+pub(crate) fn file_header() -> Id {
+    Id::new("file-header")
+}
 
 pub(crate) fn inbox() -> Id {
     Id::new("inbox")
