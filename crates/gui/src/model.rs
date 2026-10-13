@@ -6,6 +6,7 @@ use io_fonts::Fonts;
 use strum::VariantArray;
 use ui::{Count, Extent, FontSize, Id, Label, Px};
 
+use crate::columns::InboxGrid;
 use crate::element_tip::Resting;
 use crate::field::Fields;
 use crate::nav::Nav;
@@ -141,6 +142,7 @@ pub(crate) struct Model {
     pub(crate) peek: Option<Peek>,
     pub(crate) queries: Queries,
     pub(crate) panels: Panels,
+    pub(crate) inbox_grid: InboxGrid,
     pub(crate) scrolls: Scrolls,
     pub(crate) across: Scrolls,
     pub(crate) tip_shown: Option<Label>,
@@ -162,6 +164,13 @@ pub(crate) struct Model {
 }
 
 impl Model {
+    pub(crate) fn layout(&self) -> domain::Layout {
+        domain::Layout {
+            tree: self.panels.layout(),
+            columns: self.inbox_grid.saved(),
+        }
+    }
+
     pub(crate) fn new(index: Index, review: Reviewing) -> Self {
         Self {
             index,
@@ -171,6 +180,7 @@ impl Model {
             peek: None,
             queries: Queries::default(),
             panels: Panels::default(),
+            inbox_grid: InboxGrid::default(),
             scrolls: Scrolls::default(),
             across: Scrolls::default(),
             tip_shown: None,

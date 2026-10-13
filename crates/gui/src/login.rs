@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use domain::{ForgeHost, Token, UserCode, WebLink};
+use domain::{ForgeHost, JiraSite, Token, UserCode, WebLink};
 use io_forge::ForgeError;
 use io_process::{Argument, Opener};
 use platform::ClipboardRequest;
@@ -53,6 +53,26 @@ pub(crate) struct Logins {
     pub(crate) failed: BTreeMap<ForgeHost, Label>,
     asked: BTreeSet<ForgeHost>,
     pub(crate) login: Option<Login>,
+    pub(crate) jira: BTreeMap<JiraSite, Held>,
+    pub(crate) jira_paste: Option<JiraSite>,
+}
+
+pub(crate) struct Holdings {
+    pub(crate) forges: BTreeMap<ForgeHost, Held>,
+    pub(crate) jira: BTreeMap<JiraSite, Held>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Literal(&'static str);
+
+const JIRA_TOKENS: Literal = Literal("https://id.atlassian.com/manage-profile/security/api-tokens");
+
+fn held_of(holds: Result<Holds, SessionError>) -> Held {
+    match holds {
+        Ok(Holds::Login) => Held::In,
+        Err(error) if error.keychain_timed_out() => Held::TimedOut(Label::new(error.to_string())),
+        Ok(Holds::Nothing) | Err(_) => Held::Out,
+    }
 }
 
 impl Logins {
@@ -71,20 +91,21 @@ impl Logins {
     }
 }
 
-pub(crate) fn holding(access: &Access, sites: &BTreeSet<ForgeHost>) -> BTreeMap<ForgeHost, Held> {
-    sites
-        .iter()
-        .map(|site| {
-            let held = match access.holds(site) {
-                Ok(Holds::Login) => Held::In,
-                Err(error) if error.keychain_timed_out() => {
-                    Held::TimedOut(Label::new(error.to_string()))
-                }
-                Ok(Holds::Nothing) | Err(_) => Held::Out,
-            };
-            (site.clone(), held)
-        })
-        .collect()
+pub(crate) fn holding(access: &Access, sites: &BTreeSet<ForgeHost>) -> Holdings {
+    Holdings {
+        forges: sites
+            .iter()
+            .map(|site| (site.clone(), held_of(access.holds(site))))
+            .collect(),
+        jira: access
+            .jira_sites()
+            .into_iter()
+            .map(|site| {
+                let held = held_of(access.holds_jira(&site));
+                (site, held)
+            })
+            .collect(),
+    }
 }
 
 pub(crate) enum Ended {
@@ -118,6 +139,8 @@ pub(crate) enum LoginAct {
     Cancel,
     Save,
     Logout(ForgeHost),
+    StartJira(JiraSite),
+    LogoutJira(JiraSite),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,19 +156,25 @@ pub(crate) enum LoginStatus {
     Out(ForgeHost, Forgotten),
     Cancelled(ForgeHost),
     Failed(ForgeHost, Label),
+    JiraPaste(JiraSite),
+    JiraIn(JiraSite),
+    JiraOut(JiraSite, Forgotten),
+    JiraFailed(JiraSite, Label),
 }
 
 impl LoginStatus {
     pub(crate) const fn tone(&self) -> Tone {
         match self {
-            Self::Waiting(_) | Self::Paste(_) => Tone::Plain,
+            Self::Waiting(_) | Self::Paste(_) | Self::JiraPaste(_) => Tone::Plain,
             Self::CodeCopied(_)
             | Self::PageOpened(_)
             | Self::In(_)
             | Self::Listed(..)
-            | Self::Out(..) => Tone::Done,
+            | Self::Out(..)
+            | Self::JiraIn(_)
+            | Self::JiraOut(..) => Tone::Done,
             Self::NoToken | Self::Cancelled(_) => Tone::Warning,
-            Self::PageFailed(_) | Self::Failed(..) => Tone::Problem,
+            Self::PageFailed(_) | Self::Failed(..) | Self::JiraFailed(..) => Tone::Problem,
         }
     }
 }
@@ -186,6 +215,28 @@ impl fmt::Display for LoginStatus {
             Self::Failed(site, why) => {
                 write!(formatter, "not logged in to {site}: {}", why.as_str())
             }
+            Self::JiraFailed(site, why) => {
+                write!(
+                    formatter,
+                    "not logged in to Jira on {site}: {}",
+                    why.as_str()
+                )
+            }
+            Self::JiraPaste(site) => write!(
+                formatter,
+                "logging in to Jira on {site}: paste email:api-token in the Inbox and press enter"
+            ),
+            Self::JiraIn(site) => write!(
+                formatter,
+                "logged in to Jira on {site}; the token is in the system keychain"
+            ),
+            Self::JiraOut(site, Forgotten::Removed) => write!(
+                formatter,
+                "logged out of Jira on {site}; its token is gone from the keychain"
+            ),
+            Self::JiraOut(site, Forgotten::Absent) => {
+                write!(formatter, "the keychain holds no token for {site}")
+            }
         }
     }
 }
@@ -199,10 +250,85 @@ impl App {
         match act {
             LoginAct::Start(site) => self.start_login(&site),
             LoginAct::CopyCode => self.copy_code(),
+            LoginAct::OpenPage if self.model.review.logins.jira_paste.is_some() => {
+                self.open_page(JIRA_TOKENS);
+            }
             LoginAct::OpenPage => self.open_login_page(),
+            LoginAct::Cancel if self.model.review.logins.jira_paste.is_some() => {
+                self.end_jira_paste();
+            }
             LoginAct::Cancel => self.cancel_login(),
+            LoginAct::Save if self.model.review.logins.jira_paste.is_some() => {
+                self.save_jira_token();
+            }
             LoginAct::Save => self.save_token(),
             LoginAct::Logout(site) => self.logout(&site),
+            LoginAct::StartJira(site) => self.start_jira(site),
+            LoginAct::LogoutJira(site) => self.logout_jira(&site),
+        }
+    }
+
+    fn start_jira(&mut self, site: JiraSite) {
+        self.stop_login();
+        self.model.review.logins.jira_paste = Some(site.clone());
+        self.model.fields.start_empty(Which::Token);
+        self.model.fields.focus(Which::Token);
+        self.model.set_tab(Tab::Inbox);
+        self.say_login(LoginStatus::JiraPaste(site));
+    }
+
+    fn end_jira_paste(&mut self) {
+        self.model.review.logins.jira_paste = None;
+        self.model.fields.start_empty(Which::Token);
+        self.model.fields.release(Which::Token);
+    }
+
+    fn save_jira_token(&mut self) {
+        let Some(site) = self.model.review.logins.jira_paste.clone() else {
+            return;
+        };
+        let Some(token) = Token::new(self.model.fields.get(Which::Token).text().as_str()) else {
+            self.say_login(LoginStatus::NoToken);
+            return;
+        };
+        match self.model.review.desk.access().keep_jira(&site, token) {
+            Ok(()) => {
+                self.end_jira_paste();
+                self.model.review.logins.jira.insert(site.clone(), Held::In);
+                self.say_login(LoginStatus::JiraIn(site));
+                self.ask_card();
+            }
+            Err(error) => {
+                self.say_login(LoginStatus::JiraFailed(site, Label::new(error.to_string())));
+            }
+        }
+    }
+
+    fn logout_jira(&mut self, site: &JiraSite) {
+        match self.model.review.desk.access().forget_jira(site) {
+            Ok(forgotten) => {
+                self.model
+                    .review
+                    .logins
+                    .jira
+                    .insert(site.clone(), Held::Out);
+                self.say_login(LoginStatus::JiraOut(site.clone(), forgotten));
+                self.ask_card();
+            }
+            Err(error) => self.say_login(LoginStatus::JiraFailed(
+                site.clone(),
+                Label::new(error.to_string()),
+            )),
+        }
+    }
+
+    fn open_page(&mut self, page: Literal) {
+        let Some(page) = WebLink::new(page.0) else {
+            return;
+        };
+        match Opener::open(&Argument::new(page.as_str())) {
+            Ok(()) => self.say_login(LoginStatus::PageOpened(page)),
+            Err(error) => self.say_login(LoginStatus::PageFailed(Label::new(format!("{error:?}")))),
         }
     }
 
@@ -216,6 +342,7 @@ impl App {
 
     pub(crate) fn carry_login(&mut self, started: StartedLogin, browser: Browser) {
         self.stop_login();
+        self.model.review.logins.jira_paste = None;
         let access = self.model.review.desk.access().clone();
         let logins = &mut self.model.review.logins;
         let site = match started {

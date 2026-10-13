@@ -13,18 +13,22 @@ pub use index::{
     Readiness, Root, Scope, SourceFile, Stop, Symbol, SymbolId, SymbolIndex, SymbolKey, SymbolKind,
     SymbolName, SymbolQuery, TreeEntry, TypeName, Verdict,
 };
-pub use layout::{LayoutPanel, LayoutSplit, LayoutTree, Share, SplitDirection, ViewKey};
+pub use layout::{
+    ColumnCells, ColumnKey, ColumnWidth, Layout, LayoutPanel, LayoutSplit, LayoutTree, Share,
+    SplitDirection, ViewKey,
+};
 pub use picture::{
     Credential, Picture, PictureFrame, PictureSource, PixelCount, Rgba, SignedPicture,
 };
 pub use review::{
-    Block, BranchName, ChangeKind, ClientId, CodePlace, Commit, CommitId, Content, Conversation,
-    Decision, DiffLayout, DiffLine, Draft, DraftError, DraftId, DraftOn, DraftText, FileChange,
-    FileCount, FileRow, Forge, ForgeHost, ForgeKind, Grant, Host, Hunk, Lifetime, LineKind, Linked,
-    LinkedFile, Login, Mark, Moment, Note, NumberedLine, OAuthApp, Paired, Pairing, PrNumber,
-    PrTitle, Progress, Prose, Provenance, PullRequest, RefName, RefreshToken, Refusal, Removal,
-    RemovedLine, Renewal, RepoSlug, Review, Revision, Rights, Seen, Side, Spelling, Standing,
-    Submission, SubmissionId, Thread, ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
+    Block, BranchName, Card, CardFamily, CardField, CardKey, CardStage, ChangeKind, ClientId,
+    CodePlace, Commit, CommitId, Content, Conversation, Decision, DiffLayout, DiffLine, Draft,
+    DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount, FileRow, Forge, ForgeHost,
+    ForgeKind, Grant, Host, Hunk, JiraSite, Lifetime, LineKind, Linked, LinkedFile, Login, Mark,
+    Moment, Note, NumberedLine, OAuthApp, Paired, Pairing, PrNumber, PrTitle, Progress, Prose,
+    Provenance, PullRequest, RefName, RefreshToken, Refusal, Removal, RemovedLine, Renewal,
+    RepoSlug, Review, Revision, Rights, Seen, Side, Spelling, Standing, Submission, SubmissionId,
+    Thread, ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
 };
 pub use settings::{BaseFontSize, FontFamily, Settings, Theme};
 pub use text::{

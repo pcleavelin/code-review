@@ -21,6 +21,10 @@ pub fn plain(path: PathBuf) -> PathBuf {
     }
 }
 
+pub fn temp_directory() -> PathBuf {
+    env::temp_dir()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Program(String);
 

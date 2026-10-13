@@ -8,7 +8,7 @@ use ui::{Axis, Button, Count, Icon, Label, Px, Run};
 use crate::action::Action;
 use crate::ids;
 use crate::model::Model;
-use crate::nav::{Aim, LineRequest};
+use crate::nav::{Aim, Kept, LineRequest};
 use crate::review::ReviewAct;
 use crate::text::{Counted, Noun};
 use crate::theme::{FIELD, FILE_HEADER_EXTRA, GREEN, ORANGE, RED, SOURCE_GUESS, TEXT, WEAK};
@@ -19,6 +19,8 @@ use super::center::{
 };
 use super::review;
 use super::table::TableBody;
+
+const AIMED_ABOVE: Count = Count::new(3);
 
 enum Body<'body> {
     Code(CodeBody<'body>),
@@ -43,6 +45,15 @@ impl Body<'_> {
             Self::Gone(body) => body.aim(line),
             Self::Table(body) => body.aim(line),
             Self::Collapsed => Aimed::Folded,
+        }
+    }
+
+    fn line_at(&self, down: Px) -> Option<Line> {
+        match self {
+            Self::Code(body) => body.line_at(down),
+            Self::Gone(body) => body.line_at(down),
+            Self::Table(body) => body.line_at(down),
+            Self::Collapsed => None,
         }
     }
 
@@ -148,6 +159,20 @@ impl<'body> Stack<'body> {
         self.total + room
     }
 
+    fn kept(&self, offset: Px) -> Option<Kept> {
+        let section = self.holding(offset)?;
+        let line = section
+            .body
+            .line_at((offset - section.body_top()).max(Px::ZERO))?;
+        Some(Kept {
+            path: section.path.clone(),
+            line: Line::new(
+                line.value()
+                    .saturating_add(u32::try_from(AIMED_ABOVE.get()).unwrap_or(0)),
+            ),
+        })
+    }
+
     fn holding(&self, offset: Px) -> Option<&Section<'body>> {
         self.sections
             .iter()
@@ -182,13 +207,18 @@ fn showing(model: &Model) -> Showing<'_> {
 pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
     match showing(model) {
         Showing::Changes(changes) => {
-            changes_toolbar(model, frame, changes);
             let stack = Stack::of(model, frame, changes);
+            changes_toolbar(
+                model,
+                frame,
+                changes,
+                stack.kept(model.scrolls.get(ids::source())),
+            );
             column(model, frame, &stack);
         }
         Showing::Reading => {
             frame.start(Container::Toolbar);
-            review::diff_controls(model, frame);
+            review::diff_controls(model, frame, None);
             frame.finish();
             frame.note("reading the commit's changes...", WEAK, Padding::Step);
         }
@@ -223,13 +253,18 @@ pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
     }
 }
 
-fn changes_toolbar(model: &Model, frame: &mut Frame<'_>, changes: &[FileChange]) {
+fn changes_toolbar(
+    model: &Model,
+    frame: &mut Frame<'_>,
+    changes: &[FileChange],
+    kept: Option<Kept>,
+) {
     frame.start(Container::Toolbar);
     frame.label(
         Counted::new(Count::new(changes.len()), Noun::ChangedFile).to_string(),
         TEXT,
     );
-    review::diff_controls(model, frame);
+    review::diff_controls(model, frame, kept);
     frame.finish();
 }
 

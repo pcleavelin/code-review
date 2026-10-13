@@ -75,6 +75,10 @@ pub(crate) struct Pictures {
 }
 
 impl Pictures {
+    pub(crate) const fn loaded(&self) -> &BTreeMap<WebLink, Loading<Animation>> {
+        &self.loaded
+    }
+
     pub(crate) fn forget_failed(&mut self) {
         self.loaded
             .retain(|_, loading| !matches!(loading, Loading::Failed(_)));
@@ -156,17 +160,21 @@ impl App {
             .and_then(|open| open.conversation())
             .map(|conversation| conversation.signed_pictures.clone())
             .unwrap_or_default();
+        let access = self.model.review.desk.access().clone();
         let jobs = &mut self.jobs.pictures;
         while jobs.running.len() < AT_ONCE.get() && !jobs.waiting.is_empty() {
             let link = jobs.waiting.remove(0);
             let cache = picture_cache();
             let repo = repo.clone();
             let signed = signed.clone();
+            let access = access.clone();
             jobs.running.push(Job::start(move || {
-                let source = repo.and_then(|repo| repo.forge().ok()).map_or_else(
-                    || PictureSource::anonymous(&link),
-                    |forge| forge.picture_source(&link, &signed),
-                );
+                let source = access.picture_source(&link).unwrap_or_else(|| {
+                    repo.and_then(|repo| repo.forge().ok()).map_or_else(
+                        || PictureSource::anonymous(&link),
+                        |forge| forge.picture_source(&link, &signed),
+                    )
+                });
                 let result = io_picture::load(&link, &source, &cache)
                     .map_err(|error| Label::new(error.to_string()));
                 Fetched { link, result }

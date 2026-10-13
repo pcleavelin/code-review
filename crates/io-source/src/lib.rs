@@ -18,6 +18,11 @@ impl ByteCount {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Skipped(&'static str);
+
+const SKIPPED: [Skipped; 3] = [Skipped(".git"), Skipped(".jj"), Skipped(".review-cache")];
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Contents(String);
 
@@ -90,6 +95,8 @@ pub struct SourceRead {
 pub fn walk(root: &Root) -> Vec<SourceRead> {
     WalkBuilder::new(root.as_path())
         .require_git(false)
+        .hidden(false)
+        .filter_entry(|entry| !SKIPPED.iter().any(|skipped| entry.file_name() == skipped.0))
         .build()
         .flatten()
         .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))

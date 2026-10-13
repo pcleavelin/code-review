@@ -24,6 +24,10 @@
 15. Review requests (`prs --requested`, the Inbox's requested filter) have met only the offline fake
     forge and recorded answers: GitHub's search, GitLab's reviewer list and Forgejo's issues search
     have not been asked with a live login. Ask each once, logged in.
+16. Picking a file in Changes scrolls its header to the top only as exactly as the heights of the
+    thread boxes above it are guessed: a box that was never drawn has its height guessed from its
+    lines, and the header lands that far off (8 px in the `stacked` scenario, notes.md below
+    src/lib.rs's thread 300). Trigger: a jump that hides part of the header.
 
 ## Inherited from codemap
 

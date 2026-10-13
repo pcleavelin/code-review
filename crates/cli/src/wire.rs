@@ -5,9 +5,9 @@ use std::path::Path;
 
 use clap::{Args, CommandFactory, Parser};
 use domain::{
-    Block, ChangeKind, Conversation, Decision, Depth, Draft, FileChange, ForgeHost, Index, Line,
-    LineKind, Location, Mark, PrNumber, Program, Progress, Review, Seen, Side, SourceFile,
-    SourceLine, Span, Standing, Symbol, SymbolId, Thread, ThreadState, WebLink,
+    Block, Card, ChangeKind, Conversation, Decision, Depth, Draft, FileChange, ForgeHost, Index,
+    JiraSite, Line, LineKind, Location, Mark, PrNumber, Program, Progress, Review, Seen, Side,
+    SourceFile, SourceLine, Span, Standing, Symbol, SymbolId, Thread, ThreadState, WebLink,
 };
 use session::{
     DeviceAuthorization, Entry, Forgotten, Opened, Pinned, PullAddress, RepoName, RequestedFrom,
@@ -34,11 +34,11 @@ pub(crate) enum Command {
     #[command(about = "<repository>                     unpin a repository; its reviews stay")]
     Unpin(RepoArguments),
     #[command(
-        about = "<host or repository>             log in to the forge: a code to enter in the browser (GitHub, GitLab) or a pasted token (Forgejo), kept in the system keychain"
+        about = "<host or repository>             log in to the forge: a code to enter in the browser (GitHub, GitLab) or a pasted token (Forgejo, Jira), kept in the system keychain"
     )]
     Login(LoginArguments),
     #[command(
-        about = "<host or repository>             forget the forge's token kept in the system keychain"
+        about = "<host or repository>             forget the forge's or Jira's token kept in the system keychain"
     )]
     Logout(LoginArguments),
     #[command(
@@ -51,6 +51,10 @@ pub(crate) enum Command {
     Open(PrArguments),
     #[command(about = "<pr>                             the description and every comment thread")]
     Discussion(PrArguments),
+    #[command(
+        about = "<pr>                             the Jira card whose key (PROJ-123) the title or the head branch names; needs `jira <host>` in the forges file and `review login <host>`"
+    )]
+    Card(PrArguments),
     #[command(
         about = "<pr>                             changed files, each seen, unseen, or changed since it was seen"
     )]
@@ -75,6 +79,8 @@ pub(crate) enum Command {
     Drafts(PrArguments),
     #[command(about = "<pr> <id>                        remove a draft comment")]
     Uncomment(UncommentArguments),
+    #[command(about = "<pr> <id> <text>                 replace the text of a draft comment")]
+    Edit(EditArguments),
     #[command(
         about = "<pr> [summary] [--approve|--request-changes]  send the drafts to the forge as one review"
     )]
@@ -241,6 +247,14 @@ pub(crate) struct UncommentArguments {
     #[arg(value_parser = parse_pr)]
     pub(crate) pr: PullAddress,
     pub(crate) id: u32,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct EditArguments {
+    #[arg(value_parser = parse_pr)]
+    pub(crate) pr: PullAddress,
+    pub(crate) id: u32,
+    pub(crate) text: String,
 }
 
 #[derive(Args, Debug)]
@@ -448,6 +462,62 @@ pub(crate) fn login_paste(output: &mut Output, site: &ForgeHost, page: Option<&W
         "{} on {site} has no device login: make an access token{made} that may read and write repositories and issues, paste it here and press enter",
         site.kind()
     );
+}
+
+pub(crate) fn jira_paste(output: &mut Output, site: &JiraSite) {
+    write_line!(
+        output,
+        "Jira on {site}: paste your email and an API token as email:token (Jira Cloud, made at https://id.atlassian.com/manage-profile/security/api-tokens) or a personal access token (Jira Data Center), then press enter"
+    );
+}
+
+pub(crate) fn jira_logged_in(output: &mut Output, site: &JiraSite) {
+    write_line!(
+        output,
+        "logged in to {site}; the token is in the system keychain"
+    );
+}
+
+pub(crate) fn jira_logged_out(output: &mut Output, site: &JiraSite, forgotten: Forgotten) {
+    match forgotten {
+        Forgotten::Removed => write_line!(
+            output,
+            "logged out of {site}; its token is gone from the keychain"
+        ),
+        Forgotten::Absent => write_line!(output, "the keychain holds no token for {site}"),
+    }
+}
+
+pub(crate) fn card(output: &mut Output, card: &Card) {
+    write_line!(output, "{}  {}", card.key, card.summary);
+    let assignee = card
+        .assignee
+        .as_ref()
+        .map_or_else(|| "unassigned".to_owned(), ToString::to_string);
+    write_line!(output, "{}  {}  {assignee}", card.kind, card.status);
+    if let Some(link) = &card.link {
+        write_line!(output, "{link}");
+    }
+    if !card.description.as_str().is_empty() {
+        write_line!(output, "");
+        for line in card.description.as_str().lines() {
+            write_line!(output, "  {line}");
+        }
+    }
+}
+
+pub(crate) fn no_card(output: &mut Output, sites: usize) {
+    if sites == 0 {
+        write_line!(
+            output,
+            "no Jira site: add a line `jira <host>` (e.g. `jira acme.atlassian.net`) to the forges file"
+        );
+    } else {
+        write_line!(
+            output,
+            "neither the title nor the head branch names a Jira card (a key like PROJ-123)"
+        );
+    }
 }
 
 pub(crate) fn logged_in(output: &mut Output, site: &ForgeHost) {
@@ -782,6 +852,10 @@ impl fmt::Display for Failure {
             Self::NoToken(site) => write!(
                 formatter,
                 "nothing that looks like a token was pasted for {site}: paste the token alone on one line"
+            ),
+            Self::NoJiraToken(site) => write!(
+                formatter,
+                "nothing that looks like a token was pasted for {site}: paste email:api-token (Jira Cloud) or a personal access token alone on one line"
             ),
         }
     }

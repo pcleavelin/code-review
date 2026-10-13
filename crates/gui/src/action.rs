@@ -3,6 +3,7 @@ use platform::ClipboardRequest;
 use ui::{Count, Id, Label, Point, Px, Typed};
 
 use crate::app::App;
+use crate::columns::GridAct;
 use crate::element_tip::Pressing;
 use crate::field::{AfterSubmit, Edit, FieldAct, FieldText, Which};
 use crate::ids;
@@ -56,6 +57,7 @@ pub(crate) enum Action {
     Settings(SettingsAct),
     Review(ReviewAct),
     Login(LoginAct),
+    Grid(GridAct),
 }
 
 impl App {
@@ -81,6 +83,10 @@ impl App {
             Action::Forward => model.go_at_frame_end(Going::Forward),
             Action::Scroll(id, offset) => model.scrolls.set(id, offset),
             Action::ScrollAcross(id, offset) => model.across.set(id, offset),
+            Action::Grid(act) => {
+                let cell = model.metrics.cell.width;
+                model.inbox_grid.act(act, cell);
+            }
             Action::ScrolledToLine(ticket) => model.scrolled_to_line(ticket),
             Action::ConsoleScrolled => {
                 model.console_bottom = Count::new(model.console_bottom.get().saturating_sub(1));
@@ -222,7 +228,8 @@ impl App {
             | Which::Summary
             | Which::Inbox
             | Which::Pin
-            | Which::Token => AfterSubmit::Keep,
+            | Which::Token
+            | Which::Column(_) => AfterSubmit::Keep,
             Which::Command | Which::ViewSearch => AfterSubmit::Clear,
         };
         let escaped = which == Which::Draft
@@ -251,7 +258,11 @@ impl App {
             Which::Draft => self.review(ReviewAct::SaveDraft),
             Which::Pin => self.review(ReviewAct::Pin),
             Which::Token => self.login(LoginAct::Save),
-            Which::SymbolFilter | Which::Palette | Which::Summary | Which::Inbox => {}
+            Which::SymbolFilter
+            | Which::Palette
+            | Which::Summary
+            | Which::Inbox
+            | Which::Column(_) => {}
         }
     }
 
@@ -347,6 +358,12 @@ impl App {
                     );
                 }
                 self.carry_login(started, Browser::Opened);
+            }
+            Ok(cli::Touched::JiraLoginStarted(site)) => {
+                self.model.console.append(
+                    "in this window, paste the token in the Inbox's token field instead; the Console keeps every line typed in it\n",
+                );
+                self.login(LoginAct::StartJira(site));
             }
             Ok(cli::Touched::Nothing | cli::Touched::Review(_)) => {}
         }

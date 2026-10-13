@@ -6,8 +6,9 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-use domain::{CommitId, ForgeHost, Host, PrNumber, Refusal, RelativePath};
+use domain::{CommitId, ForgeHost, Host, JiraSite, PrNumber, Refusal, RelativePath};
 use io_forge::{ForgeError, MissingClient};
+use io_jira::JiraError;
 use io_keychain::KeychainError;
 use io_review::ReviewError;
 use io_vcs::VcsError;
@@ -62,6 +63,8 @@ pub enum SessionError {
         cause: ForgeError,
     },
     NoSite(LoginTarget),
+    Jira(JiraError),
+    JiraLoggedOut(JiraSite),
 }
 
 struct Listed<'names>(&'names [RepoName]);
@@ -148,6 +151,11 @@ impl fmt::Display for SessionError {
                 formatter,
                 "{cause}: the forge refused the token the keychain holds for {site}; log in again with 'review login {site}'"
             ),
+            Self::Jira(error) => write!(formatter, "{error}"),
+            Self::JiraLoggedOut(site) => write!(
+                formatter,
+                "not logged in to {site}: `review login {site}` and paste email:api-token (Jira Cloud) or a personal access token"
+            ),
             Self::NoSite(target) => write!(
                 formatter,
                 "{} is neither a pinned repository nor a forge's host",
@@ -164,6 +172,12 @@ impl SessionError {
 
     pub const fn keychain_timed_out(&self) -> bool {
         matches!(self, Self::Keychain(KeychainError::TimedOut { .. }))
+    }
+}
+
+impl From<JiraError> for SessionError {
+    fn from(error: JiraError) -> Self {
+        Self::Jira(error)
     }
 }
 

@@ -2,11 +2,12 @@ use std::fmt::{self, Write as _};
 use std::io::{self, Write as _};
 use std::iter;
 
-use domain::{Block, Conversation};
+use domain::{Block, Card, Conversation};
 use platform::ScriptLine;
 use session::Entry;
 use ui::{Axis, Id, Px, Ui};
 
+use crate::diffs::Loading;
 use crate::field::{Fields, Shown, Which};
 use crate::ids;
 use crate::login::{Held, Logins, Stage};
@@ -58,6 +59,28 @@ pub(crate) struct Context<'dump> {
 
 pub(crate) trait Dump {
     fn dump(&self, context: &Context<'_>, lines: &mut DumpLines);
+}
+
+struct CardShown<'card>(&'card Loading<Option<Card>>);
+
+impl fmt::Display for CardShown<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Loading::Asking => formatter.write_str("asking"),
+            Loading::Failed(why) => write!(formatter, "failed {}", Quoted(why.as_str())),
+            Loading::Got(None) => formatter.write_str("none"),
+            Loading::Got(Some(card)) => write!(
+                formatter,
+                "{} {} status={} {:?} kind={} {:?}",
+                card.key,
+                Quoted(card.summary.as_str()),
+                Quoted(card.status.as_str()),
+                card.stage,
+                Quoted(card.kind.as_str()),
+                card.family
+            ),
+        }
+    }
 }
 
 struct Optional<T>(Option<T>);
@@ -157,6 +180,22 @@ fn dump_listing(review: &Reviewing, lines: &mut DumpLines) {
     }
 }
 
+fn dump_card(review: &Reviewing, card: &Loading<Option<Card>>, lines: &mut DumpLines) {
+    lines.line(format_args!(
+        "card {} collapse={:?}",
+        CardShown(card),
+        review.card_collapse
+    ));
+    for (link, state) in review.pictures.loaded() {
+        let state = match state {
+            Loading::Asking => "asking".to_owned(),
+            Loading::Got(_) => "got".to_owned(),
+            Loading::Failed(why) => format!("failed {}", Quoted(why.as_str())),
+        };
+        lines.line(format_args!("picture {} {state}", link.as_str()));
+    }
+}
+
 fn dump_requests(requests: &Requests, entries: &[Entry], lines: &mut DumpLines) {
     let pulls: Vec<String> = requests
         .pulls
@@ -246,6 +285,7 @@ impl Dump for Reviewing {
         };
         lines.line(format_args!("talk {talk}"));
         lines.line(format_args!("rights {:?}", open.rights));
+        dump_card(self, &open.card, lines);
         lines.line(format_args!(
             "diffs layout={:?} commit={}",
             self.diffs.layout,
@@ -320,6 +360,25 @@ impl Dump for Logins {
             "login sites=[{}] stage={stage}",
             sites.join(" ")
         ));
+        if !self.jira.is_empty() || self.jira_paste.is_some() {
+            let jira: Vec<String> = self
+                .jira
+                .iter()
+                .map(|(site, held)| {
+                    let held = match held {
+                        Held::In => "in".to_owned(),
+                        Held::Out => "out".to_owned(),
+                        Held::TimedOut(why) => format!("timed-out={}", Quoted(why.as_str())),
+                    };
+                    format!("{site}={held}")
+                })
+                .collect();
+            lines.line(format_args!(
+                "jira sites=[{}] pasting={}",
+                jira.join(" "),
+                Optional(self.jira_paste.as_ref())
+            ));
+        }
     }
 }
 
@@ -359,6 +418,10 @@ impl Dump for Scrolls {
         let table = context.model.across.get(ids::TABLE.id());
         if table > Px::ZERO {
             lines.line(format_args!("across table off={table}"));
+        }
+        let kept = context.model.across.get(ids::LINES.id());
+        if kept > Px::ZERO {
+            lines.line(format_args!("across lines kept={kept}"));
         }
     }
 }

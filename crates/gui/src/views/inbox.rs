@@ -1,8 +1,13 @@
-use domain::Standing;
+use std::cmp::Ordering;
+
+use domain::{JiraSite, Progress, Standing};
+use platform::Cursor;
 use session::{Entry, Pinned, RequestedFrom};
-use ui::{Count, Label, Run};
+use strum::VariantArray;
+use ui::{Button, Count, Label, Px, Run};
 
 use crate::action::Action;
+use crate::columns::{GridAct, InboxColumn, Order, Resizing, Sorting};
 use crate::field::Which;
 use crate::ids;
 use crate::login::{Held, Login, LoginAct, Stage};
@@ -10,10 +15,10 @@ use crate::model::Model;
 use crate::review::{Broken, Cure, Inbox, Pinning, Requests, ReviewAct};
 use crate::text::Needle;
 use crate::theme::{
-    ACCENT, FORGE_STATE, GREEN, INBOX_FIELD, ORANGE, PIN_FIELD, RED, SELECTED, TEXT, TOKEN_FIELD,
-    WEAK,
+    ACCENT, COLUMN_EDGE, Cells, FORGE_STATE, GREEN, INBOX_FIELD, ORANGE, PIN_FIELD, RED, SELECTED,
+    TEXT, TOKEN_FIELD, WEAK,
 };
-use crate::widgets::{Chosen, Container, Frame, Padding, Scroller, TreeRow};
+use crate::widgets::{Chosen, Container, Frame, Padding, Scroller};
 
 const STANDINGS: [Standing; 4] = [
     Standing::New,
@@ -21,6 +26,12 @@ const STANDINGS: [Standing; 4] = [
     Standing::Reviewing,
     Standing::Reviewed,
 ];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoginFailed {
+    Yes,
+    No,
+}
 
 pub(super) fn standing_word(standing: Standing) -> Label {
     Label::new(match standing {
@@ -184,32 +195,47 @@ fn forges(model: &Model, frame: &mut Frame<'_>) {
         strip(model, frame, login);
         return;
     }
+    if let Some(site) = &logins.jira_paste {
+        jira_strip(model, frame, site);
+        return;
+    }
     let sites = logins.sites(&model.review.desk);
-    if sites.is_empty() {
+    if sites.is_empty() && logins.jira.is_empty() {
         return;
     }
     frame.start(Container::ToolbarSmall);
     frame.label("forges", WEAK);
+    for (site, held) in &logins.jira {
+        let host = Label::new(site.to_string());
+        site_state(
+            frame,
+            &Label::new(format!("Jira {site}")),
+            Some(held),
+            LoginFailed::No,
+        );
+        if held == &Held::In {
+            let logout = ids::LOGOUT.with(&host);
+            if frame.small_button("log out", logout).clicked() {
+                frame.push(Action::Login(LoginAct::LogoutJira(site.clone())));
+            }
+            frame.attach_tip(logout);
+        } else {
+            let login = ids::LOGIN.with(&host);
+            if frame.small_button("log in", login).clicked() {
+                frame.push(Action::Login(LoginAct::StartJira(site.clone())));
+            }
+            frame.attach_tip(login);
+        }
+    }
     for site in sites {
         let host = Label::new(site.to_string());
         let held = logins.held.get(&site);
-        let (state, color) = match (logins.failed.contains_key(&site), held) {
-            (true, _) => ("login failed", RED),
-            (false, Some(Held::In)) => ("logged in", GREEN),
-            (false, Some(Held::Out)) => ("not logged in", WEAK),
-            (false, Some(Held::TimedOut(_))) => ("not answering", ORANGE),
-            (false, None) => ("checking...", WEAK),
+        let failed = if logins.failed.contains_key(&site) {
+            LoginFailed::Yes
+        } else {
+            LoginFailed::No
         };
-        frame.label_runs(vec![
-            Run::new(host.as_str(), TEXT),
-            Run::new(
-                format!(
-                    " {state:<width$}",
-                    width = usize::try_from(FORGE_STATE.get()).unwrap_or(0)
-                ),
-                color,
-            ),
-        ]);
+        site_state(frame, &host, held, failed);
         if held == Some(&Held::In) {
             let logout = ids::LOGOUT.with(&host);
             if frame.small_button("log out", logout).clicked() {
@@ -224,6 +250,53 @@ fn forges(model: &Model, frame: &mut Frame<'_>) {
             frame.attach_tip(login);
         }
     }
+    frame.finish();
+}
+
+fn site_state(frame: &mut Frame<'_>, name: &Label, held: Option<&Held>, failed: LoginFailed) {
+    let (state, color) = match (failed, held) {
+        (LoginFailed::Yes, _) => ("login failed", RED),
+        (LoginFailed::No, Some(Held::In)) => ("logged in", GREEN),
+        (LoginFailed::No, Some(Held::Out)) => ("not logged in", WEAK),
+        (LoginFailed::No, Some(Held::TimedOut(_))) => ("not answering", ORANGE),
+        (LoginFailed::No, None) => ("checking...", WEAK),
+    };
+    frame.label_runs(vec![
+        Run::new(name.as_str(), TEXT),
+        Run::new(
+            format!(
+                " {state:<width$}",
+                width = usize::try_from(FORGE_STATE.get()).unwrap_or(0)
+            ),
+            color,
+        ),
+    ]);
+}
+
+fn jira_strip(model: &Model, frame: &mut Frame<'_>, site: &JiraSite) {
+    frame.start(Container::ToolbarSmall);
+    frame.label_runs(vec![
+        Run::new(format!("Jira on {site}"), TEXT),
+        Run::new(": paste email:api-token", WEAK),
+    ]);
+    open_page(frame);
+    frame.field(
+        &model.fields,
+        Which::Token,
+        &Label::new("you@example.com:api-token"),
+        TOKEN_FIELD,
+    );
+    let save = ids::LOGIN_SAVE.target();
+    if frame.small_button("save", save).clicked() {
+        frame.push(Action::Login(LoginAct::Save));
+    }
+    frame.attach_tip(save);
+    frame.grow();
+    let cancel = ids::LOGIN_CANCEL.target();
+    if frame.small_button("cancel", cancel).clicked() {
+        frame.push(Action::Login(LoginAct::Cancel));
+    }
+    frame.attach_tip(cancel);
     frame.finish();
 }
 
@@ -287,6 +360,141 @@ fn open_page(frame: &mut Frame<'_>) {
     frame.attach_tip(open);
 }
 
+fn cell_runs(model: &Model, column: InboxColumn, entry: &Entry) -> Vec<Run> {
+    let pull = &entry.pull;
+    match column {
+        InboxColumn::Standing if model.review.opening == Some(pull.number) => {
+            vec![Run::new("opening", ORANGE)]
+        }
+        InboxColumn::Standing => vec![Run::new(
+            standing_word(entry.standing),
+            standing_color(entry.standing),
+        )],
+        InboxColumn::Pull => vec![Run::new(format!("{}#{}", entry.repo, pull.number), ACCENT)],
+        InboxColumn::Title => vec![Run::new(pull.title.as_str(), TEXT)],
+        InboxColumn::Author => vec![Run::new(pull.author.as_str(), TEXT)],
+        InboxColumn::Branch => vec![Run::new(format!("{} <- {}", pull.base, pull.head), WEAK)],
+        InboxColumn::Seen => {
+            let mut runs = Vec::new();
+            if let Some(progress) = entry.progress {
+                runs.push(Run::new(
+                    format!("{progress} seen"),
+                    if progress.done() { GREEN } else { WEAK },
+                ));
+            }
+            if !entry.drafts.is_empty() {
+                runs.push(Run::new(format!("  {} drafts", entry.drafts.len()), ORANGE));
+            }
+            runs
+        }
+        InboxColumn::Updated => vec![Run::new(pull.updated.to_string(), WEAK)],
+    }
+}
+
+fn cell_text(model: &Model, column: InboxColumn, entry: &Entry) -> Label {
+    Label::new(
+        cell_runs(model, column, entry)
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>(),
+    )
+}
+
+fn standing_rank(standing: Standing) -> Count {
+    Count::new(
+        STANDINGS
+            .iter()
+            .position(|known| *known == standing)
+            .unwrap_or(STANDINGS.len()),
+    )
+}
+
+fn ordered(model: &Model, column: InboxColumn, one: &Entry, other: &Entry) -> Ordering {
+    match column {
+        InboxColumn::Standing => standing_rank(one.standing).cmp(&standing_rank(other.standing)),
+        InboxColumn::Pull => (&one.repo, one.pull.number).cmp(&(&other.repo, other.pull.number)),
+        InboxColumn::Seen => (one.progress.map(Progress::seen), one.drafts.len())
+            .cmp(&(other.progress.map(Progress::seen), other.drafts.len())),
+        InboxColumn::Updated => one
+            .pull
+            .updated
+            .to_string()
+            .cmp(&other.pull.updated.to_string()),
+        InboxColumn::Title | InboxColumn::Author | InboxColumn::Branch => {
+            cell_text(model, column, one)
+                .as_str()
+                .to_lowercase()
+                .cmp(&cell_text(model, column, other).as_str().to_lowercase())
+        }
+    }
+}
+
+fn width(model: &Model, frame: &Frame<'_>, column: InboxColumn) -> Px {
+    frame.cell_width() * Count::new(usize::from(model.inbox_grid.cells(column).get()))
+}
+
+fn header(model: &Model, frame: &mut Frame<'_>) {
+    frame.start(Container::FitRow);
+    let resizing = model.inbox_grid.resizing;
+    let mouse = frame.ui.pointer().mouse.horizontal;
+    for column in InboxColumn::VARIANTS.iter().copied() {
+        let name = column.name();
+        let arrow = match model.inbox_grid.sorting {
+            Some(Sorting {
+                column: sorted,
+                order,
+            }) if sorted == column => match order {
+                Order::Ascending => " \u{25b2}",
+                Order::Descending => " \u{25bc}",
+            },
+            Some(_) | None => "",
+        };
+        let target = ids::COLUMN_HEADER.with(&name);
+        let runs = vec![Run::new(format!("{}{arrow}", name.as_str()), WEAK)];
+        if frame
+            .header_cell(runs, width(model, frame, column), target)
+            .clicked()
+        {
+            frame.push(Action::Grid(GridAct::Sort(column)));
+        }
+        frame.attach_tip(target);
+        let edge = ids::COLUMN_EDGE.with(&name);
+        let held = frame.column_edge(COLUMN_EDGE, Some(edge));
+        if held.down() || held.hovered() {
+            frame.cursor = Cursor::ColumnResize;
+        }
+        match resizing {
+            Some(Resizing {
+                column: grabbed, ..
+            }) if grabbed == column => {
+                if frame.ui.pointer().down.contains(Button::Left) {
+                    frame.push(Action::Grid(GridAct::Drag(mouse)));
+                    frame.cursor = Cursor::ColumnResize;
+                } else {
+                    frame.push(Action::Grid(GridAct::Drop));
+                }
+            }
+            None if held.down() => frame.push(Action::Grid(GridAct::Grab(column, mouse))),
+            Some(_) | None => {}
+        }
+        frame.attach_tip(edge);
+    }
+    frame.finish();
+    frame.start(Container::FitRow);
+    for column in InboxColumn::VARIANTS.iter().copied() {
+        let cells = Cells::of_count(usize::from(model.inbox_grid.cells(column).get()));
+        frame.field_named(
+            &model.fields,
+            Which::Column(column),
+            Which::Column(column).id(),
+            &Label::new("filter"),
+            cells,
+        );
+        frame.column_edge(COLUMN_EDGE, None);
+    }
+    frame.finish();
+}
+
 fn row(model: &Model, frame: &mut Frame<'_>, position: Count, entry: &Entry) {
     let pull = &entry.pull;
     let open = model
@@ -294,46 +502,29 @@ fn row(model: &Model, frame: &mut Frame<'_>, position: Count, entry: &Entry) {
         .open
         .as_ref()
         .is_some_and(|open| open.repo.name() == &entry.repo && open.pull.number == pull.number);
-    let mut badges = Vec::new();
-    if model.review.opening == Some(pull.number) {
-        badges.push(Run::new("opening", ORANGE));
+    let row = frame.open_grid_row(ids::PULL_ROW.nth(position), open.then_some(SELECTED));
+    for column in InboxColumn::VARIANTS.iter().copied() {
+        frame.cell(cell_runs(model, column, entry), width(model, frame, column));
+        frame.column_edge(COLUMN_EDGE, None);
     }
-    if let Some(progress) = entry.progress {
-        badges.push(Run::new(
-            format!("{progress} seen"),
-            if progress.done() { GREEN } else { WEAK },
-        ));
-    }
-    if !entry.drafts.is_empty() {
-        badges.push(Run::new(format!("{} drafts", entry.drafts.len()), ORANGE));
-    }
-    badges.push(Run::new(pull.updated.day(), WEAK));
-    let runs = vec![
-        Run::new(
-            format!("{:<9} ", standing_word(entry.standing).as_str()),
-            standing_color(entry.standing),
-        ),
-        Run::new(format!("{}#{} ", entry.repo, pull.number), ACCENT),
-        Run::new(pull.title.as_str(), TEXT),
-        Run::new(
-            format!("  {}  {} <- {}", pull.author, pull.base, pull.head),
-            WEAK,
-        ),
-    ];
-    let tree = TreeRow {
-        level: Count::ZERO,
-        runs,
-        badges,
-        marked: open.then_some(SELECTED),
-        action: None,
-    };
-    let clicks = frame.tree_row(tree, ids::PULL_ROW.nth(position));
-    if clicks.row.clicked() {
+    frame.finish();
+    if row.clicked() {
         frame.push(Action::Review(ReviewAct::OpenPull(
             entry.repo.clone(),
             pull.number,
         )));
     }
+}
+
+fn filtered(model: &Model, entry: &Entry) -> bool {
+    InboxColumn::VARIANTS.iter().copied().all(|column| {
+        let filter = model.fields.get(Which::Column(column)).text();
+        let cell = cell_text(model, column, entry);
+        filter
+            .as_str()
+            .split_whitespace()
+            .all(|word| Needle::new(word).found_in(cell.as_str()))
+    })
 }
 
 pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
@@ -398,7 +589,7 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
             Padding::Step,
         );
     }
-    let shown: Vec<(usize, &Entry)> = entries
+    let mut shown: Vec<(usize, &Entry)> = entries
         .iter()
         .enumerate()
         .filter(|(_, entry)| {
@@ -408,13 +599,29 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
                 .is_none_or(|standing| entry.standing == standing)
                 && (!only_requested || requests.of(entry))
                 && kept(model, entry)
+                && filtered(model, entry)
         })
         .collect();
+    if let Some(sorting) = model.inbox_grid.sorting {
+        shown.sort_by(|(_, one), (_, other)| {
+            let order = ordered(model, sorting.column, one, other);
+            match sorting.order {
+                Order::Ascending => order,
+                Order::Descending => order.reverse(),
+            }
+        });
+    }
+    let across = ids::inbox().with("grid");
+    frame.open_across(model, across);
+    if !entries.is_empty() {
+        header(model, frame);
+    }
     if shown.is_empty() && !entries.is_empty() {
         frame.note("nothing matches the filter", WEAK, Padding::Step);
     }
     for (position, entry) in shown {
         row(model, frame, Count::new(position), entry);
     }
+    frame.finish();
     frame.finish();
 }

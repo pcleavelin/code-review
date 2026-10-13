@@ -1,0 +1,4 @@
+pub struct HttpStatus(u16);
+pub enum JiraError { Process(ProcessError), Unreachable(JiraSite, Captured), LoggedOut(JiraSite), NoCard(CardKey), Http(JiraSite, HttpStatus), Malformed(JiraSite), }
+pub fn card(site: &JiraSite, token: &Token, key: &CardKey) -> Result<Card, JiraError>
+pub fn picture_source(token: &Token, link: &WebLink) -> PictureSource

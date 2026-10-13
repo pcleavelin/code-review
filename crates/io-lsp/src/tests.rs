@@ -276,7 +276,7 @@ fn outlines_keep_the_server_shape() {
 fn rust_analyzer_answers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut session = LspSession::start(Language::Rust, &root).expect("start");
-    session.wait_ready(Duration::from_secs(120));
+    session.wait_ready(Duration::from_mins(2));
     let outlines = session.outlines(&[RelativePath::new("crates/domain/src/review.rs")]);
     let Some(Reply::Given(first)) = outlines.first() else {
         panic!("no answer for crates/domain/src/review.rs");

@@ -5,6 +5,7 @@ pub(crate) const HEADER: &str = "review layout 1";
 const RIGHT: &str = "right";
 const DOWN: &str = "down";
 const PANEL: &str = "panel";
+const COLUMN: &str = "column";
 const SHOWN: char = '*';
 const INDENT: &str = "  ";
 
@@ -33,6 +34,18 @@ pub(crate) enum WireTree {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireColumn {
+    pub(crate) name: String,
+    pub(crate) cells: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireLayout {
+    pub(crate) tree: WireTree,
+    pub(crate) columns: Vec<WireColumn>,
+}
+
 struct Row {
     depth: usize,
     words: Vec<String>,
@@ -47,7 +60,7 @@ fn row(line: &str) -> Option<Row> {
     })
 }
 
-pub(crate) fn parse(text: &str) -> Option<WireTree> {
+pub(crate) fn parse(text: &str) -> Option<WireLayout> {
     let mut lines = text.lines();
     if lines.next()? != HEADER {
         return None;
@@ -59,7 +72,17 @@ pub(crate) fn parse(text: &str) -> Option<WireTree> {
         .into_iter()
         .peekable();
     let tree = tree(&mut rows, 0)?;
-    rows.next().is_none().then_some(tree)
+    let columns = rows.map(column).collect::<Option<Vec<WireColumn>>>()?;
+    Some(WireLayout { tree, columns })
+}
+
+fn column(row: Row) -> Option<WireColumn> {
+    let [head, name, cells] = <[String; 3]>::try_from(row.words).ok()?;
+    (row.depth == 0 && head == COLUMN).then_some(())?;
+    Some(WireColumn {
+        name,
+        cells: cells.parse().ok()?,
+    })
 }
 
 fn tree(rows: &mut Peekable<IntoIter<Row>>, depth: usize) -> Option<WireTree> {
@@ -102,9 +125,15 @@ fn tree(rows: &mut Peekable<IntoIter<Row>>, depth: usize) -> Option<WireTree> {
     })
 }
 
-pub(crate) fn print(tree: &WireTree) -> String {
+pub(crate) fn print(layout: &WireLayout) -> String {
     let mut out = format!("{HEADER}\n");
-    print_tree(tree, 0, &mut out);
+    print_tree(&layout.tree, 0, &mut out);
+    out.extend(
+        layout
+            .columns
+            .iter()
+            .map(|column| format!("{COLUMN} {} {}\n", column.name, column.cells)),
+    );
     out
 }
 
@@ -242,6 +271,7 @@ pub(crate) fn print_pins(pins: &WirePins) -> String {
 
 const FORGES_HEADER: &str = "review forges 1";
 const CLIENT: &str = "client";
+const JIRA: &str = "jira";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WireApp {
@@ -252,6 +282,16 @@ pub(crate) struct WireApp {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WireForges {
     pub(crate) apps: Vec<WireApp>,
+    pub(crate) jira: Vec<String>,
+}
+
+fn jira(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace();
+    if words.next()? != JIRA {
+        return None;
+    }
+    let host = words.next()?.to_owned();
+    words.next().is_none().then_some(host)
 }
 
 fn app(line: &str) -> Option<WireApp> {
@@ -271,7 +311,9 @@ pub(crate) fn parse_forges(text: &str) -> Option<WireForges> {
     if lines.next()?.trim() != FORGES_HEADER {
         return None;
     }
+    let lines: Vec<&str> = lines.collect();
     Some(WireForges {
-        apps: lines.filter_map(app).collect(),
+        apps: lines.iter().copied().filter_map(app).collect(),
+        jira: lines.iter().copied().filter_map(jira).collect(),
     })
 }

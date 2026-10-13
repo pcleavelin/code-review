@@ -141,7 +141,7 @@ const EXPECTS: [Allowance; 31] = [
     },
 ];
 
-const DEPENDENCIES: [Allowed; 22] = [
+const DEPENDENCIES: [Allowed; 23] = [
     Allowed {
         package: Literal::new("xtask"),
         dependencies: &[
@@ -179,6 +179,14 @@ const DEPENDENCIES: [Allowed; 22] = [
             Literal::new("domain"),
             Literal::new("io-process"),
             Literal::new("io-vcs"),
+            Literal::new("serde_json"),
+        ],
+    },
+    Allowed {
+        package: Literal::new("io-jira"),
+        dependencies: &[
+            Literal::new("domain"),
+            Literal::new("io-process"),
             Literal::new("serde_json"),
         ],
     },
@@ -264,6 +272,7 @@ const DEPENDENCIES: [Allowed; 22] = [
             Literal::new("io-process"),
             Literal::new("io-vcs"),
             Literal::new("io-forge"),
+            Literal::new("io-jira"),
             Literal::new("io-review"),
         ],
     },

@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use domain::{LayoutTree, OAuthApp, Root, Settings};
+use domain::{JiraSite, Layout, OAuthApp, Root, Settings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reach {
@@ -107,12 +107,12 @@ impl LayoutStore {
         &self.path
     }
 
-    pub fn load(&self) -> Option<LayoutTree> {
+    pub fn load(&self) -> Option<Layout> {
         let text = fs::read_to_string(&self.path).ok()?;
         convert::layout(&wire::parse(&text)?)
     }
 
-    pub fn save(&self, layout: &LayoutTree) -> io::Result<()> {
+    pub fn save(&self, layout: &Layout) -> io::Result<()> {
         save_text(&self.path, wire::print(&convert::wire(layout)))
     }
 }
@@ -203,11 +203,21 @@ impl ForgesStore {
     }
 
     pub fn load(&self) -> Vec<OAuthApp> {
+        self.read()
+            .map(|forges| convert::apps(&forges))
+            .unwrap_or_default()
+    }
+
+    pub fn jira_sites(&self) -> Vec<JiraSite> {
+        self.read()
+            .map(|forges| convert::jira_sites(&forges))
+            .unwrap_or_default()
+    }
+
+    fn read(&self) -> Option<wire::WireForges> {
         fs::read_to_string(&self.path)
             .ok()
             .and_then(|text| wire::parse_forges(&text))
-            .map(|forges| convert::apps(&forges))
-            .unwrap_or_default()
     }
 }
 

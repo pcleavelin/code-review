@@ -1,31 +1,35 @@
 mod code;
 
+use std::rc::Rc;
+
 use platform::Cursor;
 use ui::{
-    Align, Button, Canvas, Color, Count, Draw, FontSize, Icon, Id, Interaction, Kind, Label,
-    Layout, Point, Px, Rect, Run, Scrollbar, Sides, Size, Style, Text, Ui, Wrap,
+    Align, Button, Canvas, Color, Count, Draw, FontSize, Grid, Icon, Id, Interaction, Kind, Label,
+    Layout, Point, Px, Rect, Run, ScrollAxes, Scrollbar, Sides, Size, Style, Text, Ui, Wrap,
 };
 
 use crate::action::Action;
 use crate::element_tip::{AttachedTip, ElementTip};
 use crate::field::{
-    Attention, Field, FieldAct, FieldShape, FieldWindow, Piece, Pointing, Shown, Tint, Which,
+    Attention, CaretAt, Field, FieldAct, FieldShape, FieldWindow, Piece, Pointing, Shown, Tint,
+    Which,
 };
 use crate::grid::Grids;
 use crate::ids::{Control, Target};
 use crate::keys::Walk;
-use crate::model::Metrics;
+use crate::model::{Metrics, Model};
 use crate::panels::Direction;
 use crate::peek::Tip;
 use crate::status::Status;
 use crate::theme::{
-    self, ACCENT, BACKGROUND, BADGE, BADGE_PADDING, BAR_PADDING, BORDER, BUTTON_PADDING,
-    COMMENT_DRAFT_FILL, COMMENT_PADDING, COMMENT_SAVED_FILL, Cells, DROP_BAND, FAINT, FIELD,
-    FIELD_CARET_ROOM, FIELD_PADDING, FOLD_FILL, GAP, HOVER, INDENT_EXTRA, LABEL_PADDING,
-    NAV_BUTTON, NAV_BUTTON_EXTRA, NOTE_ROWS_LEAST, NOTE_ROWS_MOST, ORANGE, PALETTE_TAG, PANEL,
-    PANEL_PADDING, REMOVED_FILL, RESOLVED_FILL, ROW_PADDING, SELECTED, SMALL_BUTTON_EXTRA,
-    SMALL_BUTTON_PADDING, SMALL_GAP, STATUS_GAP, STEP_SPACER, TAB_PADDING, TAB_STRIP, TEXT,
-    THREAD_FILL, TIGHT_GAP, TOOLTIP_PADDING, TREE_GUIDE, TREE_LEVEL_WIDTH, WEAK, WIDE_GAP,
+    self, ACCENT, BACKGROUND, BADGE, BADGE_PADDING, BAR_PADDING, BORDER, BUTTON_PADDING, CARD_EDGE,
+    CARD_FILL, CARD_STRIPE, COMMENT_DRAFT_FILL, COMMENT_PADDING, COMMENT_SAVED_FILL, Cells,
+    DROP_BAND, FAINT, FIELD, FIELD_CARET_ROOM, FIELD_PADDING, FOLD_FILL, GAP, HOVER, INDENT_EXTRA,
+    LABEL_PADDING, NAV_BUTTON, NAV_BUTTON_EXTRA, NOTE_ROWS_LEAST, NOTE_ROWS_MOST, ORANGE,
+    PALETTE_TAG, PANEL, PANEL_PADDING, REMOVED_FILL, RESOLVED_FILL, ROW_PADDING, SELECTED,
+    SMALL_BUTTON_EXTRA, SMALL_BUTTON_PADDING, SMALL_GAP, STATUS_GAP, STEP_SPACER, TAB_PADDING,
+    TAB_STRIP, TEXT, THREAD_FILL, TIGHT_GAP, TOOLTIP_PADDING, TREE_GUIDE, TREE_LEVEL_WIDTH, WEAK,
+    WIDE_GAP,
 };
 
 use crate::field::Fields;
@@ -33,10 +37,14 @@ use crate::ids;
 pub(crate) use code::{AcrossBar, AcrossScroll, CodeBlock, Coded, Marks, Width};
 
 #[derive(Clone, Copy, Debug)]
+struct Literal(&'static str);
+
+const CARET_GLYPH: Literal = Literal("\u{258f}");
+
+#[derive(Clone, Copy, Debug)]
 struct Spot {
     across: Px,
     first: Count,
-    attention: Attention,
 }
 
 #[derive(Clone, Debug)]
@@ -128,6 +136,7 @@ pub(crate) enum Container {
     Stack,
     StepRow { selected: Chosen },
     FillRow,
+    FitRow,
     Tooltip { at: Point },
     ElementTip { at: Point },
     Picker { at: Point, width: Px },
@@ -135,6 +144,8 @@ pub(crate) enum Container {
     Settings { at: Point, width: Px },
     PanelHeader,
     Comment { look: CommentLook, id: Id },
+    Card(Id),
+    CardBody,
     CommentRow(Id),
     Removed(Id),
     Folded,
@@ -179,12 +190,9 @@ fn masked(which: Which, pieces: Vec<Piece>) -> Vec<Piece> {
         Shown::Clear => pieces,
         Shown::Masked => pieces
             .into_iter()
-            .map(|piece| match piece.tint {
-                Tint::Caret => piece,
-                Tint::Plain | Tint::Selected => Piece {
-                    text: Label::new("*".repeat(piece.text.as_str().chars().count())),
-                    tint: piece.tint,
-                },
+            .map(|piece| Piece {
+                text: Label::new("*".repeat(piece.text.as_str().chars().count())),
+                ..piece
             })
             .collect(),
     }
@@ -292,12 +300,26 @@ impl Container {
                 Style::background(PANEL).border(Sides::TOP.with(Sides::BOTTOM), BORDER),
                 Some(id),
             ),
+            Self::Card(id) => Shape::new(
+                Layout::row().grow_width(),
+                Style::background(CARD_FILL).border(Sides::ALL, CARD_EDGE),
+                Some(id),
+            ),
+            Self::CardBody => Shape::new(
+                Layout::column()
+                    .grow_width()
+                    .padding(COMMENT_PADDING)
+                    .gap(TIGHT_GAP),
+                Style::NONE,
+                None,
+            ),
             Self::Folded => Shape::new(
                 Layout::row().grow_width(),
                 Style::background(FOLD_FILL),
                 None,
             ),
             Self::FillRow => Shape::new(Layout::row().grow_width(), Style::NONE, None),
+            Self::FitRow => Shape::new(Layout::row(), Style::NONE, None),
             Self::Markdown(id) => Shape::new(
                 Layout::column().grow_width().padding(LABEL_PADDING),
                 Style::NONE,
@@ -410,6 +432,10 @@ impl Frame<'_> {
 
     pub(crate) fn text_line(&mut self, runs: Vec<Run>) {
         let size = self.metrics.font;
+        self.sized_line(runs, size);
+    }
+
+    pub(crate) fn sized_line(&mut self, runs: Vec<Run>, size: FontSize) {
         self.ui.leaf(
             text_kind(runs, size, Wrap::None),
             Layout::row(),
@@ -451,8 +477,8 @@ impl Frame<'_> {
     pub(crate) fn title(&mut self, text: impl Into<Label>) {
         let size = theme::title_font(self.metrics.font);
         self.ui.leaf(
-            text_kind(vec![Run::new(text, TEXT)], size, Wrap::None),
-            Layout::row(),
+            text_kind(vec![Run::new(text, TEXT)], size, Wrap::Words),
+            Layout::row().grow_width(),
             Style::NONE,
             None,
         );
@@ -467,6 +493,25 @@ impl Frame<'_> {
             text_kind(vec![Run::new(text, color)], size, Wrap::Words),
             Layout::row().grow_width().padding(padding),
             Style::NONE,
+            None,
+        );
+    }
+
+    pub(crate) fn stripe(&mut self, color: Color) {
+        self.ui.leaf(
+            Kind::None,
+            Layout::row().width(CARD_STRIPE).grow_height(),
+            Style::background(color),
+            None,
+        );
+    }
+
+    pub(crate) fn pill(&mut self, text: impl Into<Label>, color: Color) {
+        let size = self.metrics.font;
+        self.ui.leaf(
+            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            Layout::row().padding(BADGE_PADDING),
+            Style::background(theme::pill_fill(color)).border(Sides::ALL, theme::pill_edge(color)),
             None,
         );
     }
@@ -697,24 +742,132 @@ impl Frame<'_> {
         )
     }
 
-    pub(crate) fn marked_code_line(
-        &mut self,
-        runs: Vec<Run>,
-        target: Target,
-        marked: Option<ui::Color>,
-    ) -> Interaction {
+    pub(crate) fn cell(&mut self, runs: Vec<Run>, width: Px) {
+        let size = self.metrics.font;
+        self.ui.leaf(
+            text_kind(runs, size, Wrap::Clip),
+            Layout::row().width(width).padding(LABEL_PADDING),
+            Style::NONE,
+            None,
+        );
+    }
+
+    pub(crate) fn header_cell(&mut self, runs: Vec<Run>, width: Px, target: Target) -> Interaction {
         let id = target.id();
         let hovered = self.ui.interaction(id).hovered();
         let size = self.metrics.font;
         self.ui.leaf(
             text_kind(runs, size, Wrap::Clip),
-            Layout::row().grow_width(),
+            Layout::row().width(width).padding(LABEL_PADDING),
+            Style {
+                background: hovered.then_some(HOVER),
+                ..Style::NONE
+            }
+            .border(Sides::BOTTOM, BORDER),
+            Some(id),
+        )
+    }
+
+    pub(crate) fn column_edge(&mut self, width: Px, target: Option<Target>) -> Interaction {
+        let id = target.map(Target::id);
+        let lit = id.is_some_and(|id| {
+            let interaction = self.ui.interaction(id);
+            interaction.hovered() || interaction.down()
+        });
+        self.ui.leaf(
+            Kind::None,
+            Layout::row().width(width).grow_height(),
+            if lit {
+                Style::background(ACCENT)
+            } else {
+                Style::NONE
+            },
+            id,
+        )
+    }
+
+    pub(crate) fn open_grid_row(&mut self, target: Target, marked: Option<Color>) -> Interaction {
+        let id = target.id();
+        let hovered = self.ui.interaction(id).hovered();
+        self.ui.open(
+            Kind::None,
+            Layout::row(),
             Style {
                 background: marked.or(hovered.then_some(HOVER)),
                 ..Style::NONE
             },
             Some(id),
         )
+    }
+
+    pub(crate) fn open_across(&mut self, model: &Model, id: Id) {
+        let kept = model.across.get(id);
+        let mut offset = Point::new(kept, Px::ZERO);
+        let across = self.ui.scroll_by_wheel(id, &mut offset).horizontal;
+        if across != kept {
+            self.push(Action::ScrollAcross(id, across));
+        }
+        self.ui.open(
+            Kind::None,
+            Layout::column()
+                .grow_width()
+                .scroll(Point::new(across, Px::ZERO))
+                .scroll_axes(ScrollAxes::HORIZONTAL),
+            Style::NONE,
+            Some(id),
+        );
+    }
+
+    pub(crate) fn link(&mut self, runs: Vec<Run>, target: Target) -> Interaction {
+        let size = self.metrics.font;
+        self.sized_link(runs, target, size)
+    }
+
+    pub(crate) fn sized_link(
+        &mut self,
+        runs: Vec<Run>,
+        target: Target,
+        size: FontSize,
+    ) -> Interaction {
+        let id = target.id();
+        let hovered = self.ui.interaction(id).hovered();
+        let (runs, style) = if hovered {
+            self.cursor = Cursor::Pointer;
+            (
+                runs.into_iter()
+                    .map(|run| Run::new(run.text, TEXT))
+                    .collect(),
+                Style::background(HOVER).border(Sides::BOTTOM, TEXT),
+            )
+        } else {
+            (runs, Style::NONE.border(Sides::BOTTOM, ACCENT))
+        };
+        self.ui.leaf(
+            text_kind(runs, size, Wrap::None),
+            Layout::row().steady(),
+            style,
+            Some(id),
+        )
+    }
+
+    pub(crate) fn grid_line(
+        &mut self,
+        grid: Rc<Grid>,
+        across: Px,
+        target: Target,
+        marked: Option<ui::Color>,
+    ) -> Interaction {
+        let id = target.id();
+        let background = marked.or(self.ui.interaction(id).hovered().then_some(HOVER));
+        let font = self.metrics.font;
+        let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
+            if let Some(color) = background {
+                canvas.rect(rect, color);
+            }
+            canvas.grid(Point::new(rect.left - across, rect.top), font, &grid);
+        };
+        let row = self.row_height();
+        self.custom_block(Box::new(draw), row, id)
     }
 
     pub(crate) fn row(&mut self, runs: Vec<Run>, target: Target, chosen: Chosen) -> Interaction {
@@ -922,19 +1075,20 @@ impl Frame<'_> {
         if field.text().is_empty() && attention == Attention::Idle {
             return vec![Run::new(hint.clone(), WEAK)];
         }
-        field
-            .pieces(field.whole(), attention)
-            .into_iter()
-            .map(|Piece { text, tint }| {
-                Run::new(
-                    text,
-                    match tint {
-                        Tint::Plain => TEXT,
-                        Tint::Selected | Tint::Caret => ACCENT,
-                    },
-                )
-            })
-            .collect()
+        let mut runs = Vec::new();
+        for Piece { text, tint, caret } in field.pieces(field.whole(), attention) {
+            if caret == CaretAt::Before {
+                runs.push(Run::new(CARET_GLYPH.0, ACCENT));
+            }
+            runs.push(Run::new(
+                text,
+                match tint {
+                    Tint::Plain => TEXT,
+                    Tint::Selected => ACCENT,
+                },
+            ));
+        }
+        runs
     }
 
     fn field_pieces(&mut self, pieces: Vec<Piece>) {
@@ -947,14 +1101,20 @@ impl Frame<'_> {
                 None,
             );
         }
-        for Piece { text, tint } in pieces {
-            let (color, style) = match tint {
-                Tint::Plain => (TEXT, Style::NONE),
-                Tint::Selected => (TEXT, Style::background(SELECTED)),
-                Tint::Caret => (ACCENT, Style::NONE),
+        for Piece { text, tint, caret } in pieces {
+            let style = match tint {
+                Tint::Plain => Style::NONE,
+                Tint::Selected => Style::background(SELECTED),
+            };
+            let (text, style) = match caret {
+                CaretAt::Before if text.as_str().is_empty() => {
+                    (Label::new(" "), style.border(Sides::LEFT, ACCENT))
+                }
+                CaretAt::Before => (text, style.border(Sides::LEFT, ACCENT)),
+                CaretAt::Elsewhere => (text, style),
             };
             self.ui.leaf(
-                text_kind(vec![Run::new(text, color)], size, Wrap::None),
+                text_kind(vec![Run::new(text, TEXT)], size, Wrap::None),
                 Layout::row(),
                 style,
                 None,
@@ -987,7 +1147,7 @@ impl Frame<'_> {
         let down = mouse.vertical.get() - rect.top.get() - FIELD_PADDING.get();
         let column = Count::new(usize::try_from(across / cell).unwrap_or(0));
         let row = Count::new(at.first.get() + usize::try_from(down / row_height).unwrap_or(0));
-        let caret = field.caret_at(which.shape(), row, column, at.attention);
+        let caret = field.caret_at(which.shape(), row, column);
         self.push(Action::Field(which, FieldAct::Point(caret, pointing)));
     }
 
@@ -1049,6 +1209,7 @@ impl Frame<'_> {
                 vec![Piece {
                     text: field.idle_text(room),
                     tint: Tint::Plain,
+                    caret: CaretAt::Elsewhere,
                 }],
             )),
             Attention::Focused => {
@@ -1066,7 +1227,6 @@ impl Frame<'_> {
             Spot {
                 across,
                 first: Count::ZERO,
-                attention,
             },
         );
     }
@@ -1139,7 +1299,6 @@ impl Frame<'_> {
             Spot {
                 across: Px::ZERO,
                 first,
-                attention,
             },
         );
     }

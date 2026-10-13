@@ -3,8 +3,8 @@ pub struct LayoutStore { path: PathBuf, }
 pub const fn at(path: PathBuf) -> Self
 pub fn find(reach: Reach) -> Option<Self>
 pub fn path(&self) -> &Path
-pub fn load(&self) -> Option<LayoutTree>
-pub fn save(&self, layout: &LayoutTree) -> io::Result<()>
+pub fn load(&self) -> Option<Layout>
+pub fn save(&self, layout: &Layout) -> io::Result<()>
 pub struct SettingsStore { path: PathBuf, }
 pub const fn at(path: PathBuf) -> Self
 pub fn find(reach: Reach) -> Option<Self>
@@ -23,3 +23,4 @@ pub const fn at(path: PathBuf) -> Self
 pub fn find(reach: Reach) -> Option<Self>
 pub fn path(&self) -> &Path
 pub fn load(&self) -> Vec<OAuthApp>
+pub fn jira_sites(&self) -> Vec<JiraSite>

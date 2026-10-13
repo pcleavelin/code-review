@@ -207,7 +207,11 @@ impl Frame<'_> {
             }
             AcrossBar::Omitted => self.wheel_across(block.id, kept, extent.width),
         };
-        if across != kept {
+        let asked = match block.across {
+            AcrossScroll::Own => true,
+            AcrossScroll::Shared { .. } => self.scrolled_across(block.id),
+        };
+        if across != kept && asked {
             self.push(Action::ScrollAcross(key, across));
         }
         let layout = match block.width {
@@ -255,10 +259,8 @@ impl Frame<'_> {
             .max(Px::ZERO)
     }
 
-    pub(crate) fn code_columns(&mut self, model: &Model, file: FileId, span: Span) -> Count {
-        model.index.file(file).map_or(Count::ZERO, |source| {
-            self.grids.get(file, source, span).columns()
-        })
+    pub(crate) fn scrolled_across(&self, id: Id) -> bool {
+        self.ui.interaction(id).wheel().horizontal.get() != 0.0 || self.ui.dragging()
     }
 
     pub(crate) fn hover(&mut self, model: &Model, file: FileId, line: Line, column: Column) {

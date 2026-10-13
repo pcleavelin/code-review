@@ -914,7 +914,7 @@ int sum_squares(int n) {
         "README.md",
         "# shapes\n\nA store of shapes and the sum of their areas.\n",
     ),
-    (".gitignore", "build/\n"),
+    (".gitignore", "build/\n.gitignore\n"),
     ("build/generated.rs", "fn ignored() {}\n"),
     ("data.bin", "\0\x01binary"),
 ];

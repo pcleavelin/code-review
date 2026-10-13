@@ -25,6 +25,12 @@ pub(crate) enum Aim {
     Top,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Kept {
+    pub(crate) path: RelativePath,
+    pub(crate) line: Line,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LineRequest {
     pub(crate) line: Line,
@@ -305,6 +311,13 @@ impl Model {
         self.clear_lines();
     }
 
+    pub(crate) fn keep_place(&mut self, place: &Kept) {
+        if self.shown_path().as_ref() != Some(&place.path) {
+            self.select_file(&place.path);
+        }
+        self.nav.scroll_to_line(place.line);
+    }
+
     pub(crate) fn scrolled_to_file(&mut self, path: &RelativePath) {
         self.select_file(path);
         self.review.picked = None;
@@ -383,6 +396,11 @@ impl Model {
                 self.nav.lines = Some(LineSelection { from, to: line });
             }
             (LineGesture::Drag, None) => {}
+            (LineGesture::Extend, _) => {
+                self.review.picked = None;
+                let from = self.nav.lines.map_or(line, |kept| kept.from);
+                self.nav.lines = Some(LineSelection { from, to: line });
+            }
         }
     }
 

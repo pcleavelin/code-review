@@ -373,6 +373,30 @@ pub(crate) const DRAFT_REMOVE: Control = Control::new(
     Element::new("draft-remove"),
     Words::new("remove this draft before it is sent"),
 );
+pub(crate) const COLUMN_FIELD: Control = Control::new(
+    Element::new("column-filter"),
+    Words::new("keep the pull requests whose cell in this column has these words"),
+);
+pub(crate) const COLUMN_HEADER: Control = Control::new(
+    Element::new("column-header"),
+    Words::new("sort by this column; again to reverse"),
+);
+pub(crate) const COLUMN_EDGE: Control = Control::new(
+    Element::new("column-edge"),
+    Words::new("drag to make this column wider or narrower"),
+);
+pub(crate) const CARD_LINK: Control = Control::new(
+    Element::new("card-link"),
+    Words::new("open the Jira card in the browser"),
+);
+pub(crate) const CARD_COLLAPSE: Control = Control::new(
+    Element::new("card-collapse"),
+    Words::new("show or hide the Jira card's description"),
+);
+pub(crate) const DRAFT_EDIT: Control = Control::new(
+    Element::new("draft-edit"),
+    Words::new("change the text of this draft before it is sent"),
+);
 pub(crate) const REPLY: Control = Control::new(
     Element::new("reply"),
     Words::new("answer this thread; the answer is a draft until the review is sent"),
@@ -517,6 +541,12 @@ pub(crate) const CONTROLS: &[Control] = &[
     DRAFT_ADD,
     DRAFT_CANCEL,
     DRAFT_REMOVE,
+    DRAFT_EDIT,
+    CARD_LINK,
+    CARD_COLLAPSE,
+    COLUMN_FIELD,
+    COLUMN_HEADER,
+    COLUMN_EDGE,
     REPLY,
     THREAD_ROW,
     TALK_REFRESH,
@@ -552,6 +582,14 @@ pub(crate) fn inbox() -> Id {
 
 pub(crate) fn thread_box() -> Id {
     Id::new("thread-box")
+}
+
+pub(crate) fn card_box() -> Id {
+    Id::new("card-box")
+}
+
+pub(crate) fn snippet() -> Id {
+    Id::new("snippet")
 }
 
 pub(crate) fn body() -> Id {

@@ -1,15 +1,47 @@
 use std::path::Path;
 
 use domain::{
-    BaseFontSize, ClientId, FontFamily, Host, LayoutPanel, LayoutSplit, LayoutTree, OAuthApp, Root,
-    Settings, Share, SplitDirection, Theme, ViewKey,
+    BaseFontSize, ClientId, ColumnCells, ColumnKey, ColumnWidth, FontFamily, Host, JiraSite,
+    Layout, LayoutPanel, LayoutSplit, LayoutTree, OAuthApp, Root, Settings, Share, SplitDirection,
+    Theme, ViewKey,
 };
 
 use crate::wire::{
-    WireDirection, WireForges, WirePins, WireSetting, WireSettings, WireTheme, WireTree, WireView,
+    WireColumn, WireDirection, WireForges, WireLayout, WirePins, WireSetting, WireSettings,
+    WireTheme, WireTree, WireView,
 };
 
-pub(crate) fn layout(wire: &WireTree) -> Option<LayoutTree> {
+pub(crate) fn layout(wire: &WireLayout) -> Option<Layout> {
+    Some(Layout {
+        tree: tree(&wire.tree)?,
+        columns: wire
+            .columns
+            .iter()
+            .map(|column| {
+                Some(ColumnWidth {
+                    column: ColumnKey::new(&column.name)?,
+                    cells: ColumnCells::new(column.cells)?,
+                })
+            })
+            .collect::<Option<Vec<ColumnWidth>>>()?,
+    })
+}
+
+pub(crate) fn wire(layout: &Layout) -> WireLayout {
+    WireLayout {
+        tree: wire_tree(&layout.tree),
+        columns: layout
+            .columns
+            .iter()
+            .map(|width| WireColumn {
+                name: width.column.as_str().to_owned(),
+                cells: width.cells.get(),
+            })
+            .collect(),
+    }
+}
+
+fn tree(wire: &WireTree) -> Option<LayoutTree> {
     match wire {
         WireTree::Panel { views } => {
             let keys = views
@@ -30,13 +62,13 @@ pub(crate) fn layout(wire: &WireTree) -> Option<LayoutTree> {
         } => Some(LayoutTree::Split(LayoutSplit::new(
             direction(*split),
             Share::permille(*share)?,
-            layout(first)?,
-            layout(second)?,
+            tree(first)?,
+            tree(second)?,
         ))),
     }
 }
 
-pub(crate) fn wire(layout: &LayoutTree) -> WireTree {
+fn wire_tree(layout: &LayoutTree) -> WireTree {
     match layout {
         LayoutTree::Panel(panel) => WireTree::Panel {
             views: panel
@@ -51,8 +83,8 @@ pub(crate) fn wire(layout: &LayoutTree) -> WireTree {
         LayoutTree::Split(split) => WireTree::Split {
             direction: wire_direction(split.direction()),
             share: split.share().get(),
-            first: Box::new(wire(split.first())),
-            second: Box::new(wire(split.second())),
+            first: Box::new(wire_tree(split.first())),
+            second: Box::new(wire_tree(split.second())),
         },
     }
 }
@@ -115,6 +147,13 @@ pub(crate) fn wire_pins(pins: &[Root]) -> WirePins {
             .map(|root| root.as_path().to_string_lossy().into_owned())
             .collect(),
     }
+}
+
+pub(crate) fn jira_sites(wire: &WireForges) -> Vec<JiraSite> {
+    wire.jira
+        .iter()
+        .filter_map(|host| Host::new(host).map(JiraSite::new))
+        .collect()
 }
 
 pub(crate) fn apps(wire: &WireForges) -> Vec<OAuthApp> {

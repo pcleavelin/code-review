@@ -169,6 +169,16 @@ layout::pub const fn share(&self) -> Share
 layout::pub fn first(&self) -> &LayoutTree
 layout::pub fn second(&self) -> &LayoutTree
 layout::pub enum LayoutTree { Split(LayoutSplit), Panel(LayoutPanel), }
+layout::pub struct ColumnKey(String);
+layout::pub fn new(name: &str) -> Option<Self>
+layout::pub fn as_str(&self) -> &str
+layout::pub struct ColumnCells(u16);
+layout::pub const LEAST: Self = Self(4);
+layout::pub const MOST: Self = Self(400);
+layout::pub fn new(cells: u16) -> Option<Self>
+layout::pub const fn get(self) -> u16
+layout::pub struct ColumnWidth { pub column: ColumnKey, pub cells: ColumnCells, }
+layout::pub struct Layout { pub tree: LayoutTree, pub columns: Vec<ColumnWidth>, }
 picture::pub struct PixelCount(u32);
 picture::pub const fn new(value: u32) -> Self
 picture::pub const fn get(self) -> u32
@@ -225,6 +235,22 @@ review::access::pub struct ForgeHost { kind: ForgeKind, host: Host, }
 review::access::pub const fn new(kind: ForgeKind, host: Host) -> Self
 review::access::pub const fn kind(&self) -> ForgeKind
 review::access::pub const fn host(&self) -> &Host
+review::card::pub struct CardKey(String);
+review::card::pub fn new(text: &str) -> Option<Self>
+review::card::pub fn find_in(text: &str) -> Option<Self>
+review::card::pub fn of_pull(pull: &PullRequest) -> Option<Self>
+review::card::pub fn as_str(&self) -> &str
+review::card::pub struct JiraSite(Host);
+review::card::pub const fn new(host: Host) -> Self
+review::card::pub const fn host(&self) -> &Host
+review::card::pub fn card_link(&self, key: &CardKey) -> Option<WebLink>
+review::card::pub fn serves(&self, link: &WebLink) -> bool
+review::card::pub struct CardField(String);
+review::card::pub fn new(text: &str) -> Self
+review::card::pub fn as_str(&self) -> &str
+review::card::pub enum CardStage { ToDo, InProgress, Done, }
+review::card::pub enum CardFamily { Bug, Story, Task, Epic, Other, }
+review::card::pub struct Card { pub key: CardKey, pub summary: CardField, pub status: CardField, pub stage: CardStage, pub kind: CardField, pub family: CardFamily, pub assignee: Option<CardField>, pub description: Prose, pub link: Option<WebLink>, }
 review::diff::pub enum LineKind { Context, Added, Removed, }
 review::diff::pub const fn marker(self) -> Spelling
 review::diff::pub struct DiffLine { pub kind: LineKind, pub text: SourceLine, }
@@ -310,6 +336,7 @@ review::state::pub fn progress(&self, changes: &[FileChange]) -> Progress
 review::state::pub fn next_unseen<'changes>( &self, changes: &'changes [FileChange], after: Option<&RelativePath>, ) -> Option<&'changes FileChange>
 review::state::pub fn add_draft(&mut self, on: DraftOn, text: DraftText) -> DraftId
 review::state::pub fn remove_draft(&mut self, id: DraftId) -> Result<Draft, DraftError>
+review::state::pub fn edit_draft(&mut self, id: DraftId, text: DraftText) -> Result<&Draft, DraftError>
 review::state::pub fn clear_drafts(&mut self)
 review::state::pub fn drafts_at<'review>( &'review self, file: &'review RelativePath, ) -> impl Iterator<Item = &'review Draft>
 review::talk::pub struct Moment(String);
@@ -326,7 +353,8 @@ review::talk::pub struct ThreadId(String);
 review::talk::pub fn new(text: &str) -> Option<Self>
 review::talk::pub fn as_str(&self) -> &str
 review::talk::pub struct Note { pub author: Login, pub body: Prose, pub when: Moment, pub link: Option<WebLink>, }
-review::talk::pub struct CodePlace { pub file: RelativePath, pub side: Side, pub line: Line, }
+review::talk::pub struct CodePlace { pub file: RelativePath, pub side: Side, pub start: Option<Line>, pub line: Line, }
+review::talk::pub fn lines(&self) -> Span
 review::talk::pub enum ThreadState { Open, Resolved, Outdated, }
 review::talk::pub struct SubmissionId(String);
 review::talk::pub fn new(text: &str) -> Option<Self>

@@ -16,7 +16,7 @@ use crate::answer::{
 use crate::convert::{self, Uri};
 use crate::wire::{self, LocationShape, Notice, Outgoing, ProgressKind};
 
-const ANSWER_WAIT: Duration = Duration::from_secs(120);
+const ANSWER_WAIT: Duration = Duration::from_mins(2);
 const CANCEL_POLL: Duration = Duration::from_millis(10);
 const READY_POLL: Duration = Duration::from_millis(200);
 const QUIET_AFTER: Duration = Duration::from_millis(500);

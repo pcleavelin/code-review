@@ -5,7 +5,7 @@ use regex::Regex;
 use session::{LoginTarget, PinTarget, PullAddress, RepoName, RequestedFrom};
 
 use crate::failure::{Failure, Given};
-use crate::wire::{Command, CommentArguments, FilesArguments, OldSide};
+use crate::wire::{Command, CommentArguments, EditArguments, FilesArguments, OldSide};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Marking {
@@ -69,6 +69,7 @@ pub(crate) enum Request {
     Pulls(Filter, RequestedFrom),
     Open(PullAddress),
     Discussion(PullAddress),
+    Card(PullAddress),
     Changes(PullAddress),
     Diff(PullAddress, Option<RelativePath>, OldSide),
     Next(PullAddress),
@@ -80,6 +81,7 @@ pub(crate) enum Request {
     },
     Drafts(PullAddress),
     Uncomment(PullAddress, DraftId),
+    Edit(PullAddress, DraftId, Option<DraftText>),
     Submit {
         address: PullAddress,
         decision: Decision,
@@ -101,6 +103,14 @@ fn files(arguments: &FilesArguments) -> Files {
                 .collect(),
         )
     }
+}
+
+fn edit(arguments: EditArguments) -> Request {
+    Request::Edit(
+        arguments.pr,
+        DraftId::new(arguments.id),
+        DraftText::new(&arguments.text),
+    )
 }
 
 fn comment(arguments: CommentArguments) -> Result<Request, Failure> {
@@ -140,6 +150,7 @@ pub(crate) fn request(command: Command) -> Result<Request, Failure> {
         ),
         Command::Open(arguments) => Request::Open(arguments.pr),
         Command::Discussion(arguments) => Request::Discussion(arguments.pr),
+        Command::Card(arguments) => Request::Card(arguments.pr),
         Command::Changes(arguments) => Request::Changes(arguments.pr),
         Command::Diff(arguments) => Request::Diff(
             arguments.pr,
@@ -161,6 +172,7 @@ pub(crate) fn request(command: Command) -> Result<Request, Failure> {
         }
         Command::Comment(arguments) => return comment(arguments),
         Command::Drafts(arguments) => Request::Drafts(arguments.pr),
+        Command::Edit(arguments) => edit(arguments),
         Command::Uncomment(arguments) => {
             Request::Uncomment(arguments.pr, DraftId::new(arguments.id))
         }

@@ -1,5 +1,5 @@
 use crate::review::{
-    Block, BranchName, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision,
+    Block, BranchName, CardKey, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision,
     DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login,
     Moment, Note, Pairing, PrNumber, Prose, Provenance, RefName, Refusal, RepoSlug, Review,
     Revision, Rights, Seen, Side, Standing, Submission, SubmissionId, Thread, ThreadId,
@@ -265,6 +265,60 @@ fn draft_ids_never_repeat_after_a_removal() {
 }
 
 #[test]
+fn an_edited_draft_keeps_its_id_and_place_and_takes_the_new_text() {
+    let mut review = Review::default();
+    let on = |line: u32| DraftOn {
+        file: RelativePath::new("a"),
+        side: Side::Old,
+        line: Line::new(line),
+        reply: None,
+        start: Some(Line::new(1)),
+    };
+    let kept = review.add_draft(on(3), DraftText::new("why?").unwrap());
+    let other = review.add_draft(on(7), DraftText::new("and this").unwrap());
+    review
+        .edit_draft(kept, DraftText::new("why here?").unwrap())
+        .unwrap();
+    let drafts: Vec<(DraftId, Line, Option<Line>, Side, &str)> = review
+        .drafts()
+        .iter()
+        .map(|draft| {
+            (
+                draft.id,
+                draft.line,
+                draft.start,
+                draft.side,
+                draft.text.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        drafts,
+        [
+            (
+                kept,
+                Line::new(3),
+                Some(Line::new(1)),
+                Side::Old,
+                "why here?"
+            ),
+            (
+                other,
+                Line::new(7),
+                Some(Line::new(1)),
+                Side::Old,
+                "and this"
+            ),
+        ]
+    );
+    assert!(
+        review
+            .edit_draft(DraftId::new(99), DraftText::new("x").unwrap())
+            .is_err()
+    );
+}
+
+#[test]
 fn a_pull_request_is_new_until_looked_at_and_updated_once_its_head_moves() {
     let first = commit();
     let moved = CommitId::new("fedcba9876543210").unwrap();
@@ -412,6 +466,7 @@ fn thread_on(id: &str, file: &str, state: ThreadState) -> Thread {
         place: Some(CodePlace {
             file: RelativePath::new(file),
             side: Side::New,
+            start: None,
             line: Line::new(3),
         }),
         state,
@@ -565,4 +620,22 @@ fn a_lock_file_is_generated_unless_its_attributes_say_it_is_handwritten() {
     assert!(!generated(Provenance::Undeclared, "src/lib.rs"));
     assert!(!generated(Provenance::Handwritten, "Cargo.lock"));
     assert!(generated(Provenance::Generated, "src/lib.rs"));
+}
+
+#[test]
+fn a_card_key_is_found_in_a_title_or_a_branch_and_not_inside_another_word() {
+    let found = |text: &str| CardKey::find_in(text).map(|key| key.as_str().to_owned());
+    assert_eq!(
+        found("PROJ-3014 Speed Up The Parser").as_deref(),
+        Some("PROJ-3014")
+    );
+    assert_eq!(
+        found("feature/PROJ-2726-faster-parser").as_deref(),
+        Some("PROJ-2726")
+    );
+    assert_eq!(found("Fix the grid (AB2-7)").as_deref(), Some("AB2-7"));
+    assert_eq!(found("xPROJ-12 is not a key"), None);
+    assert_eq!(found("PROJ-12x is not a key"), None);
+    assert_eq!(found("proj-12 and -12 and PROJ- are not keys"), None);
+    assert_eq!(found("UTF-8 decoding"), Some("UTF-8".to_owned()));
 }

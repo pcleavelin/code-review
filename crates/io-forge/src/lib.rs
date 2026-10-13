@@ -92,7 +92,7 @@ fn curl(config: &Captured, host: &Host) -> Result<WireResponse, ForgeError> {
     let output = Process::run_with_input(
         &Program::new(wire::CURL),
         &arguments,
-        &env::temp_dir(),
+        &io_process::temp_directory(),
         config,
         wire::REQUEST_DEADLINE,
     )

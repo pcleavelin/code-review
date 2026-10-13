@@ -1047,6 +1047,7 @@ fn code_place(file: &str, side: Side, line: u32) -> CodePlace {
     CodePlace {
         file: RelativePath::new(file),
         side,
+        start: None,
         line: Line::new(line),
     }
 }
@@ -1090,6 +1091,45 @@ fn github_replies_join_their_root_comment_and_the_root_places_the_thread() {
         ]
     );
     assert_eq!(thread.started(), Some(&Moment::new("2026-05-01T10:00:00Z")));
+}
+
+#[test]
+fn a_github_comment_on_several_lines_keeps_its_first_line() {
+    let threads = wire::parse_github_code_threads(
+        &parse_items(
+            r#"[
+    {"id": 1101, "user": {"login": "dave"}, "body": "These three",
+     "path": "src/lib.rs", "start_line": 7, "line": 9, "original_line": 9, "side": "RIGHT",
+     "created_at": "2026-05-01T10:00:00Z"},
+    {"id": 1102, "user": {"login": "dave"}, "body": "Gone pair",
+     "path": "src/lib.rs", "start_line": null, "original_start_line": 3, "line": null,
+     "original_line": 4, "side": "RIGHT", "created_at": "2026-05-01T10:00:00Z"}
+]"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let conversation = conversation(&threads);
+    let place = |id: &str| {
+        conversation
+            .thread(&ThreadId::new(id).unwrap())
+            .unwrap()
+            .place
+            .clone()
+            .unwrap()
+    };
+    assert_eq!(
+        place("1101").lines(),
+        Span::new(Line::new(6), Line::new(8)).unwrap()
+    );
+    assert_eq!(
+        place("1102").lines(),
+        Span::new(Line::new(2), Line::new(3)).unwrap()
+    );
+    assert_eq!(
+        code_place("src/lib.rs", Side::New, 9).lines(),
+        Span::line(Line::new(9))
+    );
 }
 
 #[test]

@@ -1,4 +1,5 @@
 pub fn plain(path: PathBuf) -> PathBuf
+pub fn temp_directory() -> PathBuf
 pub struct Program(String);
 pub fn new(name: &str) -> Self
 pub fn as_str(&self) -> &str

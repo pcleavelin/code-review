@@ -75,6 +75,7 @@ fn place(wire: &WirePlace) -> CodePlace {
     CodePlace {
         file: RelativePath::new(&wire.path),
         side: wire.side,
+        start: wire.start.map(|start| Line::new(start.saturating_sub(1))),
         line: Line::new(wire.line.saturating_sub(1)),
     }
 }

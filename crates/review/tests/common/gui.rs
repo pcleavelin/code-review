@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_card, across }
     };
 }
 
@@ -36,6 +36,13 @@ struct Setup {
 
 const OPEN: &str = "idle\nclick-id pull/0\nidle\nwait 2\n";
 const STALL: &str = "STALL\n";
+const CARD: &str = "CARD\n";
+const JIRA_PICTURE: [u8; 70] = [
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
+    0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 248, 207, 80, 15, 0, 3,
+    134, 1, 128, 90, 52, 125, 107, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+const JIRA_CARD: &str = r#"{"key":"PROJ-7","fields":{"summary":"Square every input before the sum","issuetype":{"name":"Story"},"assignee":{"displayName":"Ann Smith"},"status":{"name":"In Review","statusCategory":{"key":"indeterminate"}},"description":"h3. Overview\r\nThe sum takes *squares* of {{inputs}}.\r\n\r\n# Square each one\r\n## Keep the sign\r\n# Add them\r\n\r\n!shot.png|width=300!","attachment":[{"filename":"shot.png","content":"https://jira.test/rest/api/2/attachment/content/7"}]}}"#;
 
 pub(crate) fn open() -> Scenario {
     Scenario {
@@ -46,7 +53,7 @@ shot {shots}/inbox.png
 OPEN
 dump
 shot {shots}/review.png
-click-id change/2
+click-id change/1
 idle
 wait 2
 dump
@@ -100,9 +107,11 @@ pub(crate) fn play_at_scale(binary: &Path, name: &str, scale: &ScaleScenario) ->
 
 fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> String {
     let stalled = scenario.script.starts_with(STALL);
+    let carded = scenario.script.starts_with(CARD);
     let script = scenario
         .script
         .trim_start_matches(STALL)
+        .trim_start_matches(CARD)
         .replace("OPEN\n", OPEN);
     let mut lines: Vec<String> = script.lines().map(str::to_owned).collect();
     for line_index in 0..lines.len() {
@@ -118,7 +127,7 @@ fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> Strin
             let step = format!("the script up to line {}, to find {prefix}", line_index + 1);
             let err = play_script(
                 binary,
-                &staged(run, name, stalled),
+                &staged(run, name, stalled, carded),
                 &Deadline {
                     scenario: name,
                     step: &step,
@@ -147,7 +156,7 @@ fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> Strin
     }
     play_script(
         binary,
-        &staged(run, name, stalled),
+        &staged(run, name, stalled, carded),
         &Deadline {
             scenario: name,
             step: "the script",
@@ -157,10 +166,30 @@ fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> Strin
     )
 }
 
-fn staged(run: &Setup, name: &str, stalled: bool) -> Fixture {
+fn staged(run: &Setup, name: &str, stalled: bool, carded: bool) -> Fixture {
     let staged = (run.fixture)(name);
     if stalled {
         fs::write(staged.home.join("keychain.stall"), "").unwrap();
+    }
+    if carded {
+        let api = staged.home.join("api");
+        for pulls in ["pulls.json", "pulls-1.json"] {
+            let text = fs::read_to_string(api.join(pulls)).unwrap();
+            fs::write(
+                api.join(pulls),
+                text.replace(r#""ref":"feature""#, r#""ref":"PROJ-7-square""#),
+            )
+            .unwrap();
+        }
+        fs::write(api.join("jira-login"), "ann@acme.test:jtoken").unwrap();
+        fs::write(api.join("jira-PROJ-7.json"), JIRA_CARD).unwrap();
+        fs::write(api.join("jira-picture.png"), JIRA_PICTURE).unwrap();
+        fs::create_dir_all(staged.home.join("keychain")).unwrap();
+        fs::write(
+            staged.home.join("keychain").join("jira.test"),
+            "ann@acme.test:jtoken",
+        )
+        .unwrap();
     }
     staged
 }
@@ -196,7 +225,7 @@ fn last_rectangle(stderr: &str, prefix: &str) -> Option<(i32, i32, i32, i32)> {
 pub(crate) fn deleted() -> Scenario {
     Scenario {
         script: "OPEN
-click-id change/1
+click-id change/0
 idle
 wait 2
 rect draft-removed@old.txt:1
@@ -232,6 +261,8 @@ rect draft-box/2
 shot {shots}/drafted.png
 click-id tab@Review
 wait 2
+scroll review 5000
+wait 2
 click-id review-draft/1
 wait 3
 rect draft-box/2
@@ -256,7 +287,7 @@ quit
 pub(crate) fn split() -> Scenario {
     Scenario {
         script: "OPEN
-click-id change/2
+click-id change/1
 idle
 wait 2
 click-id layout
@@ -309,7 +340,7 @@ quit
 pub(crate) fn copy() -> Scenario {
     Scenario {
         script: "OPEN
-click-id change/2
+click-id change/1
 idle
 wait 3
 click-id copy-lines
@@ -368,7 +399,10 @@ dump
 shot {shots}/description.png
 quit
 ",
-        shows: &["DUMP rect md-link@description/0/5 = Some("],
+        shows: &[
+            "DUMP rect md-link@description/0/5 = Some(",
+            "DUMP cursor=Pointer",
+        ],
     }
 }
 
@@ -381,7 +415,7 @@ OPEN
 dump
 quit
 ",
-        shows: &["/local files=4", "/code-review/trees/1 files=3"],
+        shows: &["/local files=5", "/code-review/trees/1 files=4"],
     }
 }
 
@@ -396,7 +430,7 @@ idle
 dump
 quit
 ",
-        shows: &["open=None", "/local files=4"],
+        shows: &["open=None", "/local files=5"],
     }
 }
 
@@ -449,11 +483,13 @@ quit
 pub(crate) fn submissions() -> Scenario {
     Scenario {
         script: "OPEN
+rect snippet@300
 dump
 shot {shots}/submissions.png
 quit
 ",
         shows: &[
+            "DUMP rect snippet@300 = Some(Rect { x: 367, y: 477, w: 894, h: 56 })",
             "DUMP block alone issue-501",
             "DUMP block submitted review-20 dave RequestChanges [300 301]",
             "DUMP block submitted review-22 erin Approve []",
@@ -474,6 +510,8 @@ wait 2
 OPEN
 dump
 shot {shots}/rights.png
+scroll review 5000
+wait 2
 hover-id submit-changes
 wait 80
 dump
@@ -510,6 +548,8 @@ quit
 pub(crate) fn submit_logged_out() -> Scenario {
     Scenario {
         script: "OPEN
+scroll review 5000
+wait 2
 hover-id submit-approve
 wait 80
 dump
@@ -535,6 +575,8 @@ dump
 shot {shots}/listed.png
 click-id pull/0
 idle
+wait 2
+scroll review 5000
 wait 2
 hover-id submit-approve
 wait 80
@@ -564,7 +606,9 @@ wait 3
 idle
 wait 2
 dump
-rect file-header@src/lib.rs
+mouse 800 400
+wheel 70
+wait 3
 shot {shots}/head.png
 click-id link-open@src/lib.rs
 wait 2
@@ -586,7 +630,6 @@ quit
 ",
         shows: &[
             "file=Some(\"src/lib.rs\") gone=None sel=Some((4, 6))",
-            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 96,",
             "status=\"src/lib.rs from the link\"",
             "status=\"opened https://forgejo.test/owner/repo/src/commit/",
             "/src/lib.rs#L5-L7\"",
@@ -710,28 +753,28 @@ pub(crate) fn stacked() -> Scenario {
 click-id change/2
 idle
 wait 3
-rect file-header@src/lib.rs
+rect file-header@notes.md
 rect source
 dump
 shot {shots}/last.png
 mouse 800 400
-wheel 300
+wheel 100
 wait 3
 dump
 shot {shots}/scrolled.png
 click-id change/0
 idle
 wait 3
-rect file-header@notes.md
-rect file-header@old.txt
-click-id collapse@notes.md
-wait 3
 rect file-header@old.txt
 rect draft-removed@old.txt:1
+dump
 click-id collapse@old.txt
 wait 3
 absent draft-removed@old.txt:1
 rect file-header@src/lib.rs
+click-id collapse@src/lib.rs
+wait 3
+rect file-header@notes.md
 click-id seen@notes.md
 wait 2
 dump
@@ -739,15 +782,188 @@ shot {shots}/collapsed.png
 quit
 ",
         shows: &[
-            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 96,",
+            "DUMP tab=Source focus=None file=Some(\"notes.md\")",
             "DUMP tab=Source focus=None file=Some(\"src/lib.rs\")",
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 96,",
             "DUMP tab=Source focus=None file=None gone=Some(\"old.txt\")",
-            "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 96,",
             "DUMP rect draft-removed@old.txt:1 = Some(",
+            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 126,",
+            "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 156,",
             "DUMP change notes.md Modified +1 -1 Seen",
             "DUMP change notes.md Modified +1 -1 Unseen generated",
-            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 126,",
-            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 274,",
+        ],
+    }
+}
+
+pub(crate) fn across() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/1
+idle
+wait 3
+mouse 800 200
+swipe -4000 0
+wait 3
+scroll source 0
+wait 3
+dump
+click-id change/1
+idle
+wait 3
+shot {shots}/kept.png
+quit
+",
+        shows: &["DUMP across lines kept=222"],
+    }
+}
+
+pub(crate) fn jira_card() -> Scenario {
+    Scenario {
+        script: "CARD
+OPEN
+tab review
+idle
+wait 3
+idle
+wait 3
+dump
+shot {shots}/card.png
+click-id card-collapse
+wait 2
+dump
+shot {shots}/folded.png
+quit
+",
+        shows: &[
+            "DUMP card PROJ-7 \"Square every input before the sum\" status=\"In Review\" InProgress kind=\"Story\" Story collapse=Open",
+            "DUMP picture https://jira.test/rest/api/2/attachment/content/7 got",
+            "DUMP card PROJ-7 \"Square every input before the sum\" status=\"In Review\" InProgress kind=\"Story\" Story collapse=Collapsed",
+        ],
+    }
+}
+
+pub(crate) fn jira_login() -> Scenario {
+    Scenario {
+        script: "idle
+wait 2
+dump
+click-id login@jira.test
+wait 2
+dump
+shot {shots}/paste.png
+text ann@acme.test:jtoken
+key enter
+wait 2
+dump
+mouse 10 500
+wait 2
+click-id logout@jira.test
+wait 2
+dump
+quit
+",
+        shows: &[
+            "DUMP jira sites=[jira.test=out] pasting=None",
+            "DUMP jira sites=[jira.test=out] pasting=Some(jira.test)",
+            "DUMP jira sites=[jira.test=in] pasting=None",
+            "status=\"logged in to Jira on jira.test; the token is in the system keychain\"",
+            "status=\"logged out of Jira on jira.test; its token is gone from the keychain\"",
+        ],
+    }
+}
+
+pub(crate) fn range_draft() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/1
+idle
+wait 3
+click 600 202
+wait 1
+click 600 234 shift
+wait 2
+dump
+text shift selected
+wait 2
+click-id draft-add
+wait 3
+dump
+shot {shots}/range.png
+quit
+",
+        shows: &[
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((6, 8))",
+            "DUMP draft 1 src/lib.rs:7-9 New reply=None \"shift selected\"",
+        ],
+    }
+}
+
+pub(crate) fn edit_draft() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/0
+idle
+wait 2
+click-id draft-removed@old.txt:2
+wait 1
+text near the top
+wait 2
+click-id draft-add
+wait 2
+click-id draft-edit@1
+wait 2
+dump
+shot {shots}/editing.png
+key a ctrl
+text rewritten
+wait 2
+click-id draft-add
+wait 2
+dump
+quit
+",
+        shows: &[
+            "DUMP field Draft caret=12 first=0 rows=1 text=\"near the top\"",
+            "DUMP draft 1 old.txt:2-2 Old reply=None \"rewritten\"",
+            "status=\"draft 1 changed; it is sent with the review\"",
+        ],
+    }
+}
+
+pub(crate) fn inbox_grid() -> Scenario {
+    Scenario {
+        script: "idle
+wait 2
+click-id column-header@title
+wait 2
+rect pull/0
+rect pull/1
+click-id column-header@title
+wait 2
+rect pull/0
+rect pull/1
+rect column-header@author
+rect column-edge@title
+drag <<DUMP rect column-edge@title|2,10>> <<DUMP rect column-edge@title|82,10>>
+wait 2
+rect column-header@author
+click-id column-filter@author
+text ann
+wait 2
+rect pull/0
+absent pull/1
+dump
+shot {shots}/grid.png
+quit
+",
+        shows: &[
+            "DUMP rect pull/1 = Some(Rect { x: 361, y: 196,",
+            "DUMP rect pull/0 = Some(Rect { x: 361, y: 216,",
+            "DUMP rect pull/0 = Some(Rect { x: 361, y: 196,",
+            "DUMP rect pull/1 = Some(Rect { x: 361, y: 216,",
+            "DUMP rect column-header@author = Some(Rect { x: 973, y: 154,",
+            "DUMP rect column-header@author = Some(Rect { x: 1053, y: 154,",
+            "DUMP field Column(Author) caret=3 first=0 rows=1 text=\"ann\"",
         ],
     }
 }
@@ -782,7 +998,7 @@ quit
             script: Box::leak(script.into_boxed_str()),
             shows: &[
                 "DUMP tab=Source focus=None file=Some(\"assets/table_0.txt\")",
-                "DUMP tab=Source focus=None file=Some(\"src/moved/",
+                "DUMP tab=Source focus=None file=Some(\"generated/",
             ],
         },
         within: Duration::from_secs(75),

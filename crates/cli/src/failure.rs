@@ -1,6 +1,6 @@
 use std::fmt;
 
-use domain::{DraftError, ForgeHost, Line, PrNumber, RelativePath, Side, SymbolName};
+use domain::{DraftError, ForgeHost, JiraSite, Line, PrNumber, RelativePath, Side, SymbolName};
 use session::SessionError;
 
 #[derive(Debug)]
@@ -22,6 +22,7 @@ pub enum Failure {
     NoSuchSymbol(SymbolName),
     BadPattern(regex::Error),
     NoToken(ForgeHost),
+    NoJiraToken(JiraSite),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

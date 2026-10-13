@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use domain::{
-    CommitId, Depth, DraftId, FileChange, FileId, Index, Language, Line, PrNumber, RelativePath,
-    Root, Seen, SourceFile, Span, Symbol, SymbolId, SymbolName, SymbolQuery,
+    CommitId, Depth, DraftId, DraftOn, DraftText, FileChange, FileId, Index, JiraSite, Language,
+    Line, PrNumber, RelativePath, Root, Seen, SourceFile, Span, Symbol, SymbolId, SymbolName,
+    SymbolQuery,
 };
 use index::Servers;
 use io_process::{Argument, Opener};
@@ -28,6 +29,7 @@ pub enum Touched {
     Review(PrNumber),
     Dropped(RepoName, PrNumber),
     LoginStarted(StartedLogin),
+    JiraLoginStarted(JiraSite),
     Keychain,
 }
 
@@ -77,6 +79,7 @@ impl Run<'_> {
                 wire::opened(self.output, &opened);
                 Ok(Touched::Review(address.number))
             }
+            Request::Card(address) => self.card(&address),
             Request::Discussion(address) => {
                 let repo = self.repo(&address)?;
                 let pull = repo.pull(address.number)?;
@@ -105,23 +108,7 @@ impl Run<'_> {
             }
             Request::Mark(address, files, marking) => self.mark(&address, &files, marking),
             Request::Comment { address, on, text } => {
-                let text = text.ok_or(Failure::EmptyComment)?;
-                let repo = self.repo(&address)?;
-                let mut opened = repo.state(address.number)?;
-                let change = change_of(&opened.changes, address.number, &on.file)?;
-                if !change.commentable(on.side, on.lines()) {
-                    return Err(Failure::NotInDiff {
-                        file: on.file,
-                        side: on.side,
-                        line: on.line,
-                    });
-                }
-                let id = opened.review.add_draft(on, text);
-                repo.save(&opened)?;
-                if let Some(draft) = opened.review.drafts().iter().find(|draft| draft.id == id) {
-                    wire::draft(self.output, draft);
-                }
-                Ok(Touched::Review(address.number))
+                self.comment(&address, on, text.ok_or(Failure::EmptyComment)?)
             }
             Request::Drafts(address) => {
                 let repo = self.repo(&address)?;
@@ -129,6 +116,9 @@ impl Run<'_> {
                 Ok(Touched::Nothing)
             }
             Request::Uncomment(address, id) => self.uncomment(&address, id),
+            Request::Edit(address, id, text) => {
+                self.edit(&address, id, text.ok_or(Failure::EmptyComment)?)
+            }
             Request::Drop(address) => self.drop_fetched(&address),
             Request::Navigate(address, navigation) => self
                 .navigate(&address, navigation)
@@ -153,6 +143,10 @@ impl Run<'_> {
     }
 
     fn login(&mut self, target: &LoginTarget) -> Result<Touched, Failure> {
+        if let Some(site) = self.desk.access().jira_site(target) {
+            wire::jira_paste(self.output, &site);
+            return Ok(Touched::JiraLoginStarted(site));
+        }
         let started = self.desk.access().start(&self.desk.forge_host(target)?)?;
         match &started {
             StartedLogin::Device(authorization) => {
@@ -170,6 +164,11 @@ impl Run<'_> {
     }
 
     fn logout(&mut self, target: &LoginTarget) -> Result<Touched, Failure> {
+        if let Some(site) = self.desk.access().jira_site(target) {
+            let forgotten = self.desk.access().forget_jira(&site)?;
+            wire::jira_logged_out(self.output, &site, forgotten);
+            return Ok(Touched::Keychain);
+        }
         let site = self.desk.forge_host(target)?;
         let forgotten = self.desk.access().forget(&site)?;
         wire::logged_out(self.output, &site, forgotten);
@@ -313,6 +312,54 @@ impl Run<'_> {
             output: self.output,
         }
         .run(navigation)
+    }
+
+    fn comment(
+        &mut self,
+        address: &PullAddress,
+        on: DraftOn,
+        text: DraftText,
+    ) -> Result<Touched, Failure> {
+        let repo = self.repo(address)?;
+        let mut opened = repo.state(address.number)?;
+        let change = change_of(&opened.changes, address.number, &on.file)?;
+        if !change.commentable(on.side, on.lines()) {
+            return Err(Failure::NotInDiff {
+                file: on.file,
+                side: on.side,
+                line: on.line,
+            });
+        }
+        let id = opened.review.add_draft(on, text);
+        repo.save(&opened)?;
+        if let Some(draft) = opened.review.drafts().iter().find(|draft| draft.id == id) {
+            wire::draft(self.output, draft);
+        }
+        Ok(Touched::Review(address.number))
+    }
+
+    fn card(&mut self, address: &PullAddress) -> Result<Touched, Failure> {
+        let repo = self.repo(address)?;
+        let pull = repo.pull(address.number)?;
+        match self.desk.access().card(&pull)? {
+            Some(card) => wire::card(self.output, &card),
+            None => wire::no_card(self.output, self.desk.access().jira_sites().len()),
+        }
+        Ok(Touched::Nothing)
+    }
+
+    fn edit(
+        &mut self,
+        address: &PullAddress,
+        id: DraftId,
+        text: DraftText,
+    ) -> Result<Touched, Failure> {
+        let repo = self.repo(address)?;
+        let mut opened = repo.state(address.number)?;
+        let edited = opened.review.edit_draft(id, text)?.clone();
+        repo.save(&opened)?;
+        wire::draft(self.output, &edited);
+        Ok(Touched::Review(address.number))
     }
 
     fn uncomment(&mut self, address: &PullAddress, id: DraftId) -> Result<Touched, Failure> {

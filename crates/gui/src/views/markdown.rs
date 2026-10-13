@@ -14,6 +14,7 @@ use crate::ids;
 use crate::markdown::{self, Align, Block, Cell, Goal, Lead, Piece, Row, Tone};
 use crate::model::Model;
 use crate::review::{LinkTarget, ReviewAct};
+use crate::theme;
 use crate::theme::{
     ACCENT, BLOCK_GAP, BORDER, CODE_TEXT, EMPHASIS_TEXT, FIELD, LABEL_PADDING, MARKDOWN_GUESS,
     PICTURE_TALLEST, PIXEL, RED, STRONG_TEXT, TEXT, WEAK,
@@ -324,6 +325,14 @@ fn row_lines(row: &Row, widths: &[Count], aligns: &[Align], tone: Tone) -> Vec<V
         .collect()
 }
 
+const RULED_LEVELS: Count = Count::new(2);
+
+#[derive(Clone, Copy)]
+struct Look {
+    color: ui::Color,
+    size: ui::FontSize,
+}
+
 struct Writer<'model> {
     model: &'model Model,
     key: Label,
@@ -337,12 +346,13 @@ impl Writer<'_> {
         lead: Vec<Run>,
         line: &[Token],
         goals: &[Goal],
-        base: ui::Color,
+        look: Look,
         number: Count,
     ) {
+        let Look { color: base, size } = look;
         frame.start(Container::FillRow);
         if !lead.is_empty() {
-            frame.text_line(lead);
+            frame.sized_line(lead, size);
         }
         let mut at = 0;
         while let Some(first) = line.get(at) {
@@ -370,13 +380,13 @@ impl Writer<'_> {
                         Some(LinkTarget::Source(..)) => ids::MD_SOURCE,
                         Some(LinkTarget::Browser(_)) | None => ids::MD_LINK,
                     };
-                    if frame.inline_button(runs, control.with(&key)).clicked()
+                    if frame.sized_link(runs, control.with(&key), size).clicked()
                         && let Some(target) = target
                     {
                         frame.push(Action::Review(target.act()));
                     }
                 }
-                None => frame.text_line(runs),
+                None => frame.sized_line(runs, size),
             }
         }
         frame.finish();
@@ -397,11 +407,23 @@ impl Writer<'_> {
                 WEAK,
             ),
         };
+        let base_size = frame.metrics.font;
+        let size = match lead {
+            Lead::Heading(level) => theme::heading_font(base_size, *level),
+            Lead::Paragraph | Lead::Item { .. } | Lead::Quote(_) => base_size,
+        };
+        let width = Count::new(
+            usize::try_from(
+                u64::try_from(self.width.get()).unwrap_or(0) * u64::from(base_size.get())
+                    / u64::from(size.get().max(1)),
+            )
+            .unwrap_or(0),
+        );
         let lead_columns = indent.get() + marker.as_str().chars().count();
         let found = tokens(pieces);
         let lines = wrap(
             &found.all,
-            Count::new(self.width.get().saturating_sub(lead_columns)),
+            Count::new(width.get().saturating_sub(lead_columns)),
         );
         for (position, line) in lines.iter().enumerate() {
             let lead_text = if position == 0 || matches!(lead, Lead::Quote(_)) {
@@ -414,9 +436,39 @@ impl Writer<'_> {
             } else {
                 vec![Run::new(lead_text, WEAK)]
             };
-            self.line(frame, runs, line, &found.goals, base, *number);
+            self.line(
+                frame,
+                runs,
+                line,
+                &found.goals,
+                Look { color: base, size },
+                *number,
+            );
             *number += Count::new(1);
         }
+        if let Lead::Heading(level) = lead
+            && level.get() <= RULED_LEVELS.get()
+        {
+            self.rule(frame, *number);
+        }
+    }
+
+    fn rule(&self, frame: &mut Frame<'_>, number: Count) {
+        let draw = |canvas: &mut Canvas<'_>, rect: Rect| {
+            canvas.rect(
+                Rect::new(rect.left, rect.top + rect.height / 2, rect.width, PIXEL),
+                BORDER,
+            );
+        };
+        frame.custom_block(
+            Box::new(draw),
+            BLOCK_GAP,
+            ids::MD_CODE
+                .id()
+                .with(self.key.as_str())
+                .with("rule")
+                .nth(number.get()),
+        );
     }
 
     fn table(
@@ -472,7 +524,17 @@ impl Writer<'_> {
                 .into_iter()
                 .filter(|token| token.kind != Kind::Break)
                 .collect();
-            self.line(frame, Vec::new(), &line, &found.goals, TEXT, *number);
+            self.line(
+                frame,
+                Vec::new(),
+                &line,
+                &found.goals,
+                Look {
+                    color: TEXT,
+                    size: frame.metrics.font,
+                },
+                *number,
+            );
             *number += Count::new(1);
         }
     }
@@ -611,19 +673,7 @@ pub(super) fn markdown(model: &Model, frame: &mut Frame<'_>, written: &Prose, ke
             } => writer.table(frame, aligns, header, rows, &mut number),
             Block::Code { language, text } => writer.code(frame, language, text, number),
             Block::Picture { link, alt } => writer.picture(frame, link, alt, number),
-            Block::Rule => {
-                let draw = |canvas: &mut Canvas<'_>, rect: Rect| {
-                    canvas.rect(
-                        Rect::new(rect.left, rect.top + rect.height / 2, rect.width, PIXEL),
-                        BORDER,
-                    );
-                };
-                frame.custom_block(
-                    Box::new(draw),
-                    frame.row_height(),
-                    ids::MD_CODE.id().with(key.as_str()).nth(number.get()),
-                );
-            }
+            Block::Rule => writer.rule(frame, number),
         }
         number += Count::new(1);
         previous = Some(block);

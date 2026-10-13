@@ -5,8 +5,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use domain::{
-    CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn, DraftText,
-    FileChange, FileRow, FileText, Forge, ForgeHost, Hunk, Index, Line, LineKind, Linked,
+    Card, CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn,
+    DraftText, FileChange, FileRow, FileText, Forge, Hunk, Index, Line, LineKind, Linked,
     LinkedFile, PrNumber, PullRequest, RelativePath, Revision, Rights, Root, Seen, Side, Span,
     Standing, WebLink,
 };
@@ -24,9 +24,9 @@ use crate::app::App;
 use crate::diffs::{DiffJobs, Diffs, Loading, SidesKey};
 use crate::field::Which;
 use crate::keys::Going;
-use crate::login::{self, Ended, Held, LoginStatus, Logins};
+use crate::login::{self, Ended, Holdings, LoginStatus, Logins};
 use crate::model::{LineSelection, Model, Tab};
-use crate::nav::Aim;
+use crate::nav::{Aim, Kept};
 use crate::panels::View;
 use crate::pictures::{PictureJobs, Pictures};
 use crate::runtime::{Job, Landing, landed};
@@ -124,6 +124,7 @@ pub(crate) struct OpenReview {
     pub(crate) opened: Opened,
     pub(crate) talk: Talk,
     pub(crate) rights: Option<Result<Rights, Label>>,
+    pub(crate) card: Loading<Option<Card>>,
     pub(crate) web: Option<Forge>,
 }
 
@@ -174,7 +175,7 @@ pub(crate) struct Awaited {
 }
 
 pub(crate) struct Listing {
-    held: Option<Job<BTreeMap<ForgeHost, Held>>>,
+    held: Option<Job<Holdings>>,
     repos: Vec<Job<RepoListed>>,
     waits: Receiver<Awaited>,
     pins: Vec<Broken>,
@@ -193,6 +194,7 @@ pub(crate) struct ReviewJobs {
     open: Option<Job<Result<Landed, Label>>>,
     talk: Option<Job<Result<Conversation, Label>>>,
     rights: Option<Job<Result<Rights, Label>>>,
+    card: Option<Job<Result<Option<Card>, Label>>>,
     submit: Option<Job<Result<Submitted, Label>>>,
     pin: Option<Job<Result<PinLanded, Label>>>,
     pub(crate) login: Option<Job<Ended>>,
@@ -212,6 +214,7 @@ impl ReviewJobs {
             || self.open.is_some()
             || self.talk.is_some()
             || self.rights.is_some()
+            || self.card.is_some()
             || self.submit.is_some()
             || self.pin.is_some()
             || self.diffs.busy()
@@ -253,6 +256,21 @@ pub(crate) enum Picking {
     Drag,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CardCollapse {
+    Open,
+    Collapsed,
+}
+
+impl CardCollapse {
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Open => Self::Collapsed,
+            Self::Collapsed => Self::Open,
+        }
+    }
+}
+
 pub(crate) struct Reviewing {
     pub(crate) desk: Desk,
     pub(crate) inbox: Inbox,
@@ -263,6 +281,8 @@ pub(crate) struct Reviewing {
     pub(crate) opening: Option<PrNumber>,
     pub(crate) pinning: Pinning,
     pub(crate) draft: Option<DraftOn>,
+    pub(crate) editing: Option<DraftId>,
+    pub(crate) card_collapse: CardCollapse,
     pub(crate) picked: Option<RemovedPick>,
     pub(crate) submitting: Submitting,
     pub(crate) whole: BTreeSet<RelativePath>,
@@ -291,6 +311,8 @@ impl Reviewing {
             opening: None,
             pinning: Pinning::Idle,
             draft: None,
+            editing: None,
+            card_collapse: CardCollapse::Open,
             picked: None,
             submitting: Submitting::Idle,
             whole: BTreeSet::new(),
@@ -495,6 +517,7 @@ pub(crate) fn change_starts(change: &FileChange) -> Vec<Line> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ReviewAct {
+    CollapseCard,
     RefreshPulls,
     OpenPull(RepoName, PrNumber),
     Pin,
@@ -521,6 +544,7 @@ pub(crate) enum ReviewAct {
     SaveDraft,
     CancelDraft,
     RemoveDraft(DraftId),
+    EditDraft(DraftId),
     RefreshTalk,
     AskSubmit(Decision),
     CancelSubmit,
@@ -532,7 +556,7 @@ pub(crate) enum ReviewAct {
     NeedPicture(WebLink),
     PictureWake(Duration),
     NeedSides(SidesKey),
-    ToggleLayout,
+    ToggleLayout(Option<Kept>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -560,6 +584,7 @@ pub(crate) enum ReviewStatus {
     NotInDiff,
     EmptyDraft,
     Drafted(DraftId),
+    DraftEdited(DraftId),
     DraftRemoved(DraftId),
     NotSaved(Label),
     Busy,
@@ -593,6 +618,7 @@ impl ReviewStatus {
             | Self::Marked { .. }
             | Self::AllSeen
             | Self::Drafted(_)
+            | Self::DraftEdited(_)
             | Self::DraftRemoved(_)
             | Self::Submitted { .. }
             | Self::LinkOpened(_)
@@ -657,6 +683,7 @@ impl fmt::Display for ReviewStatus {
             ),
             Self::EmptyDraft => formatter.write_str("type the comment first; escape cancels it"),
             Self::Drafted(id) => write!(formatter, "draft {id} saved; it is sent with the review"),
+            Self::DraftEdited(id) => write!(formatter, "draft {id} changed; it is sent with the review"),
             Self::DraftRemoved(id) => write!(formatter, "draft {id} removed"),
             Self::NotSaved(why) => write!(formatter, "review not saved: {}", why.as_str()),
             Self::Busy => formatter.write_str("still working on the last request"),
@@ -889,6 +916,7 @@ impl Model {
         let place = CodePlace {
             file: on.file.clone(),
             side: on.side,
+            start: on.start,
             line: on.line,
         };
         let line = self.review.place_line(&place, self.head_text(&place.file));
@@ -1092,9 +1120,11 @@ impl App {
             ReviewAct::SaveDraft => self.save_draft(),
             ReviewAct::CancelDraft => {
                 self.model.review.draft = None;
+                self.model.review.editing = None;
                 self.model.fields.release(Which::Draft);
             }
             ReviewAct::RemoveDraft(id) => self.remove_draft(id),
+            ReviewAct::EditDraft(id) => self.edit_draft(id),
             ReviewAct::RefreshTalk => self.ask_talk(),
             ReviewAct::AskSubmit(decision) => {
                 self.model.review.submitting = Submitting::Asking(decision);
@@ -1102,17 +1132,23 @@ impl App {
             ReviewAct::CancelSubmit => self.model.review.submitting = Submitting::Idle,
             ReviewAct::Submit(decision) => self.submit(decision),
             ReviewAct::OpenLink(link) => self.open_link(link),
+            ReviewAct::CollapseCard => {
+                self.model.review.card_collapse = self.model.review.card_collapse.toggled();
+            }
             ReviewAct::ShowLinkedFile(file, link) => self.show_linked_file(file, link),
             ReviewAct::ViewCommit(commit) => self.view_commit(commit),
             ReviewAct::NeedPicture(link) => self.need_picture(link),
             ReviewAct::PictureWake(at) => self.model.review.pictures.wake_at(at),
             ReviewAct::NeedSides(key) => self.need_sides(key),
-            ReviewAct::ToggleLayout => {
+            ReviewAct::ToggleLayout(kept) => {
                 let diffs = &mut self.model.review.diffs;
                 diffs.layout = match diffs.layout {
                     DiffLayout::Unified => DiffLayout::Split,
                     DiffLayout::Split => DiffLayout::Unified,
                 };
+                if let Some(place) = kept {
+                    self.model.keep_place(&place);
+                }
             }
             ReviewAct::CopyLines => match self.model.copied_lines() {
                 Some(copied) => {
@@ -1243,6 +1279,35 @@ impl App {
                 .map_err(|error| Label::new(error.to_string()))
         }));
         self.ask_rights();
+        self.ask_card();
+    }
+
+    pub(crate) fn ask_card(&mut self) {
+        let access = self.model.review.desk.access().clone();
+        let Some(open) = self.model.review.open.as_mut() else {
+            return;
+        };
+        let pull = open.pull.clone();
+        open.card = Loading::Asking;
+        self.jobs.card = Some(Job::start(move || {
+            access
+                .card(&pull)
+                .map_err(|error| Label::new(error.to_string()))
+        }));
+    }
+
+    fn poll_card(&mut self) {
+        let result = match landed(&mut self.jobs.card) {
+            Landing::Waiting => return,
+            Landing::Landed(result) => result,
+            Landing::Failed => Err(Label::new("the thread asking Jira failed")),
+        };
+        if let Some(open) = self.model.review.open.as_mut() {
+            open.card = match result {
+                Ok(card) => Loading::Got(card),
+                Err(why) => Loading::Failed(why),
+            };
+        }
     }
 
     fn ask_rights(&mut self) {
@@ -1312,9 +1377,35 @@ impl App {
             Some(true) => {
                 self.model.show_editing(&on);
                 self.model.review.draft = Some(on);
+                self.model.review.editing = None;
                 self.model.fields.start_empty(Which::Draft);
             }
         }
+    }
+
+    fn edit_draft(&mut self, id: DraftId) {
+        let Some(draft) = self
+            .model
+            .review
+            .opened()
+            .and_then(|opened| opened.review.drafts().iter().find(|draft| draft.id == id))
+            .cloned()
+        else {
+            return;
+        };
+        let on = DraftOn {
+            file: draft.file,
+            side: draft.side,
+            start: draft.start,
+            line: draft.line,
+            reply: draft.reply,
+        };
+        self.model.show_editing(&on);
+        self.model.review.draft = Some(on);
+        self.model.review.editing = Some(id);
+        self.model
+            .fields
+            .start_with(Which::Draft, &Label::new(draft.text.as_str()));
     }
 
     fn save_draft(&mut self) {
@@ -1325,15 +1416,22 @@ impl App {
             self.model.say(ReviewStatus::EmptyDraft);
             return;
         };
+        let editing = self.model.review.editing.take();
         let Some(opened) = self.model.review.opened_mut() else {
             return;
         };
-        let id = opened.review.add_draft(on, text);
+        let status = match editing {
+            Some(id) => match opened.review.edit_draft(id, text) {
+                Ok(_) => ReviewStatus::DraftEdited(id),
+                Err(_) => return,
+            },
+            None => ReviewStatus::Drafted(opened.review.add_draft(on, text)),
+        };
         self.model.review.draft = None;
         self.model.fields.start_empty(Which::Draft);
         self.model.fields.release(Which::Draft);
         self.save_review();
-        self.model.say(ReviewStatus::Drafted(id));
+        self.model.say(status);
     }
 
     fn remove_draft(&mut self, id: DraftId) {
@@ -1371,6 +1469,7 @@ impl App {
         self.poll_open();
         self.poll_talk();
         self.poll_rights();
+        self.poll_card();
         self.poll_submit();
         self.poll_diffs();
         self.poll_pictures();
@@ -1388,7 +1487,9 @@ impl App {
                 .map(|awaited| (awaited.repo, awaited.waiting)),
         );
         if let Landing::Landed(held) = landed(&mut listing.held) {
-            self.model.review.logins.held.extend(held);
+            let logins = &mut self.model.review.logins;
+            logins.held.extend(held.forges);
+            logins.jira = held.jira;
         }
         let mut arrived = Vec::new();
         let mut failed = false;
@@ -1608,6 +1709,7 @@ impl App {
             opened,
             talk: Talk::Asking,
             rights: None,
+            card: Loading::Asking,
         });
         self.model.say(ReviewStatus::Opened { number, files });
         self.model.panels.activate(View::Changes);

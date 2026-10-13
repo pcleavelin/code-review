@@ -100,3 +100,50 @@ pub enum LayoutTree {
     Split(LayoutSplit),
     Panel(LayoutPanel),
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ColumnKey(String);
+
+impl ColumnKey {
+    pub fn new(name: &str) -> Option<Self> {
+        (!name.is_empty()
+            && name
+                .chars()
+                .all(|letter| letter.is_ascii_alphanumeric() || letter == '-'))
+        .then(|| Self(name.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ColumnCells(u16);
+
+impl ColumnCells {
+    pub const LEAST: Self = Self(4);
+    pub const MOST: Self = Self(400);
+
+    pub fn new(cells: u16) -> Option<Self> {
+        (Self::LEAST.0..=Self::MOST.0)
+            .contains(&cells)
+            .then_some(Self(cells))
+    }
+
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnWidth {
+    pub column: ColumnKey,
+    pub cells: ColumnCells,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Layout {
+    pub tree: LayoutTree,
+    pub columns: Vec<ColumnWidth>,
+}

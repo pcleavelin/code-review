@@ -1009,6 +1009,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-jira"
+version = "0.1.0"
+dependencies = [
+ "domain",
+ "io-process",
+ "serde_json",
+]
+
+[[package]]
 name = "io-keychain"
 version = "0.1.0"
 dependencies = [
@@ -2145,6 +2154,7 @@ dependencies = [
  "domain",
  "io-config",
  "io-forge",
+ "io-jira",
  "io-keychain",
  "io-process",
  "io-review",

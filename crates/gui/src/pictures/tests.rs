@@ -19,7 +19,7 @@ fn frame(key: u64, millis: u64) -> AnimationFrame {
 fn animation(frames: Vec<AnimationFrame>) -> Animation {
     Animation {
         frames,
-        started_at: Duration::from_millis(1000),
+        started_at: Duration::from_secs(1),
         size: Extent::new(Px::new(1), Px::new(1)),
     }
 }

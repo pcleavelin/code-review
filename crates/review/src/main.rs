@@ -77,6 +77,13 @@ fn run(root: &Root, arguments: &[Argument]) -> Status {
             output::text(Channel::Stdout, &finished);
             result.map(|()| Touched::Nothing)
         }
+        Ok(Touched::JiraLoginStarted(site)) => {
+            let pasted = output::pasted_line();
+            let mut finished = Output::new();
+            let result = cli::finish_jira_login(&desk, &site, pasted.as_ref(), &mut finished);
+            output::text(Channel::Stdout, &finished);
+            result.map(|()| Touched::Nothing)
+        }
         other => other,
     };
     match done {

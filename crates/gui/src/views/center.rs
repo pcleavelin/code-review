@@ -1,14 +1,16 @@
 use std::mem;
+use std::rc::Rc;
 
 use domain::{
     CodePlace, Draft, DraftOn, FileChange, FileId, Line, LineCount, Linked, LinkedFile,
-    RelativePath, Removal, Revision, Side, SourceLine, Span, Thread,
+    RelativePath, Removal, Revision, Side, SourceFile, SourceLine, Span, Thread,
 };
 use ui::{Button, Count, Icon, Id, Label, Px, Rect, Run, Scrollbar};
 
 use crate::action::Action;
+use crate::diffs::{Loading, SidesKey};
 use crate::field::Which;
-use crate::grid::GUTTER;
+use crate::grid::{self, GUTTER};
 use crate::ids::{self, Target};
 use crate::keys::{self, LineGesture};
 use crate::model::{HIT_LIMIT, HitsShown, Model};
@@ -16,8 +18,8 @@ use crate::review::{Picking, ReviewAct, merged};
 use crate::text::{Counted, Noun};
 use crate::theme::{
     ACCENT, ADDED_FILL, COMMENT_FRAME, DRAFT_FRAME, DRAFT_ROWS, DRAFTED_BAR, EDGE_SCROLL_BAND,
-    EDGE_SCROLL_MOST, LINES_SELECTED, ORANGE, PIXEL, RED, ROW_EXTRA, SEARCH_FIELD, TEXT,
-    THREAD_BAR, WEAK,
+    EDGE_SCROLL_MOST, LINES_SELECTED, ORANGE, PIXEL, ROW_EXTRA, SEARCH_FIELD, TEXT, THREAD_BAR,
+    WEAK,
 };
 use crate::widgets::{
     AcrossBar, AcrossScroll, Chosen, CodeBlock, Coded, Container, Frame, Marks, Padding, Scroller,
@@ -235,10 +237,11 @@ pub(super) fn noted<'inset>(
         );
     }
     for draft in model.review.drafts_in(path).filter(|draft| {
-        draft
-            .reply
-            .as_ref()
-            .is_none_or(|id| !threaded.contains(&id))
+        model.review.editing != Some(draft.id)
+            && draft
+                .reply
+                .as_ref()
+                .is_none_or(|id| !threaded.contains(&id))
     }) {
         let tall = 1 + draft.text.as_str().lines().count().max(1);
         add(
@@ -478,12 +481,10 @@ pub(super) fn select_lines(
             coded.spot,
             coded.dragged_to,
         ) {
-            (Some(LineGesture::Press), Some(spot), _) if !on_scrollbar => {
-                frame.push(Action::SelectLine(
-                    segment.path.clone(),
-                    spot.line,
-                    LineGesture::Press,
-                ));
+            (Some(gesture @ (LineGesture::Press | LineGesture::Extend)), Some(spot), _)
+                if !on_scrollbar =>
+            {
+                frame.push(Action::SelectLine(segment.path.clone(), spot.line, gesture));
                 acted = true;
             }
             (Some(LineGesture::Drag), _, Some(line)) => {
@@ -531,16 +532,26 @@ pub(super) fn inset(
                 .filter(|picked| &picked.file == path);
             let origin = picked.map(|picked| removed_target(path, picked.from).id());
             let held = origin.is_some() && frame.ui.active() == origin;
+            let side = old_side(model, frame, path);
+            let content = frame.cell_width() * viewed.columns;
             for gone in lines.iter().take(past.get()).skip(first.get()) {
                 let old = gone.old;
-                let runs = vec![
-                    Run::new(format!("{:5}-", old.number()), RED),
-                    Run::new(gone.text.as_str(), TEXT),
-                ];
                 let marked = picked
                     .filter(|picked| picked.lines().contains(old))
                     .map(|_| LINES_SELECTED);
-                let line = frame.marked_code_line(runs, removed_target(path, old), marked);
+                let target = removed_target(path, old);
+                let line = frame.grid_line(
+                    Rc::new(grid::removed(old, gone.text, side)),
+                    viewed.across,
+                    target,
+                    marked,
+                );
+                if line.hovered() && frame.scrolled_across(target.id()) {
+                    let moved = frame.wheel_across(target.id(), viewed.across, content);
+                    if moved != viewed.across {
+                        frame.push(Action::ScrollAcross(ids::LINES.id(), moved));
+                    }
+                }
                 let pointer = frame.ui.pointer();
                 let picking = if line.double_clicked() {
                     frame.push(Action::Review(ReviewAct::StartDraftHere));
@@ -587,6 +598,49 @@ pub(super) fn inset(
             frame.finish();
         }
     }
+}
+
+fn old_side<'model>(
+    model: &'model Model,
+    frame: &mut Frame<'_>,
+    path: &RelativePath,
+) -> Option<&'model SourceFile> {
+    let key = SidesKey {
+        commit: None,
+        path: path.clone(),
+    };
+    match model.review.diffs.sides.get(&key) {
+        Some(Loading::Got(sides)) => Some(&sides.old),
+        Some(Loading::Asking | Loading::Failed(_)) => None,
+        None => {
+            frame.push(Action::Review(ReviewAct::NeedSides(key)));
+            None
+        }
+    }
+}
+
+fn text_columns(model: &Model, file: FileId, span: Span) -> Count {
+    model.index.file(file).map_or(Count::ZERO, |source| {
+        let text = source.text();
+        span.lines()
+            .filter_map(|line| text.line(line))
+            .map(|line| Count::new(line.as_str().chars().count()))
+            .max()
+            .map_or(Count::ZERO, |widest| widest + GUTTER)
+    })
+}
+
+fn removed_columns<'inset>(insets: impl Iterator<Item = &'inset Inset<'inset>>) -> Count {
+    insets
+        .filter_map(|inset| match &inset.kind {
+            InsetKind::Removed { lines, .. } => lines
+                .iter()
+                .map(|gone| gone.text.as_str().chars().count())
+                .max(),
+            InsetKind::Thread(_) | InsetKind::Draft(_) | InsetKind::Editing(_) => None,
+        })
+        .max()
+        .map_or(Count::ZERO, |widest| Count::new(widest) + GUTTER)
 }
 
 fn line_count(line: Line) -> Count {
@@ -709,6 +763,8 @@ impl Band {
 pub(super) struct Viewed {
     pub(super) top: Px,
     pub(super) band: Band,
+    pub(super) across: Px,
+    pub(super) columns: Count,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -718,7 +774,7 @@ struct RowsShown {
 }
 
 fn removed_rows(count: Count, viewed: Viewed, row: Px) -> RowsShown {
-    let Viewed { top, band } = viewed;
+    let Viewed { top, band, .. } = viewed;
     let rows = |height: Px| Count::new(usize::try_from(height.ratio(row)).unwrap_or(0));
     let first = rows(band.offset - top).min(count);
     let past = (rows(band.bottom - top) + Count::new(1))
@@ -759,6 +815,10 @@ fn cut(placed: &Placed, row: Px, range: Band) -> Option<Cut> {
         .min(end),
         top: placed.top + rows(start, first, row),
     })
+}
+
+pub(super) fn rows_into(top: Px, down: Px, row: Px) -> Count {
+    Count::new(usize::try_from((down - top).ratio(row).max(0)).unwrap_or(0))
 }
 
 fn rows(from: Line, to: Line, row: Px) -> Px {
@@ -816,15 +876,18 @@ fn draw<'path>(
         .iter()
         .filter(|placed| range.reaches(placed.top, placed.height))
         .collect();
-    let columns = visible
+    let columns = sheet
+        .pieces
         .iter()
         .filter_map(|placed| match placed.piece {
             Piece::Code { start, end } => Span::new(start, end),
             Piece::Fold { .. } | Piece::Inset(_) => None,
         })
         .fold(Count::ZERO, |widest, span| {
-            widest.max(frame.code_columns(shown.model, shown.file, span))
-        });
+            widest.max(text_columns(shown.model, shown.file, span))
+        })
+        .max(removed_columns(insets.iter()));
+    let across = shown.model.across.get(ids::LINES.id());
     let last_code = visible
         .iter()
         .rposition(|placed| matches!(placed.piece, Piece::Code { .. }));
@@ -864,6 +927,8 @@ fn draw<'path>(
                         Viewed {
                             top: placed.top,
                             band: range,
+                            across,
+                            columns,
                         },
                     );
                 }
@@ -902,9 +967,10 @@ fn lit(model: &Model, all: &[Inset<'_>], path: &RelativePath) -> Lit {
                     .place
                     .as_ref()
                     .filter(|place| place.side == Side::New)
-                    .map(|place| place.line),
+                    .map(CodePlace::lines),
                 _ => None,
             })
+            .flat_map(Span::lines)
             .collect(),
     }
 }
@@ -1002,6 +1068,25 @@ impl<'body> CodeBody<'body> {
                 .or_else(|| self.sheet.line_top(line))
                 .unwrap_or(Px::ZERO),
         )
+    }
+
+    pub(super) fn line_at(&self, down: Px) -> Option<Line> {
+        self.sheet
+            .pieces
+            .iter()
+            .filter(|placed| placed.top + placed.height > down)
+            .find_map(|placed| match placed.piece {
+                Piece::Code { start, end } => Some(
+                    Line::new(
+                        start.value().saturating_add(
+                            u32::try_from(rows_into(placed.top, down, self.sheet.row).get())
+                                .unwrap_or(0),
+                        ),
+                    )
+                    .min(end),
+                ),
+                Piece::Fold { .. } | Piece::Inset(_) => None,
+            })
     }
 
     pub(super) fn editor(&self) -> Option<Stretch> {
@@ -1163,6 +1248,22 @@ impl<'inset> GoneBody<'inset> {
             })
     }
 
+    pub(super) fn line_at(&self, down: Px) -> Option<Line> {
+        self.pieces
+            .iter()
+            .filter(|piece| piece.top + piece.inset.height > down)
+            .find_map(|piece| match &piece.inset.kind {
+                InsetKind::Removed { lines, .. } => {
+                    let skipped = rows_into(piece.top, down, self.row);
+                    lines
+                        .get(skipped.get())
+                        .or_else(|| lines.last())
+                        .map(|gone| gone.old)
+                }
+                InsetKind::Thread(_) | InsetKind::Draft(_) | InsetKind::Editing(_) => None,
+            })
+    }
+
     pub(super) fn editor(&self) -> Option<Stretch> {
         self.pieces
             .iter()
@@ -1181,6 +1282,8 @@ impl<'inset> GoneBody<'inset> {
         range: Band,
     ) -> Px {
         let mut drawn = Px::ZERO;
+        let columns = removed_columns(self.pieces.iter().map(|piece| &piece.inset));
+        let across = model.across.get(ids::LINES.id());
         for piece in self
             .pieces
             .iter()
@@ -1196,6 +1299,8 @@ impl<'inset> GoneBody<'inset> {
                 Viewed {
                     top: piece.top,
                     band: range,
+                    across,
+                    columns,
                 },
             );
             drawn = piece.top + piece.inset.height;
@@ -1345,6 +1450,8 @@ mod tests {
                     offset: Px::new(offset),
                     bottom: Px::new(bottom),
                 },
+                across: Px::ZERO,
+                columns: Count::ZERO,
             },
             Px::new(16),
         );

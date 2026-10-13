@@ -412,7 +412,7 @@ impl Renderer {
             start: Vector::new(Coordinate::new(0.0), Coordinate::new(0.0)),
             end: Vector::new(Coordinate::new(1.0), Coordinate::new(1.0)),
         };
-        self.quad(corners, whole, Color::rgba(255, 255, 255, 255));
+        self.unpainted_quad(corners, whole, Color::rgba(255, 255, 255, 255));
         self.switch(Source::Atlas);
     }
 
@@ -427,6 +427,11 @@ impl Renderer {
     }
 
     fn quad(&mut self, corners: [Vector; 4], area: TextureArea, color: Color) {
+        let painted = self.repaint.paint(color);
+        self.unpainted_quad(corners, area, painted);
+    }
+
+    fn unpainted_quad(&mut self, corners: [Vector; 4], area: TextureArea, color: Color) {
         let base = IndexSlot::of_count(self.vertices.len());
         let [first, second, third, fourth] = corners;
         let start = area.start;
@@ -440,7 +445,7 @@ impl Renderer {
             self.vertices.push(Vertex {
                 position,
                 texture,
-                color: self.repaint.paint(color),
+                color,
             });
         }
         self.indices.quad(base);

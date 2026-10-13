@@ -27,6 +27,10 @@ pub enum Icon {
     Ellipsis,
     LinkExternal,
     Copy,
+    Bug,
+    Bookmark,
+    Zap,
+    Person,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +71,10 @@ impl Icon {
             Self::Ellipsis => '\u{EA7C}',
             Self::LinkExternal => '\u{EB14}',
             Self::Copy => '\u{EBCC}',
+            Self::Bug => '\u{EAAF}',
+            Self::Bookmark => '\u{EAA5}',
+            Self::Zap => '\u{EA86}',
+            Self::Person => '\u{EA67}',
         })
     }
 
@@ -92,6 +100,10 @@ impl Icon {
             Self::Ellipsis => "ellipsis",
             Self::LinkExternal => "link-external",
             Self::Copy => "copy",
+            Self::Bug => "bug",
+            Self::Bookmark => "bookmark",
+            Self::Zap => "zap",
+            Self::Person => "person",
         })
     }
 

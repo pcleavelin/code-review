@@ -1,8 +1,11 @@
+use std::rc::Rc;
+
 use domain::{
-    Block, ChangeKind, Content, Conversation, Decision, Draft, DraftOn, DraftText, FileChange,
-    Login, Note, RelativePath, Rights, Seen, Side, Span, Submission, Thread, ThreadState,
+    Block, CardFamily, CardKey, CardStage, ChangeKind, CodePlace, Content, Conversation, Decision,
+    Draft, DraftOn, DraftText, FileChange, Line, Login, Note, RelativePath, Rights, Seen, Side,
+    Span, Submission, Thread, ThreadState,
 };
-use ui::{Color, Count, Icon, Label, Run};
+use ui::{Canvas, Color, Count, Grid, Icon, Label, Point, Rect, Run};
 
 use domain::{CommitId, DiffLayout, Linked, Prose, WebLink};
 
@@ -10,13 +13,15 @@ use crate::diffs::Loading;
 
 use crate::action::Action;
 use crate::field::Which;
+use crate::grid::{self, Gutter};
 use crate::ids::{self, Control};
 use crate::model::Model;
-use crate::review::{OpenReview, ReviewAct, Submitting, Talk};
+use crate::nav::Kept;
+use crate::review::{CardCollapse, OpenReview, ReviewAct, Submitting, Talk};
 use crate::text::{Counted, Noun};
 use crate::theme::{
-    ACCENT, COMMENT_BUTTONS_ROOM, COMMENT_FIELD_GUESS, COMMENT_LEAST_FIELD, Cells, GREEN, NOTE,
-    ORANGE, RED, ROW_EXTRA, SELECTED, SUMMARY_FIELD, TEXT, WEAK,
+    ACCENT, COMMENT_BUTTONS_ROOM, COMMENT_FIELD_GUESS, COMMENT_LEAST_FIELD, Cells, FIELD, GREEN,
+    LINES_SELECTED, NOTE, ORANGE, RED, ROW_EXTRA, SELECTED, SUMMARY_FIELD, TEXT, VIOLET, WEAK,
 };
 use crate::widgets::{
     Chosen, CommentLook, Container, Enabled, Frame, Padding, RowAction, Scroller, TreeRow,
@@ -247,7 +252,7 @@ pub(super) fn changes_window(model: &Model, frame: &mut Frame<'_>) {
     frame.finish();
 }
 
-fn layout_toggle(model: &Model, frame: &mut Frame<'_>) {
+fn layout_toggle(model: &Model, frame: &mut Frame<'_>, kept: Option<Kept>) {
     let layout = ids::LAYOUT.target();
     let split = model.review.diffs.layout == DiffLayout::Split;
     if frame
@@ -258,13 +263,13 @@ fn layout_toggle(model: &Model, frame: &mut Frame<'_>) {
         )
         .clicked()
     {
-        frame.push(Action::Review(ReviewAct::ToggleLayout));
+        frame.push(Action::Review(ReviewAct::ToggleLayout(kept)));
     }
     frame.attach_tip(layout);
 }
 
-pub(super) fn diff_controls(model: &Model, frame: &mut Frame<'_>) {
-    layout_toggle(model, frame);
+pub(super) fn diff_controls(model: &Model, frame: &mut Frame<'_>, kept: Option<Kept>) {
+    layout_toggle(model, frame, kept);
     if let Some(commit) = model.review.diffs.commit() {
         frame.label(format!("commit {commit}"), ORANGE);
         let all = ids::ALL_CHANGES.with(&Label::new("source"));
@@ -369,7 +374,7 @@ fn note_head(model: &Model, frame: &mut Frame<'_>, note: &Note, key: &Label) {
 fn author_button(model: &Model, frame: &mut Frame<'_>, author: &Login, key: &Label) {
     let target = ids::AUTHOR.with(key);
     if frame
-        .inline_button(vec![Run::new(author.as_str(), ACCENT)], target)
+        .link(vec![Run::new(author.as_str(), ACCENT)], target)
         .clicked()
         && let Some(link) = model
             .review
@@ -414,13 +419,114 @@ fn submission_box(
         markdown(model, frame, &submission.summary, &key);
     }
     for thread in threads {
-        place_row(frame, talk, thread);
+        place_row(model, frame, talk, thread);
         thread_box(model, frame, thread);
     }
     frame.finish();
 }
 
-fn place_row(frame: &mut Frame<'_>, talk: &Conversation, thread: &Thread) {
+fn card(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
+    let found = match &open.card {
+        Loading::Got(Some(found)) => found,
+        Loading::Got(None) => return,
+        Loading::Asking => {
+            if let Some(key) = CardKey::of_pull(&open.pull) {
+                frame.note(format!("asking Jira for {key}..."), WEAK, Padding::Step);
+            }
+            return;
+        }
+        Loading::Failed(why) => {
+            frame.note(why.as_str(), ORANGE, Padding::Step);
+            return;
+        }
+    };
+    let family = family_color(found.family);
+    let collapse = model.review.card_collapse;
+    frame.start(Container::Card(ids::card_box()));
+    frame.stripe(family);
+    frame.start(Container::CardBody);
+    frame.start(Container::FillRow);
+    let toggle = ids::CARD_COLLAPSE.target();
+    let chevron = match collapse {
+        CardCollapse::Open => Icon::Expanded,
+        CardCollapse::Collapsed => Icon::Collapsed,
+    };
+    if frame
+        .inline_button(
+            vec![
+                Run::new(chevron, WEAK),
+                Run::new(" ", WEAK),
+                Run::new(family_icon(found.family), family),
+                Run::new(format!(" {} ", found.kind), family),
+            ],
+            toggle,
+        )
+        .clicked()
+    {
+        frame.push(Action::Review(ReviewAct::CollapseCard));
+    }
+    frame.attach_tip(toggle);
+    let target = ids::CARD_LINK.target();
+    if frame
+        .link(vec![Run::new(found.key.as_str(), ACCENT)], target)
+        .clicked()
+        && let Some(link) = &found.link
+    {
+        frame.push(Action::Review(ReviewAct::OpenLink(link.clone())));
+    }
+    frame.attach_tip(target);
+    frame.label("", WEAK);
+    frame.pill(
+        format!(" {} ", found.status.as_str().to_uppercase()),
+        stage_color(found.stage),
+    );
+    frame.grow();
+    let assignee = found
+        .assignee
+        .as_ref()
+        .map_or_else(|| "unassigned".to_owned(), ToString::to_string);
+    frame.label_runs(vec![
+        Run::new(Icon::Person, WEAK),
+        Run::new(format!(" {assignee}"), WEAK),
+    ]);
+    frame.finish();
+    frame.title(found.summary.as_str());
+    if collapse == CardCollapse::Open && !found.description.as_str().is_empty() {
+        markdown(model, frame, &found.description, &Label::new("card"));
+    }
+    frame.finish();
+    frame.finish();
+}
+
+const fn family_color(family: CardFamily) -> Color {
+    match family {
+        CardFamily::Bug => RED,
+        CardFamily::Story => GREEN,
+        CardFamily::Task => ACCENT,
+        CardFamily::Epic => VIOLET,
+        CardFamily::Other => WEAK,
+    }
+}
+
+const fn family_icon(family: CardFamily) -> Icon {
+    match family {
+        CardFamily::Bug => Icon::Bug,
+        CardFamily::Story => Icon::Bookmark,
+        CardFamily::Task => Icon::Check,
+        CardFamily::Epic => Icon::Zap,
+        CardFamily::Other => Icon::Dot,
+    }
+}
+
+const fn stage_color(stage: CardStage) -> Color {
+    match stage {
+        CardStage::ToDo => WEAK,
+        CardStage::InProgress => ACCENT,
+        CardStage::Done => GREEN,
+    }
+}
+
+fn place_row(model: &Model, frame: &mut Frame<'_>, talk: &Conversation, thread: &Thread) {
     let Some(place) = &thread.place else {
         return;
     };
@@ -431,26 +537,86 @@ fn place_row(frame: &mut Frame<'_>, talk: &Conversation, thread: &Thread) {
         .unwrap_or_default();
     let target = ids::THREAD_ROW.nth(Count::new(position));
     let outdated = thread.state == ThreadState::Outdated;
-    let runs = vec![
-        Run::new(
-            format!(
-                "{}:{}{}",
-                place.file,
-                place.line.number(),
-                side_word(place.side).as_str()
-            ),
-            if outdated { WEAK } else { ACCENT },
+    let spot = Run::new(
+        format!(
+            "{}:{}{}",
+            place.file,
+            place.line.number(),
+            side_word(place.side).as_str()
         ),
-        Run::new(state_word(thread.state), WEAK),
-    ];
+        if outdated { WEAK } else { ACCENT },
+    );
+    let state = Run::new(state_word(thread.state), WEAK);
     if outdated {
-        frame.text_line(runs);
+        frame.text_line(vec![spot, state]);
     } else {
-        if frame.row(runs, target, Chosen::Plain).clicked() {
+        frame.start(Container::FillRow);
+        if frame.link(vec![spot], target).clicked() {
             frame.push(Action::Review(ReviewAct::OpenPlace(place.clone())));
         }
         frame.attach_tip(target);
+        frame.label_runs(vec![state]);
+        frame.finish();
+        snippet(model, frame, thread, place);
     }
+}
+
+const SNIPPET_ABOVE: Count = Count::new(2);
+
+fn snippet_grid(model: &Model, place: &CodePlace) -> Option<Grid> {
+    match place.side {
+        Side::New => {
+            let source = model
+                .index
+                .find_file(&place.file)
+                .and_then(|file| model.index.file(file))?;
+            let last = source.text().count().last()?;
+            let span = Span::new(
+                Line::new(
+                    place
+                        .line
+                        .value()
+                        .saturating_sub(u32::try_from(SNIPPET_ABOVE.get()).unwrap_or(0)),
+                ),
+                place.line.min(last),
+            )?;
+            Some(grid::build(source, span, Gutter::Numbered))
+        }
+        Side::Old => {
+            let change = model.review.change(&place.file)?;
+            change
+                .removals()
+                .iter()
+                .flat_map(|removal| removal.lines.iter())
+                .find(|removed| removed.old == place.line)
+                .map(|removed| grid::removed(removed.old, removed.text, None))
+        }
+    }
+}
+
+fn snippet(model: &Model, frame: &mut Frame<'_>, thread: &Thread, place: &CodePlace) {
+    let Some(grid) = snippet_grid(model, place) else {
+        return;
+    };
+    let grid = Rc::new(grid);
+    let row = frame.row_height();
+    let font = frame.metrics.font;
+    let pad = frame.cell_width() / 2;
+    let rows = grid.rows();
+    let marked = row * Count::new(rows.get().saturating_sub(1));
+    let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
+        canvas.rect(rect, FIELD);
+        canvas.rect(
+            Rect::new(rect.left, rect.top + pad + marked, rect.width, row),
+            LINES_SELECTED,
+        );
+        canvas.grid(Point::new(rect.left + pad, rect.top + pad), font, &grid);
+    };
+    frame.custom_block(
+        Box::new(draw),
+        row * rows + pad * 2,
+        ids::snippet().with(thread.id.as_str()),
+    );
 }
 
 fn notes(model: &Model, frame: &mut Frame<'_>, thread: &Thread) {
@@ -494,11 +660,7 @@ fn pending_reply(model: &Model, frame: &mut Frame<'_>, draft: &Draft) {
         Run::new("  draft reply, sent with the review", WEAK),
     ]);
     frame.grow();
-    let remove = ids::DRAFT_REMOVE.with(&Label::new(draft.id.to_string()));
-    if frame.small_button("remove", remove).clicked() {
-        frame.push(Action::Review(ReviewAct::RemoveDraft(draft.id)));
-    }
-    frame.attach_tip(remove);
+    draft_buttons(frame, draft);
     frame.finish();
     markdown(
         model,
@@ -514,8 +676,24 @@ pub(super) fn replies_to<'model>(model: &'model Model, thread: &Thread) -> Vec<&
         .opened()
         .into_iter()
         .flat_map(|opened| opened.review.drafts())
-        .filter(|draft| draft.reply.as_ref() == Some(&thread.id))
+        .filter(|draft| {
+            draft.reply.as_ref() == Some(&thread.id) && model.review.editing != Some(draft.id)
+        })
         .collect()
+}
+
+fn draft_buttons(frame: &mut Frame<'_>, draft: &Draft) {
+    let key = Label::new(draft.id.to_string());
+    let edit = ids::DRAFT_EDIT.with(&key);
+    if frame.small_button("edit", edit).clicked() {
+        frame.push(Action::Review(ReviewAct::EditDraft(draft.id)));
+    }
+    frame.attach_tip(edit);
+    let remove = ids::DRAFT_REMOVE.with(&key);
+    if frame.small_button("remove", remove).clicked() {
+        frame.push(Action::Review(ReviewAct::RemoveDraft(draft.id)));
+    }
+    frame.attach_tip(remove);
 }
 
 pub(super) fn thread_box(model: &Model, frame: &mut Frame<'_>, thread: &Thread) {
@@ -576,11 +754,7 @@ pub(super) fn draft_box(model: &Model, frame: &mut Frame<'_>, draft: &Draft) {
         ),
     ]);
     frame.grow();
-    let remove = ids::DRAFT_REMOVE.with(&Label::new(draft.id.to_string()));
-    if frame.small_button("remove", remove).clicked() {
-        frame.push(Action::Review(ReviewAct::RemoveDraft(draft.id)));
-    }
-    frame.attach_tip(remove);
+    draft_buttons(frame, draft);
     frame.finish();
     markdown(
         model,
@@ -610,10 +784,10 @@ pub(super) fn editing_box(
         look: CommentLook::Draft,
         id: ids::draft_box().with("editing"),
     });
-    let what = if on.reply.is_some() {
-        "reply to the thread"
-    } else {
-        "new comment"
+    let what = match (model.review.editing, on.reply.is_some()) {
+        (Some(id), _) => format!("draft {id}"),
+        (None, true) => "reply to the thread".to_owned(),
+        (None, false) => "new comment".to_owned(),
     };
     frame.label_runs(vec![
         Run::new(
@@ -624,7 +798,14 @@ pub(super) fn editing_box(
             ),
             TEXT,
         ),
-        Run::new("  ctrl+enter adds it, escape cancels", WEAK),
+        Run::new(
+            if model.review.editing.is_some() {
+                "  ctrl+enter saves it, escape cancels"
+            } else {
+                "  ctrl+enter adds it, escape cancels"
+            },
+            WEAK,
+        ),
     ]);
     frame.start(Container::StepRow {
         selected: Chosen::Plain,
@@ -637,7 +818,12 @@ pub(super) fn editing_box(
         Cells::of_count(room.get()),
     );
     let add = ids::DRAFT_ADD.target();
-    if frame.small_button("add", add).clicked() {
+    let word = if model.review.editing.is_some() {
+        "save"
+    } else {
+        "add"
+    };
+    if frame.small_button(word, add).clicked() {
         frame.push(Action::Review(ReviewAct::SaveDraft));
     }
     frame.attach_tip(add);
@@ -727,7 +913,7 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
                 threads,
             } => submission_box(model, frame, talk, submission, threads),
             Block::Alone(thread) => {
-                place_row(frame, talk, thread);
+                place_row(model, frame, talk, thread);
                 thread_box(model, frame, thread);
             }
         }
@@ -770,6 +956,7 @@ fn your_review(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
             frame.push(Action::Review(ReviewAct::OpenPlace(domain::CodePlace {
                 file: draft.file.clone(),
                 side: draft.side,
+                start: draft.start,
                 line: draft.line,
             })));
         }
@@ -923,6 +1110,7 @@ pub(super) fn review_tab(model: &Model, frame: &mut Frame<'_>) {
             if progress.done() { GREEN } else { ORANGE },
         ),
     ]);
+    card(model, frame, open);
     conversation(model, frame, open);
     your_review(model, frame, open);
     frame.finish();

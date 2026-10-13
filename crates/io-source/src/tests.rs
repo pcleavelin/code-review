@@ -26,12 +26,15 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 #[test]
-fn the_walk_skips_ignored_hidden_and_binary_files() {
+fn the_walk_reads_dot_folders_and_skips_ignored_binary_and_tool_files() {
     let root = scratch("walk");
     put(&root, "src/a.rs", b"fn a() {\n\tb();\n}\n");
     put(&root, ".gitignore", b"build/\n");
     put(&root, "build/gen.rs", b"fn ignored() {}\n");
-    put(&root, ".hidden/x.rs", b"fn hidden() {}\n");
+    put(&root, ".sqlx/query-1.json", b"{}\n");
+    put(&root, ".git/config", b"[core]\n");
+    put(&root, ".jj/repo/store", b"store\n");
+    put(&root, ".review-cache", b"cache\n");
     put(&root, "data.bin", b"\0\x01binary");
     put(&root, "late.bin", &[b"x".repeat(2000), vec![0]].concat());
     put(&root, "big.txt", &b"y".repeat((4 << 20) + 1));
@@ -39,7 +42,16 @@ fn the_walk_skips_ignored_hidden_and_binary_files() {
     let mut read = walk(&Root::new(&root));
     read.sort_by(|one, other| one.path.cmp(&other.path));
     let paths: Vec<&str> = read.iter().map(|file| file.path.as_str()).collect();
-    assert_eq!(paths, ["edge.txt", "late.bin", "src/a.rs"]);
+    assert_eq!(
+        paths,
+        [
+            ".gitignore",
+            ".sqlx/query-1.json",
+            "edge.txt",
+            "late.bin",
+            "src/a.rs"
+        ]
+    );
     let source = read
         .iter()
         .find(|file| file.path.as_str() == "src/a.rs")

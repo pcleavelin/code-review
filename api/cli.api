@@ -1,5 +1,5 @@
-exec::pub enum Touched { Nothing, Pins, Review(PrNumber), Dropped(RepoName, PrNumber), LoginStarted(StartedLogin), Keychain, }
-failure::pub enum Failure { Session(SessionError), NotChanged { number: PrNumber, file: RelativePath, }, NotInDiff { file: RelativePath, side: Side, line: Line, }, EmptyComment, NoThread(Given), Draft(DraftError), NoSuchFile(RelativePath), NoSuchSymbol(SymbolName), BadPattern(regex::Error), NoToken(ForgeHost), }
+exec::pub enum Touched { Nothing, Pins, Review(PrNumber), Dropped(RepoName, PrNumber), LoginStarted(StartedLogin), JiraLoginStarted(JiraSite), Keychain, }
+failure::pub enum Failure { Session(SessionError), NotChanged { number: PrNumber, file: RelativePath, }, NotInDiff { file: RelativePath, side: Side, line: Line, }, EmptyComment, NoThread(Given), Draft(DraftError), NoSuchFile(RelativePath), NoSuchSymbol(SymbolName), BadPattern(regex::Error), NoToken(ForgeHost), NoJiraToken(JiraSite), }
 failure::pub struct Given(String);
 failure::pub fn as_str(&self) -> &str
 pub struct Argument(String);
@@ -18,6 +18,7 @@ pub fn parse(arguments: &[Argument]) -> Result<Self, ParseFailure>
 pub struct PastedToken(String);
 pub fn new(text: &str) -> Self
 pub fn finish_login( desk: &Desk, started: &StartedLogin, pasted: Option<&PastedToken>, output: &mut Output, ) -> Result<(), Failure>
+pub fn finish_jira_login( desk: &Desk, site: &JiraSite, pasted: Option<&PastedToken>, output: &mut Output, ) -> Result<(), Failure>
 pub fn help() -> Output
 pub fn exec( desk: &mut Desk, invocation: Invocation, output: &mut Output, ) -> Result<Touched, Failure>
 output::pub struct Output(String);

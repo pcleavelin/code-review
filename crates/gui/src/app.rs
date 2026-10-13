@@ -4,7 +4,7 @@ use std::mem;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use domain::LayoutTree;
+use domain::Layout;
 use domain::{Index, Line, RelativePath, Root};
 use io_config::{LayoutStore, Reach, SettingsStore};
 use io_picture::PictureCache;
@@ -16,6 +16,7 @@ use strum::VariantArray;
 use ui::{Button, Capture, Count, Id, Input, Label, Measure, Px, Ui};
 
 use crate::action::Action;
+use crate::columns::{InboxColumn, InboxGrid};
 use crate::dump::{self, Context, Dump, DumpLines};
 use crate::field::Which;
 use crate::grid::Grids;
@@ -56,7 +57,7 @@ pub(crate) struct App {
 #[derive(Debug, Default)]
 struct KeptLayout {
     store: Option<LayoutStore>,
-    saved: Option<LayoutTree>,
+    saved: Option<Layout>,
 }
 
 const SHOT_TAB_FRAME: Count = Count::new(3);
@@ -65,7 +66,7 @@ const SHOT_FRAME: Count = Count::new(20);
 const FOCUS_GRACE: Count = Count::new(4);
 const ANIMATING: Duration = Duration::from_millis(8);
 const BUSY: Duration = Duration::from_millis(50);
-const IDLE: Duration = Duration::from_millis(1000);
+const IDLE: Duration = Duration::from_secs(1);
 
 const PICTURES: Folder = Folder("code-review-pictures");
 
@@ -92,10 +93,11 @@ impl App {
         model.settings = settings.chosen();
         let layout_store = LayoutStore::find(reach);
         if let Some(saved) = layout_store.as_ref().and_then(LayoutStore::load) {
-            model.panels = panels::Panels::from_layout(&saved);
+            model.panels = panels::Panels::from_layout(&saved.tree);
+            model.inbox_grid = InboxGrid::of_saved(&saved.columns);
         }
         let layout = KeptLayout {
-            saved: Some(model.panels.layout()),
+            saved: Some(model.layout()),
             store: layout_store,
         };
         let mut app = Self {
@@ -235,7 +237,10 @@ impl App {
             Which::Inbox,
             Which::Pin,
             Which::Token,
-        ] {
+        ]
+        .into_iter()
+        .chain(InboxColumn::VARIANTS.iter().copied().map(Which::Column))
+        {
             actions.push(Action::Type(which, edits.clone(), typed.clone()));
         }
         for action in actions {
@@ -519,7 +524,7 @@ impl App {
         if self.model.panels.grab().is_some() || self.ui.pointer().down.contains(Button::Left) {
             return;
         }
-        let now = self.model.panels.layout();
+        let now = self.model.layout();
         if self.layout.saved.as_ref() == Some(&now) {
             return;
         }

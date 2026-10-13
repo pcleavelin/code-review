@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use domain::{FileId, Line, SourceFile, Span, TextHash};
+use domain::{FileId, Line, SourceFile, SourceLine, Span, TextHash};
 use ui::{Cell, Count, Glyph, Grid};
 
-use crate::theme::{self, TEXT, WEAK};
+use crate::theme::{self, RED, TEXT, WEAK};
 
 pub(crate) const GUTTER: Count = Count::new(6);
 
@@ -72,6 +72,40 @@ pub(crate) fn build(file: &SourceFile, span: Span, gutter: Gutter) -> Grid {
                 },
             );
         }
+    }
+    grid
+}
+
+pub(crate) fn removed(old: Line, text: &SourceLine, side: Option<&SourceFile>) -> Grid {
+    let highlighted = side.filter(|file| file.text().line(old) == Some(text));
+    let mut grid = if let Some(file) = highlighted {
+        build(file, Span::line(old), Gutter::Numbered)
+    } else {
+        let mut plain = Grid::new(
+            Count::new(text.as_str().chars().count()) + GUTTER,
+            Count::new(1),
+        );
+        for (column, glyph) in text.as_str().chars().enumerate() {
+            plain.set(
+                Count::new(column) + GUTTER,
+                Count::ZERO,
+                Cell {
+                    glyph: Glyph::new(glyph),
+                    color: TEXT,
+                },
+            );
+        }
+        plain
+    };
+    for (column, glyph) in format!("{:5}-", old.number()).chars().enumerate() {
+        grid.set(
+            Count::new(column),
+            Count::ZERO,
+            Cell {
+                glyph: Glyph::new(glyph),
+                color: RED,
+            },
+        );
     }
     grid
 }

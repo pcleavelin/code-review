@@ -1,12 +1,16 @@
 use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use domain::{ClientId, Forge, ForgeHost, Grant, Token, UnixTime, WebLink};
+use domain::{
+    Card, CardKey, ClientId, Forge, ForgeHost, Grant, Host, JiraSite, PictureSource, PullRequest,
+    Token, UnixTime, WebLink,
+};
 use io_config::{ForgesStore, Reach};
 use io_forge::{Cancel, DeviceAuthorization, LoginMethod};
 use io_keychain::{Forgotten, Keychain};
 
 use crate::SessionError;
+use crate::desk::LoginTarget;
 
 static RENEWING: Mutex<()> = Mutex::new(());
 
@@ -123,11 +127,19 @@ impl Access {
     }
 
     pub fn holds(&self, site: &ForgeHost) -> Result<Holds, SessionError> {
+        self.holds_for(site.host())
+    }
+
+    pub fn holds_jira(&self, site: &JiraSite) -> Result<Holds, SessionError> {
+        self.holds_for(site.host())
+    }
+
+    fn holds_for(&self, host: &Host) -> Result<Holds, SessionError> {
         let Some(keychain) = self.keychain.as_ref() else {
             return Ok(Holds::Nothing);
         };
         keychain
-            .load(site.host())
+            .load(host)
             .map(|grant| grant.map_or(Holds::Nothing, |_| Holds::Login))
             .map_err(SessionError::Keychain)
     }
@@ -159,6 +171,55 @@ impl Access {
             .save(site.host(), &grant)
             .map_err(SessionError::Keychain)?;
         Ok(site)
+    }
+
+    pub fn jira_sites(&self) -> Vec<JiraSite> {
+        self.forges
+            .as_ref()
+            .map(ForgesStore::jira_sites)
+            .unwrap_or_default()
+    }
+
+    pub fn jira_site(&self, target: &LoginTarget) -> Option<JiraSite> {
+        self.jira_sites()
+            .into_iter()
+            .find(|site| site.host().as_str().eq_ignore_ascii_case(target.as_str()))
+    }
+
+    pub fn keep_jira(&self, site: &JiraSite, token: Token) -> Result<(), SessionError> {
+        self.keychain()?
+            .save(site.host(), &Grant::lasting(token))
+            .map_err(SessionError::Keychain)
+    }
+
+    pub fn forget_jira(&self, site: &JiraSite) -> Result<Forgotten, SessionError> {
+        self.keychain()?
+            .forget(site.host())
+            .map_err(SessionError::Keychain)
+    }
+
+    pub fn picture_source(&self, link: &WebLink) -> Option<PictureSource> {
+        let site = self
+            .jira_sites()
+            .into_iter()
+            .find(|site| site.serves(link))?;
+        let grant = self.keychain.as_ref()?.load(site.host()).ok()??;
+        Some(io_jira::picture_source(&grant.token, link))
+    }
+
+    pub fn card(&self, pull: &PullRequest) -> Result<Option<Card>, SessionError> {
+        let Some(key) = CardKey::of_pull(pull) else {
+            return Ok(None);
+        };
+        let Some(site) = self.jira_sites().into_iter().next() else {
+            return Ok(None);
+        };
+        let grant = self
+            .keychain()?
+            .load(site.host())
+            .map_err(SessionError::Keychain)?
+            .ok_or_else(|| SessionError::JiraLoggedOut(site.clone()))?;
+        Ok(Some(io_jira::card(&site, &grant.token, &key)?))
     }
 
     pub fn keep(&self, site: &ForgeHost, token: Token) -> Result<(), SessionError> {

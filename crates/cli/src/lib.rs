@@ -4,7 +4,7 @@ mod failure;
 mod output;
 mod wire;
 
-use domain::Token;
+use domain::{JiraSite, Token};
 use session::{Cancel, Desk, StartedLogin};
 
 use crate::convert::Request;
@@ -110,6 +110,20 @@ pub fn finish_login(
         }
     };
     wire::logged_in(output, &site);
+    Ok(())
+}
+
+pub fn finish_jira_login(
+    desk: &Desk,
+    site: &JiraSite,
+    pasted: Option<&PastedToken>,
+    output: &mut Output,
+) -> Result<(), Failure> {
+    let token = pasted
+        .and_then(|pasted| Token::new(&pasted.0))
+        .ok_or_else(|| Failure::NoJiraToken(site.clone()))?;
+    desk.access().keep_jira(site, token)?;
+    wire::jira_logged_in(output, site);
     Ok(())
 }
 

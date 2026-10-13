@@ -287,19 +287,8 @@ impl Repo {
             .vcs
             .fetched(number)
             .map_err(|error| SessionError::NotOpened(number, error))?;
-        let changes = self.vcs.diff(&fetched.base, &fetched.head)?;
-        let paths: Vec<RelativePath> = changes.iter().map(|change| change.path().clone()).collect();
-        let marked = self.vcs.provenances(&fetched.head, &paths)?;
-        let generated = paths
-            .into_iter()
-            .filter(|path| {
-                marked
-                    .get(path)
-                    .copied()
-                    .unwrap_or(Provenance::Undeclared)
-                    .generated(path)
-            })
-            .collect();
+        let mut changes = self.vcs.diff(&fetched.base, &fetched.head)?;
+        let generated = self.generated_last(&fetched.head, &mut changes)?;
         Ok(Opened {
             number,
             changes,
@@ -345,7 +334,30 @@ impl Repo {
     }
 
     pub fn commit_changes(&self, commit: &CommitId) -> Result<Vec<FileChange>, SessionError> {
-        Ok(self.vcs.commit_changes(commit)?)
+        let mut changes = self.vcs.commit_changes(commit)?;
+        self.generated_last(commit, &mut changes)?;
+        Ok(changes)
+    }
+
+    fn generated_last(
+        &self,
+        at: &CommitId,
+        changes: &mut [FileChange],
+    ) -> Result<BTreeSet<RelativePath>, SessionError> {
+        let paths: Vec<RelativePath> = changes.iter().map(|change| change.path().clone()).collect();
+        let marked = self.vcs.provenances(at, &paths)?;
+        let generated: BTreeSet<RelativePath> = paths
+            .into_iter()
+            .filter(|path| {
+                marked
+                    .get(path)
+                    .copied()
+                    .unwrap_or(Provenance::Undeclared)
+                    .generated(path)
+            })
+            .collect();
+        changes.sort_by_key(|change| generated.contains(change.path()));
+        Ok(generated)
     }
 
     pub fn read_at(

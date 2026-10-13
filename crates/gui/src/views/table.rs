@@ -346,7 +346,11 @@ impl Table<'_> {
                     frame.push(Action::SelectLine(
                         self.path.clone(),
                         new,
-                        LineGesture::Press,
+                        if pointer.mods.shift() {
+                            LineGesture::Extend
+                        } else {
+                            LineGesture::Press
+                        },
                     ));
                 } else if dragging {
                     frame.push(Action::SelectLine(
@@ -552,6 +556,23 @@ impl<'body> TableBody<'body> {
             })
     }
 
+    pub(super) fn line_at(&self, down: Px) -> Option<Line> {
+        self.sheet
+            .pieces
+            .iter()
+            .filter(|placed| placed.top + placed.height > down)
+            .find_map(|placed| match placed.piece {
+                Piece::Rows { from, to } => {
+                    let skipped = center::rows_into(placed.top, down, self.row);
+                    from.down(skipped.get())
+                        .min(to)
+                        .pair(&self.pairs)
+                        .and_then(|pair| pair.new.or(pair.old))
+                }
+                Piece::Fold { .. } | Piece::Inset(_) => None,
+            })
+    }
+
     pub(super) fn editor(&self) -> Option<Stretch> {
         self.sheet
             .pieces
@@ -689,6 +710,8 @@ impl<'body> TableBody<'body> {
                             Viewed {
                                 top: placed.top,
                                 band,
+                                across: table.across,
+                                columns: Count::ZERO,
                             },
                         );
                     }

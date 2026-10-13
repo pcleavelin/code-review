@@ -16,7 +16,7 @@ use crate::build::save_cache;
 use crate::link::link;
 use crate::parse::TypeText;
 
-const READY_WAIT: Duration = Duration::from_secs(300);
+const READY_WAIT: Duration = Duration::from_mins(5);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ServerFile {

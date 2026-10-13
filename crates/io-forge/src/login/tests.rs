@@ -261,7 +261,7 @@ fn a_cancel_ends_a_pause_before_its_time() {
     let cancel = Cancel::new();
     cancel.cancel();
     assert_eq!(
-        super::pause_unless_cancelled(Duration::from_secs(3600), &cancel),
+        super::pause_unless_cancelled(Duration::from_hours(1), &cancel),
         Paused::Stopped
     );
     assert_eq!(

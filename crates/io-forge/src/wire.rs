@@ -487,6 +487,7 @@ pub(crate) struct WireNote {
 pub(crate) struct WirePlace {
     pub(crate) path: String,
     pub(crate) side: Side,
+    pub(crate) start: Option<u32>,
     pub(crate) line: u32,
 }
 
@@ -890,6 +891,11 @@ pub(crate) fn parse_github_code_threads(items: &[Value]) -> Option<Vec<WireThrea
                     side: text_at(comment, "/side")
                         .and_then(|side| WireSide::read(&side))
                         .unwrap_or(Side::New),
+                    start: if line.is_some() {
+                        line_at(comment, "/start_line")
+                    } else {
+                        line_at(comment, "/original_start_line")
+                    },
                     line: line
                         .or_else(|| line_at(comment, "/original_line"))
                         .unwrap_or(1),
@@ -918,11 +924,13 @@ fn gitlab_place(position: &Value) -> WirePlace {
         Some(line) => WirePlace {
             path: text_at(position, "/new_path").unwrap_or_default(),
             side: Side::New,
+            start: line_at(position, "/line_range/start/new_line"),
             line,
         },
         None => WirePlace {
             path: text_at(position, "/old_path").unwrap_or_default(),
             side: Side::Old,
+            start: line_at(position, "/line_range/start/old_line"),
             line: line_at(position, "/old_line").unwrap_or(1),
         },
     }
@@ -983,6 +991,7 @@ pub(crate) fn parse_forgejo_comments(items: &[Value]) -> Option<Vec<WireCodeComm
                 place: WirePlace {
                     path: text_at(comment, "/path")?,
                     side,
+                    start: None,
                     line,
                 },
                 resolved: comment

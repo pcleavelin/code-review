@@ -5,8 +5,15 @@ access::pub fn find(reach: Reach) -> Self
 access::pub fn token(&self, forge: &Forge) -> Result<Option<Token>, SessionError>
 access::pub fn renew(&self, site: &ForgeHost) -> Result<Option<Token>, SessionError>
 access::pub fn holds(&self, site: &ForgeHost) -> Result<Holds, SessionError>
+access::pub fn holds_jira(&self, site: &JiraSite) -> Result<Holds, SessionError>
 access::pub fn start(&self, site: &ForgeHost) -> Result<StartedLogin, SessionError>
 access::pub fn finish( &self, authorization: &DeviceAuthorization, cancel: &Cancel, ) -> Result<ForgeHost, SessionError>
+access::pub fn jira_sites(&self) -> Vec<JiraSite>
+access::pub fn jira_site(&self, target: &LoginTarget) -> Option<JiraSite>
+access::pub fn keep_jira(&self, site: &JiraSite, token: Token) -> Result<(), SessionError>
+access::pub fn forget_jira(&self, site: &JiraSite) -> Result<Forgotten, SessionError>
+access::pub fn picture_source(&self, link: &WebLink) -> Option<PictureSource>
+access::pub fn card(&self, pull: &PullRequest) -> Result<Option<Card>, SessionError>
 access::pub fn keep(&self, site: &ForgeHost, token: Token) -> Result<(), SessionError>
 access::pub fn forget(&self, site: &ForgeHost) -> Result<Forgotten, SessionError>
 desk::pub struct PinTarget(String);
@@ -32,7 +39,7 @@ desk::pub fn names(&self) -> Vec<RepoName>
 desk::pub fn pin(&mut self, target: &PinTarget) -> Result<RepoName, SessionError>
 desk::pub fn unpin(&mut self, asked: &RepoName) -> Result<RepoName, SessionError>
 desk::pub fn find(&self, address: &PullAddress) -> Result<&Repo, SessionError>
-pub enum SessionError { Vcs(VcsError), NoRemote, Forge(ForgeError), Review(ReviewError), NotOpened(PrNumber, VcsError), Moved { number: PrNumber, reviewed: CommitId, now: CommitId, }, SubmitRefused { number: PrNumber, refusal: Refusal, }, NothingToDrop(PrNumber), SeenHeadGone { file: RelativePath, head: CommitId, }, NoPins, NoPinStore, Pins(io::Error), AlreadyPinned(RepoName), NoSuchRepo(RepoName, Vec<RepoName>), Ambiguous(PrNumber, Vec<RepoName>), Keychain(KeychainError), NoKeychain, NoClient { host: Host, gap: MissingClient, file: Option<PathBuf>, }, Renewal { site: ForgeHost, cause: ForgeError, }, TokenRefused { site: ForgeHost, cause: ForgeError, }, NoSite(LoginTarget), }
+pub enum SessionError { Vcs(VcsError), NoRemote, Forge(ForgeError), Review(ReviewError), NotOpened(PrNumber, VcsError), Moved { number: PrNumber, reviewed: CommitId, now: CommitId, }, SubmitRefused { number: PrNumber, refusal: Refusal, }, NothingToDrop(PrNumber), SeenHeadGone { file: RelativePath, head: CommitId, }, NoPins, NoPinStore, Pins(io::Error), AlreadyPinned(RepoName), NoSuchRepo(RepoName, Vec<RepoName>), Ambiguous(PrNumber, Vec<RepoName>), Keychain(KeychainError), NoKeychain, NoClient { host: Host, gap: MissingClient, file: Option<PathBuf>, }, Renewal { site: ForgeHost, cause: ForgeError, }, TokenRefused { site: ForgeHost, cause: ForgeError, }, NoSite(LoginTarget), Jira(JiraError), JiraLoggedOut(JiraSite), }
 pub const fn lacks_token(&self) -> bool
 pub const fn keychain_timed_out(&self) -> bool
 repo::pub struct RepoName(String);

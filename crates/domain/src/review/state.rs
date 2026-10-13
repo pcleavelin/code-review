@@ -313,6 +313,16 @@ impl Review {
         Ok(self.drafts.remove(at))
     }
 
+    pub fn edit_draft(&mut self, id: DraftId, text: DraftText) -> Result<&Draft, DraftError> {
+        let draft = self
+            .drafts
+            .iter_mut()
+            .find(|draft| draft.id == id)
+            .ok_or(DraftError::NoSuchDraft(id))?;
+        draft.text = text;
+        Ok(draft)
+    }
+
     pub fn clear_drafts(&mut self) {
         self.drafts.clear();
     }

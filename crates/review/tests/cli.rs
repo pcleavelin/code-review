@@ -45,6 +45,7 @@ macro_rules! at_scale {
 at_scale!(scale_inbox, scale_review);
 
 scenarios!(
+    jira_card,
     offline_review,
     refusals,
     pinning,
@@ -226,6 +227,13 @@ case "$url" in
   rest=${url#https://*/api/v1/}; rest=${rest%%\?*}
   file="$api/$(printf '%s' "$rest" | tr '/' '-').json"
   if [ -f "$file" ]; then body=$(cat "$file"); else body='{"message":"not found"}'; status=404; fi;;
+*/rest/api/2/issue/*)
+  key=${url#*/rest/api/2/issue/}; key=${key%%\?*}
+  case "$config" in
+  *"Authorization: Basic $(printf %s "$(cat "$api/jira-login" 2>/dev/null)" | base64)\""*)
+    if [ -f "$api/jira-$key.json" ]; then body=$(cat "$api/jira-$key.json"); else body='{"errorMessages":["Issue does not exist"]}'; status=404; fi;;
+  *) body=''; status=401;;
+  esac;;
 */api/v4/user|*/merge_requests*)
   case "$config" in
   *"Authorization: Bearer $(cat "$api/token")\""*)
@@ -422,6 +430,16 @@ mod scenario {
         assert_eq!(removed.stdout, "removed draft 1\n");
         let drafts = fixture.run(&["drafts", "1"]);
         assert_eq!(drafts.stdout, "draft 2  a.txt:2 (old)  was fine\n");
+
+        let edited = fixture.run(&["edit", "1", "2", "was fine as two"]);
+        assert_eq!(edited.stdout, "draft 2  a.txt:2 (old)  was fine as two\n");
+        let blank = fixture.run(&["edit", "1", "2", "  "]);
+        assert_eq!(blank.code, Some(2), "{}", blank.stderr);
+        let missing = fixture.run(&["edit", "1", "9", "nothing here"]);
+        assert_eq!(missing.code, Some(2), "{}", missing.stderr);
+        assert!(missing.stderr.contains('9'), "{}", missing.stderr);
+        let edit_again = fixture.run(&["edit", "1", "2", "was fine"]);
+        assert_eq!(edit_again.code, Some(0), "{}", edit_again.stderr);
 
         let next = fixture.run(&["next", "1"]);
         assert!(
@@ -1106,6 +1124,71 @@ mod scenario {
             REVIEW_21,
         );
         forge
+    }
+
+    pub(super) fn jira_card(fixture: &Fixture) {
+        let forge = forgejo(fixture);
+        let head = git_output(&fixture.local, &["rev-parse", "refs/code-review/1/head"]);
+        forge.answer(
+            "repos-owner-repo-pulls-1.json",
+            &PULL
+                .replace("HEAD", head.trim())
+                .replace("\"feature\"", "\"PROJ-7-shout\""),
+        );
+        let run = |arguments: &[&str], input: &str| forge.run(fixture, arguments, &[], input);
+        let unset = run(&["card", "1"], "");
+        assert_eq!(unset.code, Some(0), "{}", unset.stderr);
+        assert!(
+            unset
+                .stdout
+                .contains("no Jira site: add a line `jira <host>`"),
+            "{}",
+            unset.stdout
+        );
+        fs::write(&forge.forges, "review forges 1\njira jira.test\n").unwrap();
+        let logged_out = run(&["card", "1"], "");
+        assert_eq!(logged_out.code, Some(2), "{}", logged_out.stdout);
+        assert!(
+            logged_out
+                .stderr
+                .contains("not logged in to jira.test: `review login jira.test`"),
+            "{}",
+            logged_out.stderr
+        );
+        forge.answer("jira-login", "ann@acme.test:jtoken");
+        forge.answer(
+            "jira-PROJ-7.json",
+            r#"{"key":"PROJ-7","fields":{"summary":"Shout the second line","issuetype":{"name":"Story"},"assignee":{"displayName":"Ann Smith"},"status":{"name":"In Review"},"description":"*Two* goes up.\r\nNothing else."}}"#,
+        );
+        let blank = run(&["login", "jira.test"], "\n");
+        assert_eq!(blank.code, Some(2), "{}", blank.stdout);
+        let login = run(&["login", "jira.test"], "ann@acme.test:jtoken\n");
+        assert_eq!(login.code, Some(0), "{}", login.stderr);
+        assert!(
+            login.stdout.contains("logged in to jira.test"),
+            "{}",
+            login.stdout
+        );
+        let card = run(&["card", "1"], "");
+        assert_eq!(card.code, Some(0), "{}", card.stderr);
+        assert_eq!(
+            card.stdout,
+            "PROJ-7  Shout the second line\nStory  In Review  Ann Smith\nhttps://jira.test/browse/PROJ-7\n\n  **Two** goes up.  \n  Nothing else.\n"
+        );
+        forge.store("jira.test", "ann@acme.test:wrong");
+        let refused = run(&["card", "1"], "");
+        assert_eq!(refused.code, Some(2), "{}", refused.stdout);
+        assert!(
+            refused.stderr.contains("jira.test refused the login"),
+            "{}",
+            refused.stderr
+        );
+        let logout = run(&["logout", "jira.test"], "");
+        assert!(
+            logout.stdout.contains("logged out of jira.test"),
+            "{}",
+            logout.stdout
+        );
     }
 
     pub(super) fn discussion(fixture: &Fixture) {

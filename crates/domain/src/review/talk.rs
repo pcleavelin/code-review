@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::picture::SignedPicture;
 use crate::review::{CommitId, Decision, Login, Side, WebLink};
-use crate::text::{Line, RelativePath};
+use crate::text::{Line, RelativePath, Span};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Moment(String);
@@ -106,7 +106,17 @@ pub struct Note {
 pub struct CodePlace {
     pub file: RelativePath,
     pub side: Side,
+    pub start: Option<Line>,
     pub line: Line,
+}
+
+impl CodePlace {
+    pub fn lines(&self) -> Span {
+        self.start
+            .filter(|start| *start < self.line)
+            .and_then(|start| Span::new(start, self.line))
+            .unwrap_or_else(|| Span::line(self.line))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

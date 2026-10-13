@@ -4,6 +4,9 @@ use std::mem;
 use platform::ClipboardRequest;
 use ui::{Count, Glyph, Id, Label, Typed};
 
+use strum::VariantArray;
+
+use crate::columns::InboxColumn;
 use crate::ids::{self, Control};
 use crate::keys::{Extend, Walk};
 use crate::text::Clipped;
@@ -74,11 +77,15 @@ pub(crate) enum Which {
     Inbox,
     Pin,
     Token,
+    Column(InboxColumn),
 }
 
 impl Which {
     pub(crate) fn id(self) -> Id {
-        self.control().id()
+        match self {
+            Self::Column(column) => ids::COLUMN_FIELD.with(&column.name()).id(),
+            _ => self.control().id(),
+        }
     }
 
     pub(crate) const fn control(self) -> Control {
@@ -93,6 +100,7 @@ impl Which {
             Self::Inbox => ids::INBOX_FIELD,
             Self::Pin => ids::PIN_FIELD,
             Self::Token => ids::TOKEN_FIELD,
+            Self::Column(_) => ids::COLUMN_FIELD,
         }
     }
 
@@ -106,7 +114,8 @@ impl Which {
             | Self::Palette
             | Self::Inbox
             | Self::Pin
-            | Self::Token => FieldShape::Single,
+            | Self::Token
+            | Self::Column(_) => FieldShape::Single,
         }
     }
 
@@ -121,7 +130,8 @@ impl Which {
             | Self::Draft
             | Self::Summary
             | Self::Inbox
-            | Self::Pin => Shown::Clear,
+            | Self::Pin
+            | Self::Column(_) => Shown::Clear,
         }
     }
 }
@@ -372,7 +382,12 @@ pub(crate) struct Handled {
 pub(crate) enum Tint {
     Plain,
     Selected,
-    Caret,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CaretAt {
+    Before,
+    Elsewhere,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -385,15 +400,7 @@ pub(crate) struct TextSelection {
 pub(crate) struct Piece {
     pub(crate) text: Label,
     pub(crate) tint: Tint,
-}
-
-impl Piece {
-    fn caret() -> Self {
-        Self {
-            text: Label::new("\u{258f}"),
-            tint: Tint::Caret,
-        }
-    }
+    pub(crate) caret: CaretAt,
 }
 
 impl Field {
@@ -474,9 +481,6 @@ impl Field {
             let (Some(from), Some(to)) = (pair.first(), pair.get(1)) else {
                 continue;
             };
-            if caret_here && *from == self.caret {
-                pieces.push(Piece::caret());
-            }
             let selected = selection.is_some_and(|chosen| chosen.from <= *from && *to <= chosen.to);
             pieces.push(Piece {
                 text: self.text.between(*from, *to),
@@ -485,34 +489,29 @@ impl Field {
                 } else {
                     Tint::Plain
                 },
+                caret: if caret_here && *from == self.caret {
+                    CaretAt::Before
+                } else {
+                    CaretAt::Elsewhere
+                },
             });
         }
         if caret_here && self.caret == row.end {
-            pieces.push(Piece::caret());
+            pieces.push(Piece {
+                text: Label::default(),
+                tint: Tint::Plain,
+                caret: CaretAt::Before,
+            });
         }
         pieces
     }
 
-    pub(crate) fn caret_at(
-        &self,
-        shape: FieldShape,
-        row: Count,
-        column: Count,
-        attention: Attention,
-    ) -> Caret {
+    pub(crate) fn caret_at(&self, shape: FieldShape, row: Count, column: Count) -> Caret {
         let rows = self.rows(shape);
         let Some(chosen) = rows.get(row.get()).or_else(|| rows.last()).copied() else {
             return Caret(0);
         };
-        let on_caret_row = attention == Attention::Focused
-            && rows.get(row_of(&rows, self.caret).get()) == Some(&chosen);
-        let caret_column = self.caret.0.saturating_sub(chosen.start.0);
-        let column = if on_caret_row && column.get() > caret_column {
-            column.get() - 1
-        } else {
-            column.get()
-        };
-        chosen.at(Count::new(column))
+        chosen.at(column)
     }
 
     fn clear(&mut self) {
@@ -780,7 +779,17 @@ pub(crate) struct Fields {
     inbox: Field,
     pin: Field,
     token: Field,
+    columns: [Field; InboxColumn::VARIANTS.len()],
     focused: Option<Holding>,
+}
+
+fn column_at(column: InboxColumn) -> Count {
+    Count::new(
+        InboxColumn::VARIANTS
+            .iter()
+            .position(|known| *known == column)
+            .unwrap_or(0),
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -802,6 +811,10 @@ impl Fields {
             Which::Inbox => &self.inbox,
             Which::Pin => &self.pin,
             Which::Token => &self.token,
+            Which::Column(column) => self
+                .columns
+                .get(column_at(column).get())
+                .unwrap_or(&self.inbox),
         }
     }
 
@@ -817,6 +830,10 @@ impl Fields {
             Which::Inbox => &mut self.inbox,
             Which::Pin => &mut self.pin,
             Which::Token => &mut self.token,
+            Which::Column(column) => match self.columns.get_mut(column_at(column).get()) {
+                Some(field) => field,
+                None => &mut self.inbox,
+            },
         }
     }
 
@@ -838,6 +855,13 @@ impl Fields {
 
     pub(crate) fn start_empty(&mut self, which: Which) {
         self.get_mut(which).clear();
+        self.focus(which);
+    }
+
+    pub(crate) fn start_with(&mut self, which: Which, text: &Label) {
+        let field = self.get_mut(which);
+        field.clear();
+        field.insert(text);
         self.focus(which);
     }
 

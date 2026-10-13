@@ -114,7 +114,7 @@ const REVIEW_21_COMMENTS: &str = r#"[
 
 const REQUESTED: &str = r#"[{"number":1,"title":"Square the inputs","repository":{"full_name":"owner/repo"}},{"number":2,"title":"Elsewhere","repository":{"full_name":"owner/other"}}]"#;
 
-pub(crate) const FORGES: &str = "review forges 1\nclient gitlab.test cid123\n";
+pub(crate) const FORGES: &str = "review forges 1\nclient gitlab.test cid123\njira jira.test\n";
 const DEVICE: &str = r#"{"device_code":"devsecret","user_code":"ABCD-1234","verification_uri":"https://gitlab.test/oauth/device","expires_in":300,"interval":1}"#;
 const PENDING: &str = r#"{"error":"authorization_pending"}"#;
 const GRANTED: &str = r#"{"access_token":"glaccess1","token_type":"Bearer","expires_in":7200,"refresh_token":"glrefresh1"}"#;
@@ -141,8 +141,8 @@ fn find_tool(tool: &str) -> PathBuf {
         .unwrap_or_else(|| panic!("{tool} is not on PATH"))
 }
 
-pub(crate) const COMMAND_DEADLINE: Duration = Duration::from_secs(60);
-pub(crate) const WINDOW_DEADLINE: Duration = Duration::from_secs(120);
+pub(crate) const COMMAND_DEADLINE: Duration = Duration::from_mins(1);
+pub(crate) const WINDOW_DEADLINE: Duration = Duration::from_mins(2);
 const KILLED_OUTPUT_WAIT: Duration = Duration::from_secs(10);
 
 pub(crate) struct Deadline<'a> {
@@ -363,6 +363,16 @@ case "$url" in
   [ -f "{api}/poll-$count.json" ] || count=granted
   cat "{api}/poll-$count.json"; status=$(cat "{api}/poll-$count.status");;
 */api/v1/repos/issues/search\?*) cat "{api}/requested.json"; status=200;;
+*/rest/api/2/attachment/content/*)
+  case "$config" in *"Authorization: Basic "*) cat "{api}/jira-picture.png"; printf '\n'; exit 0;; esac
+  exit 22;;
+*/rest/api/2/issue/*)
+  key=${{url#*/rest/api/2/issue/}}; key=${{key%%\?*}}
+  case "$config" in
+  *"Authorization: Basic $(printf %s "$(cat "{api}/jira-login" 2>/dev/null)" | base64)\""*)
+    if [ -f "{api}/jira-$key.json" ]; then cat "{api}/jira-$key.json"; status=200; else printf '{{"errorMessages":[]}}'; status=404; fi;;
+  *) status=401;;
+  esac;;
 *)
   rest=${{url#https://{HOST}/api/v1/repos/{SLUG}/}}
   rest=${{rest%%\?*}}

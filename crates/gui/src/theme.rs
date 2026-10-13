@@ -19,6 +19,7 @@ pub(crate) const HOVER: Color = Color::rgba(50, 50, 56, 255);
 pub(crate) const SELECTED: Color = Color::rgba(45, 65, 100, 255);
 pub(crate) const DANGER_HOVER: Color = Color::rgba(110, 40, 40, 255);
 pub(crate) const NOTE: Color = Color::rgba(228, 210, 178, 255);
+pub(crate) const VIOLET: Color = Color::rgba(170, 130, 240, 255);
 
 pub(crate) const DISABLED: Color = WEAK.with_alpha(90);
 pub(crate) const LINES_SELECTED: Color = SELECTED.with_alpha(160);
@@ -71,7 +72,8 @@ const fn theme_pair(dark: Color, light: Color) -> ThemePair {
     ThemePair { dark, light }
 }
 
-const LIGHT_PALETTE: [ThemePair; 25] = [
+const LIGHT_PALETTE: [ThemePair; 26] = [
+    theme_pair(VIOLET, Color::rgba(110, 60, 200, 255)),
     theme_pair(BACKGROUND, Color::rgba(250, 250, 250, 255)),
     theme_pair(PANEL, Color::rgba(243, 243, 243, 255)),
     theme_pair(FIELD, Color::rgba(255, 255, 255, 255)),
@@ -140,6 +142,16 @@ pub(crate) fn title_font(font: FontSize) -> FontSize {
     FontSize::new(font.get() + font.get() / 3)
 }
 
+pub(crate) fn heading_font(font: FontSize, level: ui::Count) -> FontSize {
+    let base = font.get();
+    FontSize::new(match level.get() {
+        1 => base + base * 3 / 5,
+        2 => base + base / 3,
+        3 => base + base / 6,
+        _ => base,
+    })
+}
+
 pub(crate) const LABEL_PADDING: Px = Px::new(2);
 pub(crate) const BUTTON_PADDING: Px = Px::new(4);
 pub(crate) const TAB_PADDING: Px = Px::new(6);
@@ -165,6 +177,7 @@ pub(crate) const STEP_SPACER: Px = Px::new(6);
 pub(crate) const INDENT_EXTRA: Px = Px::new(4);
 pub(crate) const PIXEL: Px = Px::new(1);
 pub(crate) const SELECTED_BAR: Px = PIXEL;
+pub(crate) const COLUMN_EDGE: Px = Px::new(4);
 pub(crate) const ROW_EXTRA: Px = Px::new(4);
 pub(crate) const PANEL_TEXT_ROOM: Px = Px::new(8);
 pub(crate) const PEEK_EXTRA: Px = Px::new(8);
@@ -194,6 +207,17 @@ pub(crate) const PIN_FIELD: Cells = Cells::new(36);
 pub(crate) const TOKEN_FIELD: Cells = Cells::new(36);
 pub(crate) const FORGE_STATE: Cells = Cells::new(14);
 pub(crate) const THREAD_FILL: Color = ACCENT.with_alpha(18);
+pub(crate) const CARD_FILL: Color = VIOLET.with_alpha(20);
+pub(crate) const CARD_EDGE: Color = VIOLET.with_alpha(110);
+pub(crate) const CARD_STRIPE: Px = Px::new(4);
+
+pub(crate) const fn pill_fill(color: Color) -> Color {
+    color.with_alpha(44)
+}
+
+pub(crate) const fn pill_edge(color: Color) -> Color {
+    color.with_alpha(130)
+}
 pub(crate) const RESOLVED_FILL: Color = WEAK.with_alpha(18);
 pub(crate) const THREAD_BAR: Color = ACCENT;
 pub(crate) const FOLD_FILL: Color = WEAK.with_alpha(22);

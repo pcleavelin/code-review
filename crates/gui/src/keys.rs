@@ -87,6 +87,7 @@ pub(crate) enum CodeGesture {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LineGesture {
     Press,
+    Extend,
     Drag,
 }
 
@@ -209,7 +210,11 @@ pub(crate) fn selects_line(interaction: Interaction, pointer: Pointer) -> Option
         Some(LineGesture::Drag)
     } else if interaction.clicked() && !mods.ctrl() && !mods.alt() && !interaction.double_clicked()
     {
-        Some(LineGesture::Press)
+        Some(if mods.shift() {
+            LineGesture::Extend
+        } else {
+            LineGesture::Press
+        })
     } else {
         None
     }
