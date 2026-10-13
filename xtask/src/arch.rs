@@ -14,7 +14,7 @@ struct Allowed {
     dependencies: &'static [Literal],
 }
 
-const EXPECTS: [Allowance; 30] = [
+const EXPECTS: [Allowance; 33] = [
     Allowance {
         path: Literal::new("crates/io-process/src/tests.rs"),
         lint: Literal::new("clippy::disallowed_methods"),
@@ -54,6 +54,18 @@ const EXPECTS: [Allowance; 30] = [
     Allowance {
         path: Literal::new("crates/platform/src/gpu.rs"),
         lint: Literal::new("unsafe_code"),
+    },
+    Allowance {
+        path: Literal::new("crates/review/tests/cli.rs"),
+        lint: Literal::new("clippy::print_stderr"),
+    },
+    Allowance {
+        path: Literal::new("crates/review/tests/gui.rs"),
+        lint: Literal::new("clippy::print_stderr"),
+    },
+    Allowance {
+        path: Literal::new("crates/review/tests/parity.rs"),
+        lint: Literal::new("clippy::print_stderr"),
     },
     Allowance {
         path: Literal::new("crates/review/tests/cli.rs"),

@@ -1,18 +1,26 @@
 #![expect(
     clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::string_slice,
     clippy::disallowed_methods,
-    reason = "a test harness fails by panicking, builds fixtures on disk and runs the binary"
+    clippy::print_stderr,
+    reason = "a test harness fails by panicking, builds fixtures on disk, runs the binary and prints each scale step's time"
 )]
+
+mod common;
 
 use std::env;
 use std::fs;
-use std::io::Write as _;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{self, Command, Stdio};
+use std::process::{self, Command, Output};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use common::{COMMAND_DEADLINE, Deadline};
 
 macro_rules! scenarios {
     ($($scenario:ident),* $(,)?) => {$(
@@ -22,6 +30,19 @@ macro_rules! scenarios {
         }
     )*};
 }
+
+macro_rules! at_scale {
+    ($($scenario:ident),* $(,)?) => {$(
+        #[test]
+        fn $scenario() {
+            let fixture = common::large_fixture(stringify!($scenario));
+            scale::$scenario(&fixture);
+            fixture.remove();
+        }
+    )*};
+}
+
+at_scale!(scale_inbox, scale_review);
 
 scenarios!(
     offline_review,
@@ -35,6 +56,7 @@ scenarios!(
 );
 
 struct Fixture {
+    name: String,
     forge: PathBuf,
     local: PathBuf,
 }
@@ -45,13 +67,25 @@ struct Ran {
     code: Option<i32>,
 }
 
-fn git(directory: &Path, arguments: &[&str]) {
-    let output = Command::new("git")
+fn run_git(directory: &Path, arguments: &[&str]) -> Output {
+    let mut command = Command::new("git");
+    command
         .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
         .args(arguments)
-        .current_dir(directory)
-        .output()
-        .unwrap();
+        .current_dir(directory);
+    common::run_within(
+        &mut command,
+        b"",
+        &Deadline {
+            scenario: &directory.display().to_string(),
+            step: &format!("git {}", arguments.join(" ")),
+            within: COMMAND_DEADLINE,
+        },
+    )
+}
+
+fn git(directory: &Path, arguments: &[&str]) {
+    let output = run_git(directory, arguments);
     assert!(
         output.status.success(),
         "git {arguments:?}: {}",
@@ -60,11 +94,7 @@ fn git(directory: &Path, arguments: &[&str]) {
 }
 
 fn git_output(directory: &Path, arguments: &[&str]) -> String {
-    let output = Command::new("git")
-        .args(arguments)
-        .current_dir(directory)
-        .output()
-        .unwrap();
+    let output = run_git(directory, arguments);
     assert!(output.status.success(), "git {arguments:?}");
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -116,7 +146,23 @@ impl Fixture {
                 "+refs/heads/main:refs/code-review/1/base",
             ],
         );
-        Self { forge, local }
+        Self {
+            name: name.to_owned(),
+            forge,
+            local,
+        }
+    }
+
+    fn bounded(&self, command: &mut Command, arguments: &[&str], input: &[u8]) -> Output {
+        common::run_within(
+            command,
+            input,
+            &Deadline {
+                scenario: &self.name,
+                step: &format!("review {}", arguments.join(" ")),
+                within: COMMAND_DEADLINE,
+            },
+        )
     }
 
     fn run(&self, arguments: &[&str]) -> Ran {
@@ -148,7 +194,7 @@ impl Fixture {
         if let Some(path) = path {
             command.env("PATH", path);
         }
-        let output = command.output().unwrap();
+        let output = self.bounded(&mut command, arguments, b"");
         Ran {
             stdout: String::from_utf8_lossy(&output.stdout).replace('\r', ""),
             stderr: String::from_utf8_lossy(&output.stderr).replace('\r', ""),
@@ -310,18 +356,8 @@ impl FakeForge {
             .env_remove("FORGEJO_TOKEN")
             .env_remove("GITEA_TOKEN")
             .env("PATH", env::join_paths([self.tools.clone(), git]).unwrap())
-            .envs(variables.iter().copied())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = command.spawn().unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(input.as_bytes())
-            .unwrap();
-        let output = child.wait_with_output().unwrap();
+            .envs(variables.iter().copied());
+        let output = fixture.bounded(&mut command, arguments, input.as_bytes());
         Ran {
             stdout: String::from_utf8_lossy(&output.stdout).replace('\r', ""),
             stderr: String::from_utf8_lossy(&output.stderr).replace('\r', ""),
@@ -1048,5 +1084,107 @@ erin approved 2026-01-02 12:00 (review-22)
         let approved = forge.run(fixture, &["submit", "1", "--approve"], &token, "");
         assert_eq!(approved.code, Some(0), "{}", approved.stderr);
         assert_eq!(approved.stdout, "approved #1 with 0 inline comments\n");
+    }
+}
+
+mod scale {
+    use std::time::{Duration, Instant};
+
+    use super::common::{self, Fixture, large};
+
+    const OPEN_DEADLINE: Duration = Duration::from_secs(10);
+    const STEP_DEADLINE: Duration = Duration::from_secs(4);
+    const UNOPENED_INBOX_DEADLINE: Duration = Duration::from_secs(6);
+
+    fn step(fixture: &Fixture, arguments: &[&str], within: Duration) -> String {
+        let start = Instant::now();
+        let out = common::review_within(&common::binary(), fixture, arguments, within);
+        eprintln!(
+            "SCALE review {} took {} ms (bound {} ms)",
+            arguments.join(" "),
+            start.elapsed().as_millis(),
+            within.as_millis()
+        );
+        assert!(!out.contains("[exit "), "review {arguments:?}\n{out}");
+        out
+    }
+
+    fn marked(out: &str, mark: &str) -> usize {
+        out.lines().filter(|line| line.starts_with(mark)).count()
+    }
+
+    pub(super) fn scale_inbox(fixture: &Fixture) {
+        common::git(
+            &fixture.local,
+            &[
+                "fetch",
+                "-q",
+                "origin",
+                "+refs/pull/1/head:refs/code-review/1/head",
+                "+refs/heads/main:refs/code-review/1/base",
+            ],
+        );
+        let listed = step(fixture, &["prs"], UNOPENED_INBOX_DEADLINE);
+        let progress = format!("0/{} seen]", large::CHANGED);
+        assert!(
+            listed
+                .lines()
+                .any(|line| line.starts_with("owner/repo#1 ") && line.contains(&progress)),
+            "{listed}"
+        );
+    }
+
+    pub(super) fn scale_review(fixture: &Fixture) {
+        let opened = step(fixture, &["open", "1"], OPEN_DEADLINE);
+        assert_eq!(marked(&opened, "[ ] "), large::CHANGED, "{opened}");
+        let listed = step(fixture, &["prs"], STEP_DEADLINE);
+        let progress = format!("[reviewing, 0/{} seen]", large::CHANGED);
+        assert!(listed.contains(&progress), "{listed}");
+        let changes = step(fixture, &["changes", "1"], STEP_DEADLINE);
+        assert_eq!(marked(&changes, "[ ] "), large::CHANGED, "{changes}");
+        assert_eq!(
+            changes
+                .lines()
+                .filter(|line| line.contains(" (from "))
+                .count(),
+            large::RENAMED,
+            "{changes}"
+        );
+        let first = large::first_modified();
+        let one = step(fixture, &["diff", "1", &first], STEP_DEADLINE);
+        let lines = large::first_modified_lines();
+        assert!(
+            one.starts_with(&format!("[ ] {first} (modified, +{lines} -{lines})")),
+            "{}",
+            one.lines().next().unwrap_or_default()
+        );
+        let every = step(fixture, &["diff", "1"], STEP_DEADLINE);
+        assert_eq!(marked(&every, "[ ] "), large::CHANGED);
+        let hunks = every
+            .lines()
+            .filter(|line| line.trim_start().starts_with("@@"))
+            .count();
+        assert!(hunks >= large::CHANGED - large::RENAMED, "{hunks} hunks");
+        let next = step(fixture, &["next", "1"], STEP_DEADLINE);
+        let unseen = changes.lines().next().unwrap_or_default();
+        let path = unseen.split_whitespace().last().unwrap_or_default();
+        assert!(
+            next.starts_with(&format!("[ ] {path} ")),
+            "{unseen}\n{}",
+            next.lines().next().unwrap_or_default()
+        );
+        let seen = step(fixture, &["seen", "1", "--all"], STEP_DEADLINE);
+        assert_eq!(marked(&seen, "[x] "), large::CHANGED, "{seen}");
+        let after = step(fixture, &["changes", "1"], STEP_DEADLINE);
+        assert_eq!(marked(&after, "[x] "), large::CHANGED, "{after}");
+        let done = step(fixture, &["next", "1"], STEP_DEADLINE);
+        assert_eq!(
+            done.trim_end(),
+            format!(
+                "every changed file is seen ({}/{})",
+                large::CHANGED,
+                large::CHANGED
+            )
+        );
     }
 }

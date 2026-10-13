@@ -47,4 +47,7 @@ session's first stop with nothing in flight is. This is the order that gets it g
    release build and read the screenshots.
 7. `cargo xtask gate --full` once more, then commit (`jj commit -m ...`). The message says
    what changed and why, for someone who did not see the session; a new feature's message
-   body is its case.
+   body is its case. A change to anything that runs per changed file, per pull request or
+   per line states in the message the scale scenarios' step times and slowest frame
+   (`cargo test -p review --test cli scale_ -- --nocapture`, `--test gui scale -- --nocapture`
+   print them as `SCALE` lines), before and after the change.

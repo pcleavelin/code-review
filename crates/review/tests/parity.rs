@@ -5,7 +5,8 @@
     clippy::indexing_slicing,
     clippy::string_slice,
     clippy::disallowed_methods,
-    reason = "a test harness fails by panicking, builds fixtures on disk and runs the binary"
+    clippy::print_stderr,
+    reason = "a test harness fails by panicking, builds fixtures on disk, runs the binary and prints each scale step's time"
 )]
 
 mod common;

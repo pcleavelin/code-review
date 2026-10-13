@@ -37,7 +37,9 @@ message; caught after the change, it costs the change.
    public repository; writing to one (submitting a review) only on a pull request the owner
    named for it.
 4. Restate again with what steps 2 and 3 taught: the need in one sentence, the behaviour as
-   the user will meet it, and each place the first restatement was wrong. If a question is
+   the user will meet it, the scale it meets (a pull request of thousands of changed files,
+   a file of tens of thousands of lines, an inbox of hundreds of pull requests: whichever it
+   runs once per), and each place the first restatement was wrong. If a question is
    left that only the owner can answer (which of two readings, a conflict with CLAUDE.md,
    a reported bug that is the spec's own behaviour), ask it and wait for the answer. Where a
    new kind of stored data lives is always the owner's: on the machine, or sent to the forge.

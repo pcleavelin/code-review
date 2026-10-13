@@ -153,6 +153,16 @@ rule applies.
 - **The UI is its own library** (`crates/ui`, in the shape of odin_editor's): elements opened
   and closed each frame, layout once at frame end, input answered from the previous frame's
   rectangles, one monospace font at whole-pixel sizes in one atlas, icons as Codicons glyphs.
+- **Every outside program has a deadline and cannot deadlock on its pipes.** `io-process`
+  feeds a program's stdin on its own thread while it reads stdout and stderr, so a program
+  that answers as it reads (`git check-attr --stdin` on thousands of paths) never waits on the
+  tool while the tool waits on it, and every run ends by its deadline, so a stuck program is
+  an error the user reads, not a window or a command that never answers.
+- **The gate runs a pull request of thousands of files.** A fixture of a few files hides
+  everything that grows with the pull request; the scale scenarios run the inbox, open,
+  changes, diff, next, seen and the Source view on a generated pull request of about three
+  thousand changed files, each step within a bound, so a feature meets real scale before it
+  ships and its cost there is part of its case.
 
 ## Crates
 
@@ -196,6 +206,18 @@ from files by a fake `curl`, both on a `PATH` of their own (no language server o
 tree-sitter resolvers answer). A scenario is registered in its table; a
 hand-written `#[test]` in a scenario file is refused by the linter. Behaviour a change adds is
 pinned by a test that states it, written before the code.
+
+The scale scenarios (`at_scale!` in `cli.rs`, `gui_scale_scenarios!` in `common/gui.rs`) run
+on `common::large_fixture` (`common/large.rs`, built by `git fast-import` in about two
+seconds): one pull request of 3003 changed files (modified, added, deleted, renamed, 200
+marked `linguist-generated`, paths up to fourteen directories deep, 600-line hunks, three files of
+30,000 lines). Each step's deadline is its measured time with about three times headroom, and
+the GUI's slowest frame while scrolling the Source view has a bound too; `-- --nocapture`
+prints each as a `SCALE` line. Every run of the binary and every program the harness starts
+goes through `common::run_within` with a deadline (`COMMAND_DEADLINE` 60 s, `WINDOW_DEADLINE` 120 s,
+or the scale step's bound); on expiry it kills the run's process group and fails naming the
+scenario, the step and every process still running (pid, elapsed time, command line), so a
+hang fails the gate instead of stalling it.
 
 ## Testing the GUI without a hand on the mouse
 
