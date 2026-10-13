@@ -246,6 +246,7 @@ fn fake_keychain(store: &Path) -> String {
 PATH=/usr/bin:/bin
 store="{store}"
 mkdir -p "$store"
+[ -f "{store}.stall" ] && exec sleep 3600
 case "$1" in
 -i) line=$(cat)
     account=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)".*/\1/p')

@@ -198,7 +198,17 @@ fn the_token_reaches_curl_only_through_stdin() {
     let arguments = wire::curl_arguments();
     assert_eq!(
         arguments,
-        ["--silent", "--show-error", "--location", "--config", "-"]
+        [
+            "--silent",
+            "--show-error",
+            "--location",
+            "--connect-timeout",
+            "10",
+            "--max-time",
+            "30",
+            "--config",
+            "-"
+        ]
     );
     assert!(arguments.iter().all(|argument| !argument.contains(secret)));
 }

@@ -82,7 +82,7 @@ impl fmt::Display for VcsError {
             Self::UnreadableMarker { path, error } => {
                 write!(formatter, "cannot read {}: {error}", path.display())
             }
-            Self::Process(error) => write!(formatter, "{error:?}"),
+            Self::Process(error) => write!(formatter, "{error}"),
             Self::Failure {
                 program, stderr, ..
             } => write!(formatter, "{program} failed: {}", stderr.text().trim()),
@@ -344,9 +344,20 @@ impl Vcs {
     ) -> Result<Captured, VcsError> {
         let invocation = Invocation::from(line);
         let output = if input.is_empty() {
-            Process::run(&invocation.program, &invocation.arguments, directory)
+            Process::run(
+                &invocation.program,
+                &invocation.arguments,
+                directory,
+                invocation.deadline,
+            )
         } else {
-            Process::run_with_input(&invocation.program, &invocation.arguments, directory, input)
+            Process::run_with_input(
+                &invocation.program,
+                &invocation.arguments,
+                directory,
+                input,
+                invocation.deadline,
+            )
         }
         .map_err(VcsError::Process)?;
         if output.success() {

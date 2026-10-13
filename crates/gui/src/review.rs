@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::mem;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use domain::{
@@ -13,7 +15,8 @@ use io_process::{Argument, Opener};
 use io_review::ReviewStamp;
 use platform::ClipboardRequest;
 use session::{
-    Access, Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName, RequestedFrom,
+    Desk, Entry, Opened, PinTarget, Pinned, Reach, Repo, RepoName, RequestedFrom, SessionError,
+    Waiting,
 };
 use ui::{Count, Label, Typed};
 
@@ -159,11 +162,22 @@ pub(crate) struct Submitted {
     comments: Count,
 }
 
-pub(crate) struct Listed {
-    entries: Vec<Entry>,
-    broken: Vec<Broken>,
-    requests: Requests,
-    held: BTreeMap<ForgeHost, Held>,
+pub(crate) struct RepoListed {
+    name: RepoName,
+    entries: Result<Vec<Entry>, Broken>,
+    requests: Option<Result<Vec<PrNumber>, Unanswered>>,
+}
+
+pub(crate) struct Awaited {
+    repo: RepoName,
+    waiting: Waiting,
+}
+
+pub(crate) struct Listing {
+    held: Option<Job<BTreeMap<ForgeHost, Held>>>,
+    repos: Vec<Job<RepoListed>>,
+    waits: Receiver<Awaited>,
+    pins: Vec<Broken>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -175,7 +189,7 @@ enum Relist {
 
 #[derive(Default)]
 pub(crate) struct ReviewJobs {
-    list: Option<Job<Listed>>,
+    list: Option<Listing>,
     open: Option<Job<Result<Landed, Label>>>,
     talk: Option<Job<Result<Conversation, Label>>>,
     rights: Option<Job<Result<Rights, Label>>>,
@@ -242,6 +256,7 @@ pub(crate) enum Picking {
 pub(crate) struct Reviewing {
     pub(crate) desk: Desk,
     pub(crate) inbox: Inbox,
+    pub(crate) waiting: BTreeMap<RepoName, Waiting>,
     pub(crate) standing: Option<Standing>,
     pub(crate) requested: RequestedFrom,
     pub(crate) open: Option<OpenReview>,
@@ -269,6 +284,7 @@ impl Reviewing {
         Self {
             desk,
             inbox: Inbox::Asking,
+            waiting: BTreeMap::new(),
             standing: None,
             requested: RequestedFrom::Any,
             open: None,
@@ -674,10 +690,8 @@ impl fmt::Display for ReviewStatus {
     }
 }
 
-fn list(repos: &[Repo], pinned: &[Pinned], access: &Access, sites: &BTreeSet<ForgeHost>) -> Listed {
-    let held = login::holding(access, sites);
-    let mut entries = Vec::new();
-    let mut broken: Vec<Broken> = pinned
+fn broken_pins(pinned: &[Pinned]) -> Vec<Broken> {
+    pinned
         .iter()
         .filter_map(|pin| match pin {
             Pinned::Broken { root, why } => Some(Broken {
@@ -686,50 +700,42 @@ fn list(repos: &[Repo], pinned: &[Pinned], access: &Access, sites: &BTreeSet<For
             }),
             Pinned::Ready(_) => None,
         })
-        .collect();
-    let mut requests = Requests::default();
-    for repo in repos {
-        match repo.inbox() {
-            Ok(found) => {
-                entries.extend(found);
-                ask_requests(repo, &mut requests);
-            }
-            Err(error) => broken.push(Broken {
-                place: Label::new(repo.name().as_str()),
-                why: Label::new(error.to_string()),
-            }),
-        }
-    }
-    entries.sort_by(|left, right| right.pull.updated.cmp(&left.pull.updated));
-    Listed {
-        entries,
-        broken,
-        requests,
-        held,
-    }
+        .collect()
 }
 
-fn ask_requests(repo: &Repo, requests: &mut Requests) {
-    match repo.requested() {
-        Ok(numbers) => {
-            requests.answered += Count::new(1);
-            requests
-                .pulls
-                .entry(repo.name().clone())
-                .or_default()
-                .extend(numbers);
+fn list_repo(repo: &Repo, waits: &Sender<Awaited>) -> RepoListed {
+    let name = repo.name().clone();
+    let mut report = |waiting| {
+        drop(waits.send(Awaited {
+            repo: name.clone(),
+            waiting,
+        }));
+    };
+    let broken = |error: &SessionError| Broken {
+        place: Label::new(name.as_str()),
+        why: Label::new(error.to_string()),
+    };
+    match repo.inbox(&mut report) {
+        Err(error) => RepoListed {
+            entries: Err(broken(&error)),
+            requests: None,
+            name: name.clone(),
+        },
+        Ok(found) => {
+            let requests = repo.requested(&mut report).map_err(|error| Unanswered {
+                broken: broken(&error),
+                cure: if error.lacks_token() {
+                    Cure::LogIn
+                } else {
+                    Cure::Unknown
+                },
+            });
+            RepoListed {
+                entries: Ok(found),
+                requests: Some(requests),
+                name: name.clone(),
+            }
         }
-        Err(error) => requests.unanswered.push(Unanswered {
-            broken: Broken {
-                place: Label::new(repo.name().as_str()),
-                why: Label::new(error.to_string()),
-            },
-            cure: if error.lacks_token() {
-                Cure::LogIn
-            } else {
-                Cure::Unknown
-            },
-        }),
     }
 }
 
@@ -1129,17 +1135,40 @@ impl App {
         }
         let desk = &self.model.review.desk;
         let repos: Vec<Repo> = desk.repos().cloned().collect();
-        let pinned = desk.pinned().to_vec();
+        let pins = broken_pins(desk.pinned());
         let access = desk.access().clone();
         let sites = self.model.review.logins.sites(desk);
-        if matches!(self.model.review.inbox, Inbox::Listed { .. }) && repos.is_empty() {
-            self.model.review.inbox = Inbox::Listed {
-                entries: Vec::new(),
-                broken: Vec::new(),
-                requests: Requests::default(),
-            };
+        let names: BTreeSet<RepoName> = repos.iter().map(|repo| repo.name().clone()).collect();
+        let still_pinned = |place: &Label| names.iter().any(|name| name.as_str() == place.as_str());
+        if let Inbox::Listed {
+            entries,
+            broken,
+            requests,
+        } = &mut self.model.review.inbox
+        {
+            entries.retain(|entry| names.contains(&entry.repo));
+            broken.retain(|gone| still_pinned(&gone.place));
+            broken.extend(pins.iter().cloned());
+            requests.pulls.retain(|name, _| names.contains(name));
+            requests
+                .unanswered
+                .retain(|unanswered| still_pinned(&unanswered.broken.place));
+            requests.answered = Count::new(requests.pulls.len());
         }
-        self.jobs.list = Some(Job::start(move || list(&repos, &pinned, &access, &sites)));
+        let (sender, waits) = mpsc::channel();
+        let jobs = repos
+            .into_iter()
+            .map(|repo| {
+                let sender = sender.clone();
+                Job::start(move || list_repo(&repo, &sender))
+            })
+            .collect();
+        self.jobs.list = Some(Listing {
+            held: Some(Job::start(move || login::holding(&access, &sites))),
+            repos: jobs,
+            waits,
+            pins,
+        });
     }
 
     fn pin(&mut self) {
@@ -1349,27 +1378,68 @@ impl App {
     }
 
     fn poll_list(&mut self) {
-        let listed = match landed(&mut self.jobs.list) {
-            Landing::Waiting => return,
-            Landing::Landed(listed) => listed,
-            Landing::Failed => Listed {
-                entries: Vec::new(),
-                broken: vec![Broken {
-                    place: Label::new("inbox"),
-                    why: Label::new("the listing thread failed"),
-                }],
-                requests: Requests::default(),
-                held: BTreeMap::new(),
-            },
+        let Some(listing) = self.jobs.list.as_mut() else {
+            return;
         };
+        self.model.review.waiting.extend(
+            listing
+                .waits
+                .try_iter()
+                .map(|awaited| (awaited.repo, awaited.waiting)),
+        );
+        if let Landing::Landed(held) = landed(&mut listing.held) {
+            self.model.review.logins.held.extend(held);
+        }
+        let mut arrived = Vec::new();
+        let mut failed = false;
+        for job in mem::take(&mut listing.repos) {
+            let mut slot = Some(job);
+            match landed(&mut slot) {
+                Landing::Waiting => listing.repos.extend(slot),
+                Landing::Landed(listed) => arrived.push(listed),
+                Landing::Failed => failed = true,
+            }
+        }
+        let pins = listing.pins.clone();
+        let done = listing.repos.is_empty() && listing.held.is_none();
+        for listed in arrived {
+            self.land_repo(listed, &pins);
+        }
+        if failed {
+            self.land_repo(
+                RepoListed {
+                    name: RepoName::new("inbox"),
+                    entries: Err(Broken {
+                        place: Label::new("inbox"),
+                        why: Label::new("a listing thread failed"),
+                    }),
+                    requests: None,
+                },
+                &pins,
+            );
+        }
+        if !done {
+            return;
+        }
+        self.jobs.list = None;
+        self.model.review.waiting.clear();
+        if matches!(self.model.review.inbox, Inbox::Asking) {
+            self.model.review.inbox = Inbox::Listed {
+                entries: Vec::new(),
+                broken: pins,
+                requests: Requests::default(),
+            };
+        }
         if self.jobs.relist == Relist::Again {
             self.jobs.relist = Relist::Settled;
             self.list_pulls();
         } else {
-            self.model.review.logins.held.extend(listed.held);
             self.ask_rights();
         }
-        let pulls = Count::new(listed.entries.len());
+        let pulls = match &self.model.review.inbox {
+            Inbox::Listed { entries, .. } => Count::new(entries.len()),
+            Inbox::Asking => Count::ZERO,
+        };
         match &self.model.status {
             Status::Login(LoginStatus::In(site)) => {
                 self.model.status = Status::Login(LoginStatus::Listed(site.clone(), pulls));
@@ -1380,11 +1450,50 @@ impl App {
             }
             _ => {}
         }
-        self.model.review.inbox = Inbox::Listed {
-            entries: listed.entries,
-            broken: listed.broken,
-            requests: listed.requests,
+    }
+
+    fn land_repo(&mut self, listed: RepoListed, pins: &[Broken]) {
+        let review = &mut self.model.review;
+        review.waiting.remove(&listed.name);
+        if matches!(review.inbox, Inbox::Asking) {
+            review.inbox = Inbox::Listed {
+                entries: Vec::new(),
+                broken: pins.to_vec(),
+                requests: Requests::default(),
+            };
+        }
+        let Inbox::Listed {
+            entries,
+            broken,
+            requests,
+        } = &mut review.inbox
+        else {
+            return;
         };
+        let place = listed.name.as_str();
+        entries.retain(|entry| entry.repo != listed.name);
+        broken.retain(|gone| gone.place.as_str() != place);
+        requests.pulls.remove(&listed.name);
+        requests
+            .unanswered
+            .retain(|unanswered| unanswered.broken.place.as_str() != place);
+        match listed.entries {
+            Ok(found) => entries.extend(found),
+            Err(gone) => broken.push(gone),
+        }
+        match listed.requests {
+            Some(Ok(numbers)) => {
+                requests
+                    .pulls
+                    .entry(listed.name.clone())
+                    .or_default()
+                    .extend(numbers);
+            }
+            Some(Err(unanswered)) => requests.unanswered.push(unanswered),
+            None => {}
+        }
+        requests.answered = Count::new(requests.pulls.len());
+        entries.sort_by(|left, right| right.pull.updated.cmp(&left.pull.updated));
     }
 
     fn poll_pin(&mut self) {

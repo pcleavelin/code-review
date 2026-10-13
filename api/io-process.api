@@ -14,10 +14,13 @@ pub fn text(&self) -> String
 pub struct Output { pub status: ExitStatus, pub stdout: Captured, pub stderr: Captured, }
 pub fn success(&self) -> bool
 pub struct Spawned { pub child: Child, pub input: ChildStdin, pub output: ChildStdout, }
-pub enum ProcessError { Missing(Program), Start { program: Program, error: io::Error }, NoPipe(Program), }
+pub struct Deadline(Duration);
+pub const fn seconds(count: u64) -> Self
+pub const fn whole_seconds(self) -> u64
+pub enum ProcessError { Missing(Program), Start { program: Program, error: io::Error, }, NoPipe(Program), TimedOut { program: Program, leading: Vec<Argument>, deadline: Deadline, }, }
 pub struct Process;
-pub fn run( program: &Program, arguments: &[Argument], directory: &Path, ) -> Result<Output, ProcessError>
-pub fn run_with_input( program: &Program, arguments: &[Argument], directory: &Path, input: &Captured, ) -> Result<Output, ProcessError>
+pub fn run( program: &Program, arguments: &[Argument], directory: &Path, deadline: Deadline, ) -> Result<Output, ProcessError>
+pub fn run_with_input( program: &Program, arguments: &[Argument], directory: &Path, input: &Captured, deadline: Deadline, ) -> Result<Output, ProcessError>
 pub fn spawn( program: &Program, arguments: &[Argument], directory: &Path, ) -> Result<Spawned, ProcessError>
 pub struct Opener;
 pub fn open(target: &Argument) -> Result<(), ProcessError>

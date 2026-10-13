@@ -199,7 +199,7 @@ impl Run<'_> {
         for repo in &repos {
             let requested = match from {
                 RequestedFrom::Any => None,
-                RequestedFrom::You => match repo.requested() {
+                RequestedFrom::You => match repo.requested(&mut |_| {}) {
                     Ok(numbers) => Some(numbers),
                     Err(error) => {
                         if error.lacks_token() {
@@ -211,7 +211,7 @@ impl Run<'_> {
                     }
                 },
             };
-            match repo.inbox() {
+            match repo.inbox(&mut |_| {}) {
                 Ok(found) => {
                     answered = true;
                     entries.extend(found.into_iter().filter(|entry| {

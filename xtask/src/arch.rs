@@ -14,15 +14,7 @@ struct Allowed {
     dependencies: &'static [Literal],
 }
 
-const EXPECTS: [Allowance; 30] = [
-    Allowance {
-        path: Literal::new("crates/io-process/src/tests.rs"),
-        lint: Literal::new("clippy::disallowed_methods"),
-    },
-    Allowance {
-        path: Literal::new("crates/io-vcs/src/tests.rs"),
-        lint: Literal::new("clippy::disallowed_methods"),
-    },
+const EXPECTS: [Allowance; 28] = [
     Allowance {
         path: Literal::new("crates/review/tests/common/mod.rs"),
         lint: Literal::new("dead_code"),

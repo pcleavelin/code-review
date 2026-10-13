@@ -139,6 +139,24 @@ fn dump_conversation(conversation: &Conversation, lines: &mut DumpLines) {
     }
 }
 
+fn dump_listing(review: &Reviewing, lines: &mut DumpLines) {
+    for (repo, waiting) in &review.waiting {
+        lines.line(format_args!(
+            "waiting {repo} {}",
+            Quoted(&waiting.to_string())
+        ));
+    }
+    if let Inbox::Listed { broken, .. } = &review.inbox {
+        for gone in broken {
+            lines.line(format_args!(
+                "broken {} {}",
+                gone.place.as_str(),
+                Quoted(gone.why.as_str())
+            ));
+        }
+    }
+}
+
 fn dump_requests(requests: &Requests, entries: &[Entry], lines: &mut DumpLines) {
     let pulls: Vec<String> = requests
         .pulls
@@ -195,6 +213,7 @@ impl Dump for Reviewing {
             ),
             self.submitting
         ));
+        dump_listing(self, lines);
         if let Inbox::Listed {
             entries, requests, ..
         } = &self.inbox
@@ -272,9 +291,10 @@ impl Dump for Logins {
             .into_iter()
             .map(|site| {
                 let held = match self.held.get(&site) {
-                    Some(Held::In) => "in",
-                    Some(Held::Out) => "out",
-                    None => "unknown",
+                    Some(Held::In) => "in".to_owned(),
+                    Some(Held::Out) => "out".to_owned(),
+                    Some(Held::TimedOut(why)) => format!("timed-out={}", Quoted(why.as_str())),
+                    None => "unknown".to_owned(),
                 };
                 let failed = self.failed.get(&site).map_or_else(String::new, |why| {
                     format!(" failed={}", Quoted(why.as_str()))

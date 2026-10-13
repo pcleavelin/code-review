@@ -10,6 +10,12 @@ use crate::SessionError;
 
 static RENEWING: Mutex<()> = Mutex::new(());
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Holds {
+    Login,
+    Nothing,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StartedLogin {
     Device(DeviceAuthorization),
@@ -116,11 +122,14 @@ impl Access {
         Ok(Some(self.renewed(site, &grant)?.token))
     }
 
-    pub fn holds(&self, site: &ForgeHost) -> bool {
-        self.keychain
-            .as_ref()
-            .and_then(|keychain| keychain.load(site.host()).ok().flatten())
-            .is_some()
+    pub fn holds(&self, site: &ForgeHost) -> Result<Holds, SessionError> {
+        let Some(keychain) = self.keychain.as_ref() else {
+            return Ok(Holds::Nothing);
+        };
+        keychain
+            .load(site.host())
+            .map(|grant| grant.map_or(Holds::Nothing, |_| Holds::Login))
+            .map_err(SessionError::Keychain)
     }
 
     pub fn start(&self, site: &ForgeHost) -> Result<StartedLogin, SessionError> {

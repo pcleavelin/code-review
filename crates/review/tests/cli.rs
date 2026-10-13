@@ -30,6 +30,7 @@ scenarios!(
     navigation,
     since_seen,
     login,
+    stalls,
     discussion,
     submit_refused
 );
@@ -164,6 +165,8 @@ api="$here/api"
 printf '%s\n' "$*" >> "$here/curl.argv"
 config=$(cat)
 url=$(printf '%s\n' "$config" | sed -n 's/^url = "\(.*\)"$/\1/p')
+host=${url#https://}; host=${host%%/*}
+if [ -f "$api/stall-$host" ]; then echo "curl: (28) Operation timed out after 30001 milliseconds with 0 bytes received" >&2; exit 28; fi
 status=200
 case "$url" in
 */login/device/code|*/oauth/authorize_device) body=$(cat "$api/device.json");;
@@ -198,6 +201,7 @@ here=$(dirname "$0")
 store="$here/keychain"
 mkdir -p "$store"
 printf '%s\n' "$*" >> "$here/keychain.argv"
+[ -f "$here/keychain.stall" ] && exec sleep 3600
 case "$1" in
 -i) line=$(cat)
     account=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)".*/\1/p')
@@ -959,6 +963,85 @@ mod scenario {
     ]"#;
     const REVIEW_20: &str = r#"[{"id":300,"body":"Why upper case?","user":{"login":"dave"},"path":"a.txt","position":2,"original_position":0,"resolver":null,"pull_request_review_id":20,"created_at":"2026-01-02T09:58:00Z"}]"#;
     const REVIEW_21: &str = r#"[{"id":310,"body":"It is louder.","user":{"login":"ann"},"path":"a.txt","position":2,"original_position":0,"resolver":null,"pull_request_review_id":21,"created_at":"2026-01-02T11:00:00Z"}]"#;
+
+    pub(super) fn stalls(fixture: &Fixture) {
+        let forge = FakeForge::new(fixture);
+        git(
+            &fixture.local,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://forgejo.test/owner/repo.git",
+            ],
+        );
+        forge.answer("repos-owner-repo-pulls.json", "[]");
+        forge.store("forgejo.test", "fjtoken");
+        fs::write(forge.tools.join("keychain.stall"), "").unwrap();
+        let unanswered = forge.run(fixture, &["prs"], &[], "");
+        assert_eq!(unanswered.code, Some(0), "{}", unanswered.stderr);
+        assert_eq!(unanswered.stdout, "no open pull requests\n");
+        let unrequested = forge.run(fixture, &["prs", "--requested"], &[], "");
+        for said in [
+            "! owner/repo: the keychain did not answer within 5 s: ",
+            " may be waiting on a dialog that asks to unlock the keychain or to allow access to the code-review item; answer it (or unlock the keychain), then refresh the Inbox or run the command again\n",
+        ] {
+            assert!(
+                unrequested.stdout.contains(said),
+                "{}{}",
+                unrequested.stdout,
+                unrequested.stderr
+            );
+        }
+        fs::remove_file(forge.tools.join("keychain.stall")).unwrap();
+
+        let base = fixture.forge.parent().unwrap();
+        let other = base.join("other");
+        git(
+            base,
+            &[
+                "clone",
+                "-q",
+                fixture.forge.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
+        git(
+            &other,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://gitlab.test/owner/other.git",
+            ],
+        );
+        let pinned = forge.run(fixture, &["pin", other.to_str().unwrap()], &[], "");
+        assert_eq!(pinned.code, Some(0), "{}", pinned.stderr);
+        forge.answer("token", "gltoken");
+        forge.answer("merge_requests.json", MERGE_REQUESTS);
+        fs::write(forge.tools.join("api").join("stall-forgejo.test"), "").unwrap();
+        let stalled = forge.run(fixture, &["prs"], &[("GITLAB_TOKEN", "gltoken")], "");
+        assert_eq!(stalled.code, Some(0), "{}", stalled.stderr);
+        assert!(
+            stalled.stdout.starts_with(
+                "! owner/repo: forgejo.test did not answer in time (curl gives up after 10 s connecting or 30 s on one request)"
+            ),
+            "{}",
+            stalled.stdout
+        );
+        assert!(
+            stalled.stdout.contains("owner/other#12"),
+            "{}",
+            stalled.stdout
+        );
+        assert!(
+            forge
+                .read("curl.argv")
+                .contains("--connect-timeout 10 --max-time 30"),
+            "{}",
+            forge.read("curl.argv")
+        );
+    }
 
     fn forgejo(fixture: &Fixture) -> FakeForge {
         let forge = FakeForge::new(fixture);

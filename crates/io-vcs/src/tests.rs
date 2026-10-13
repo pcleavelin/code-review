@@ -4,15 +4,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
 
 use domain::{
     BranchName, ChangeKind, CommitId, Line, PrNumber, Provenance, RefName, RelativePath, Root,
 };
 use io_process::{Argument, Process, Program};
 
+use crate::wire::GIT_READ_DEADLINE;
 use crate::{Remote, RemoteUrl, Vcs, VcsError, VcsKind};
 
 mod wire;
@@ -48,7 +46,13 @@ impl Scratch {
             .iter()
             .map(|argument| Argument::new(argument))
             .collect();
-        let output = Process::run(&Program::new(program), &arguments, &self.0).unwrap();
+        let output = Process::run(
+            &Program::new(program),
+            &arguments,
+            &self.0,
+            GIT_READ_DEADLINE,
+        )
+        .unwrap();
         assert!(
             output.success(),
             "{program} {arguments:?}: {}",
@@ -398,6 +402,7 @@ fn attributes_at_the_commit_mark_files_generated_or_handwritten_whatever_the_wor
         &Program::new("git"),
         &[Argument::new("rev-parse"), Argument::new("HEAD")],
         &repo.0,
+        GIT_READ_DEADLINE,
     )
     .unwrap();
     let head = CommitId::new(head.stdout.text().trim()).unwrap();
@@ -412,18 +417,6 @@ fn attributes_at_the_commit_mark_files_generated_or_handwritten_whatever_the_wor
     assert_eq!(said("logo.bin"), Some(Provenance::Undeclared));
     assert_eq!(said("mr.rs"), Some(Provenance::Generated));
     assert_eq!(said("src/main.rs"), Some(Provenance::Undeclared));
-}
-
-const RUN_WAIT: Duration = Duration::from_secs(60);
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the run goes on a thread of its own so a deadlock fails the test instead of hanging it"
-)]
-fn run_bounded<T: Send + 'static>(run: impl FnOnce() -> T + Send + 'static) -> Option<T> {
-    let (sender, receiver) = mpsc::channel();
-    drop(thread::spawn(move || drop(sender.send(run()))));
-    receiver.recv_timeout(RUN_WAIT).ok()
 }
 
 #[test]
@@ -441,6 +434,7 @@ fn attributes_answer_for_more_paths_than_a_pipe_holds() {
         &Program::new("git"),
         &[Argument::new("rev-parse"), Argument::new("HEAD")],
         &repo.0,
+        GIT_READ_DEADLINE,
     )
     .unwrap();
     let head = CommitId::new(head.stdout.text().trim()).unwrap();
@@ -450,10 +444,7 @@ fn attributes_answer_for_more_paths_than_a_pipe_holds() {
             RelativePath::new(&format!("{folder}/module-{number:05}.rs"))
         })
         .collect();
-    let asked = paths.clone();
-    let marked = run_bounded(move || vcs.provenances(&head, &asked))
-        .expect("git check-attr fed more paths than a pipe holds never ended")
-        .unwrap();
+    let marked = vcs.provenances(&head, &paths).unwrap();
     let generated = marked
         .values()
         .filter(|provenance| **provenance == Provenance::Generated)

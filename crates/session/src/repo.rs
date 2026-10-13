@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use domain::{
     Commit, CommitId, Content, Conversation, Decision, Draft, DraftText, FileChange, FileText,
-    Forge, Mark, PrNumber, Progress, Provenance, PullRequest, RelativePath, Review, Rights, Root,
-    Seen, Standing,
+    Forge, Host, Mark, PrNumber, Progress, Provenance, PullRequest, RelativePath, Review, Rights,
+    Root, Seen, Standing,
 };
 use io_forge::{ForgeClient, ForgeError, Submitted, TokenSource};
 use io_review::ReviewStore;
@@ -98,6 +98,30 @@ pub enum RequestedFrom {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Waiting {
+    Keychain(Host),
+    Forge(Host),
+    Review(PrNumber),
+}
+
+impl fmt::Display for Waiting {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Keychain(host) => {
+                write!(formatter, "reading the login for {host} from the keychain")
+            }
+            Self::Forge(host) => write!(formatter, "waiting for {host} to answer"),
+            Self::Review(number) => write!(formatter, "reading the review of #{number}"),
+        }
+    }
+}
+
+struct Connected {
+    client: ForgeClient,
+    timed_out: Option<SessionError>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub repo: RepoName,
     pub pull: PullRequest,
@@ -153,25 +177,36 @@ impl Repo {
         io_forge::forge_of(&self.url).ok()
     }
 
-    pub fn forge(&self) -> Result<ForgeClient, SessionError> {
+    fn connect(&self, report: &mut dyn FnMut(Waiting)) -> Result<Connected, SessionError> {
         let mut trouble = None;
         let client = ForgeClient::connect(&self.url, |forge| {
+            report(Waiting::Keychain(forge.host().clone()));
             self.access.token(forge).unwrap_or_else(|error| {
                 trouble = Some(error);
                 None
             })
         })?;
-        match trouble {
-            Some(error) if client.token_source().is_none() => Err(error),
-            _ => Ok(client),
-        }
+        let timed_out = match trouble {
+            Some(error) if client.token_source().is_none() && !error.keychain_timed_out() => {
+                return Err(error);
+            }
+            Some(error) if client.token_source().is_none() => Some(error),
+            _ => None,
+        };
+        Ok(Connected { client, timed_out })
+    }
+
+    pub fn forge(&self) -> Result<ForgeClient, SessionError> {
+        self.connect(&mut |_| {}).map(|connected| connected.client)
     }
 
     fn with_forge<T>(
         &self,
         ask: impl Fn(&ForgeClient) -> Result<T, ForgeError>,
+        report: &mut dyn FnMut(Waiting),
     ) -> Result<T, SessionError> {
-        let client = self.forge()?;
+        let Connected { client, timed_out } = self.connect(report)?;
+        report(Waiting::Forge(client.forge().host().clone()));
         match ask(&client) {
             Err(cause)
                 if cause.refused_token()
@@ -183,52 +218,54 @@ impl Repo {
                 }
                 Ok(ask(&self.forge()?)?)
             }
+            Err(cause @ ForgeError::NoToken(..)) => {
+                Err(timed_out.unwrap_or(SessionError::Forge(cause)))
+            }
             answered => Ok(answered?),
         }
     }
 
-    pub fn pulls(&self) -> Result<Vec<PullRequest>, SessionError> {
-        self.with_forge(ForgeClient::open_pulls)
+    pub fn inbox(&self, report: &mut dyn FnMut(Waiting)) -> Result<Vec<Entry>, SessionError> {
+        let pulls = self.with_forge(ForgeClient::open_pulls, report)?;
+        let mut entries = Vec::with_capacity(pulls.len());
+        for pull in pulls {
+            report(Waiting::Review(pull.number));
+            let state = self.state(pull.number).ok();
+            let review = state.as_ref().map_or_else(
+                || self.review(pull.number).unwrap_or_default(),
+                |opened| opened.review.clone(),
+            );
+            let progress = state
+                .as_ref()
+                .map(|opened| opened.review.progress(&opened.changes));
+            entries.push(Entry {
+                repo: self.name.clone(),
+                standing: review.standing(&pull.head_commit, progress),
+                drafts: review.drafts().to_vec(),
+                progress,
+                pull,
+            });
+        }
+        Ok(entries)
     }
 
-    pub fn inbox(&self) -> Result<Vec<Entry>, SessionError> {
-        Ok(self
-            .pulls()?
-            .into_iter()
-            .map(|pull| {
-                let state = self.state(pull.number).ok();
-                let review = state.as_ref().map_or_else(
-                    || self.review(pull.number).unwrap_or_default(),
-                    |opened| opened.review.clone(),
-                );
-                let progress = state
-                    .as_ref()
-                    .map(|opened| opened.review.progress(&opened.changes));
-                Entry {
-                    repo: self.name.clone(),
-                    standing: review.standing(&pull.head_commit, progress),
-                    drafts: review.drafts().to_vec(),
-                    progress,
-                    pull,
-                }
-            })
-            .collect())
-    }
-
-    pub fn requested(&self) -> Result<Vec<PrNumber>, SessionError> {
-        self.with_forge(ForgeClient::requested)
+    pub fn requested(
+        &self,
+        report: &mut dyn FnMut(Waiting),
+    ) -> Result<Vec<PrNumber>, SessionError> {
+        self.with_forge(ForgeClient::requested, report)
     }
 
     pub fn pull(&self, number: PrNumber) -> Result<PullRequest, SessionError> {
-        self.with_forge(|forge| forge.pull(number))
+        self.with_forge(|forge| forge.pull(number), &mut |_| {})
     }
 
     pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, SessionError> {
-        self.with_forge(|forge| forge.conversation(pull))
+        self.with_forge(|forge| forge.conversation(pull), &mut |_| {})
     }
 
     pub fn rights(&self, pull: &PullRequest) -> Result<Rights, SessionError> {
-        self.with_forge(|forge| forge.rights(pull))
+        self.with_forge(|forge| forge.rights(pull), &mut |_| {})
     }
 
     pub fn fetch(&self, pull: &PullRequest) -> Result<Opened, SessionError> {
@@ -350,11 +387,14 @@ impl Repo {
         if let Some(refused) = refused(&Rights::default()) {
             return Err(refused);
         }
-        let (forge, pull, rights) = self.with_forge(|forge| {
-            let pull = forge.pull(opened.number)?;
-            let rights = forge.rights(&pull)?;
-            Ok((forge.clone(), pull, rights))
-        })?;
+        let (forge, pull, rights) = self.with_forge(
+            |forge| {
+                let pull = forge.pull(opened.number)?;
+                let rights = forge.rights(&pull)?;
+                Ok((forge.clone(), pull, rights))
+            },
+            &mut |_| {},
+        )?;
         if let Some(refused) = refused(&rights) {
             return Err(refused);
         }

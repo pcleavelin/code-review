@@ -4,13 +4,14 @@ use domain::{
     ChangeKind, Commit, CommitId, DiffLine, FileChange, Hunk, Line, LineKind, Login, Moment, Prose,
     Provenance, RelativePath, SourceLine,
 };
-use io_process::{Argument, Captured, Program};
+use io_process::{Argument, Captured, Deadline, Program};
 
 use crate::wire::{self, CommandLine, WireAttribute, WireCommit, WireFile, WireHunk, WireKind};
 
 pub(crate) struct Invocation {
     pub(crate) program: Program,
     pub(crate) arguments: Vec<Argument>,
+    pub(crate) deadline: Deadline,
 }
 
 impl From<&CommandLine> for Invocation {
@@ -22,6 +23,7 @@ impl From<&CommandLine> for Invocation {
                 .iter()
                 .map(|argument| Argument::new(argument))
                 .collect(),
+            deadline: line.deadline,
         }
     }
 }

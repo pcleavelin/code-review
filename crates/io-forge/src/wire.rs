@@ -6,12 +6,16 @@ use domain::{
     CommitId, Decision, DraftId, ForgeKind, Line, Linked, LinkedFile, RefName, RelativePath,
     Revision, Side, Span, ThreadState,
 };
-use io_process::Captured;
+use io_process::{Captured, Deadline};
 use serde_json::{Map, Value, json};
 use strum::VariantArray;
 
 pub(crate) const CURL: &str = "curl";
 pub(crate) const GH: &str = "gh";
+pub(crate) const CONNECT_DEADLINE: Deadline = Deadline::seconds(10);
+pub(crate) const REQUEST_DEADLINE: Deadline = Deadline::seconds(30);
+pub(crate) const GH_DEADLINE: Deadline = Deadline::seconds(5);
+pub(crate) const CURL_EXIT_TIMED_OUT: i32 = 28;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EnvVar {
@@ -160,10 +164,17 @@ pub(crate) fn gh_token_arguments(host: &str) -> Vec<String> {
 }
 
 pub(crate) fn curl_arguments() -> Vec<String> {
-    ["--silent", "--show-error", "--location", "--config", "-"]
-        .iter()
-        .map(|argument| (*argument).to_owned())
-        .collect()
+    vec![
+        "--silent".to_owned(),
+        "--show-error".to_owned(),
+        "--location".to_owned(),
+        "--connect-timeout".to_owned(),
+        CONNECT_DEADLINE.whole_seconds().to_string(),
+        "--max-time".to_owned(),
+        REQUEST_DEADLINE.whole_seconds().to_string(),
+        "--config".to_owned(),
+        "-".to_owned(),
+    ]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

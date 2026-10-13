@@ -84,7 +84,7 @@ fn now() -> UnixTime {
     )
 }
 
-fn curl(config: &Captured) -> Result<WireResponse, ForgeError> {
+fn curl(config: &Captured, host: &Host) -> Result<WireResponse, ForgeError> {
     let arguments: Vec<Argument> = wire::curl_arguments()
         .iter()
         .map(|argument| Argument::new(argument))
@@ -94,8 +94,15 @@ fn curl(config: &Captured) -> Result<WireResponse, ForgeError> {
         &arguments,
         &env::temp_dir(),
         config,
+        wire::REQUEST_DEADLINE,
     )
-    .map_err(ForgeError::Process)?;
+    .map_err(|error| match error {
+        ProcessError::TimedOut { .. } => ForgeError::TimedOut(host.clone()),
+        other => ForgeError::Process(other),
+    })?;
+    if output.status.code() == Some(wire::CURL_EXIT_TIMED_OUT) {
+        return Err(ForgeError::TimedOut(host.clone()));
+    }
     if !output.success() {
         return Err(ForgeError::Unreachable(output.stderr));
     }
@@ -191,6 +198,7 @@ pub enum ForgeError {
     NoToken(ForgeHost, TokenFor),
     Process(ProcessError),
     Unreachable(Captured),
+    TimedOut(Host),
     Http {
         status: HttpStatus,
         body: ResponseBody,
@@ -239,6 +247,7 @@ impl ForgeError {
             | Self::NoToken(..)
             | Self::Process(_)
             | Self::Unreachable(_)
+            | Self::TimedOut(_)
             | Self::Http { .. }
             | Self::Malformed(_)
             | Self::PendingLeft { .. }
@@ -289,15 +298,14 @@ impl fmt::Display for ForgeError {
                 url.as_str()
             ),
             Self::NoToken(site, wanted) => no_token(formatter, site, *wanted),
-            Self::Process(ProcessError::Missing(program)) => {
-                write!(formatter, "{program} is not on PATH: install it")
-            }
-            Self::Process(ProcessError::Start { program, error }) => {
-                write!(formatter, "cannot run {program}: {error}")
-            }
-            Self::Process(ProcessError::NoPipe(program)) => {
-                write!(formatter, "cannot write to {program}")
-            }
+            Self::Process(error) => write!(formatter, "{error}"),
+            Self::TimedOut(host) => write!(
+                formatter,
+                "{host} did not answer in time ({} gives up after {} connecting or {} on one request): the forge or the network is slow or down; refresh to try again",
+                wire::CURL,
+                wire::CONNECT_DEADLINE,
+                wire::REQUEST_DEADLINE
+            ),
             Self::Unreachable(stderr) => write!(
                 formatter,
                 "{} could not reach the forge: {}",
@@ -377,7 +385,13 @@ fn gh_token(host: &Host) -> Option<Token> {
         .iter()
         .map(|argument| Argument::new(argument))
         .collect();
-    let output = Process::run(&Program::new(wire::GH), &arguments, &env::temp_dir()).ok()?;
+    let output = Process::run(
+        &Program::new(wire::GH),
+        &arguments,
+        &env::temp_dir(),
+        wire::GH_DEADLINE,
+    )
+    .ok()?;
     output
         .success()
         .then(|| Token::new(&output.stdout.text()))
@@ -504,7 +518,7 @@ impl ForgeClient {
 
     fn exchange(&self, api: &Api, request: &Request) -> Result<WireResponse, ForgeError> {
         let config = api.config(request, self.token.as_ref().map(Token::as_str));
-        let response = curl(&Captured::of(config.as_bytes()))?;
+        let response = curl(&Captured::of(config.as_bytes()), self.forge.host())?;
         let status = HttpStatus::new(response.status);
         if status.success() {
             Ok(response)

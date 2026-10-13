@@ -192,11 +192,12 @@ fn forges(model: &Model, frame: &mut Frame<'_>) {
     frame.label("forges", WEAK);
     for site in sites {
         let host = Label::new(site.to_string());
-        let held = logins.held.get(&site).copied();
+        let held = logins.held.get(&site);
         let (state, color) = match (logins.failed.contains_key(&site), held) {
             (true, _) => ("login failed", RED),
             (false, Some(Held::In)) => ("logged in", GREEN),
             (false, Some(Held::Out)) => ("not logged in", WEAK),
+            (false, Some(Held::TimedOut(_))) => ("not answering", ORANGE),
             (false, None) => ("checking...", WEAK),
         };
         frame.label_runs(vec![
@@ -209,7 +210,7 @@ fn forges(model: &Model, frame: &mut Frame<'_>) {
                 color,
             ),
         ]);
-        if held == Some(Held::In) {
+        if held == Some(&Held::In) {
             let logout = ids::LOGOUT.with(&host);
             if frame.small_button("log out", logout).clicked() {
                 frame.push(Action::Login(LoginAct::Logout(site.clone())));
@@ -351,7 +352,15 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
     forges(model, frame);
     let id = ids::inbox();
     frame.scroll_column(id, model.scrolls.get(id), Scroller::Plain, None);
-    if matches!(model.review.inbox, Inbox::Asking) {
+    for (site, held) in &model.review.logins.held {
+        if let Held::TimedOut(why) = held {
+            frame.note(format!("{site}: {}", why.as_str()), ORANGE, Padding::Step);
+        }
+    }
+    for (repo, waiting) in &model.review.waiting {
+        frame.note(format!("{repo}: {waiting}..."), WEAK, Padding::Step);
+    }
+    if matches!(model.review.inbox, Inbox::Asking) && model.review.waiting.is_empty() {
         frame.note(
             "asking every forge for its open pull requests...",
             WEAK,

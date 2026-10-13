@@ -131,7 +131,9 @@ impl LspSession {
             .collect();
         let spawned = Process::spawn(&program, &arguments, &root).map_err(|error| match error {
             ProcessError::Missing(_) => StartError::Missing(language.program()),
-            ProcessError::Start { .. } | ProcessError::NoPipe(_) => failed(),
+            ProcessError::Start { .. }
+            | ProcessError::NoPipe(_)
+            | ProcessError::TimedOut { .. } => failed(),
         })?;
         let mut session = Self {
             child: spawned.child,

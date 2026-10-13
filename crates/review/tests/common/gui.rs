@@ -1,10 +1,11 @@
 use super::{fixture, play_script};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, requested, all_changes, stacked }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked }
     };
 }
 
@@ -14,6 +15,7 @@ pub(crate) struct Scenario {
 }
 
 const OPEN: &str = "idle\nclick-id pull/0\nidle\nwait 2\n";
+const STALL: &str = "STALL\n";
 
 pub(crate) fn open() -> Scenario {
     Scenario {
@@ -46,7 +48,11 @@ pub(crate) fn screenshots(name: &str) -> PathBuf {
 }
 
 pub(crate) fn play(binary: &Path, name: &str, scenario: &Scenario) -> String {
-    let script = scenario.script.replace("OPEN\n", OPEN);
+    let stalled = scenario.script.starts_with(STALL);
+    let script = scenario
+        .script
+        .trim_start_matches(STALL)
+        .replace("OPEN\n", OPEN);
     let mut lines: Vec<String> = script.lines().map(str::to_owned).collect();
     for line_index in 0..lines.len() {
         while let Some(open) = lines[line_index].find("<<") {
@@ -58,7 +64,7 @@ pub(crate) fn play(binary: &Path, name: &str, scenario: &Scenario) -> String {
                 None => (lines[line_index][open + 2..close].to_owned(), None),
             };
             let probe = lines[..line_index].join("\n") + "\ndump\nquit\n";
-            let err = play_script(binary, &fixture(name), name, &probe);
+            let err = play_script(binary, &staged(name, stalled), name, &probe);
             let (left, top, width, height) = last_rectangle(&err, &prefix).unwrap_or_else(|| {
                 panic!(
                     "{name}: no rectangle for '{prefix}' before line {}\n{err}",
@@ -78,7 +84,20 @@ pub(crate) fn play(binary: &Path, name: &str, scenario: &Scenario) -> String {
             lines[line_index].replace_range(open..close + 2, &format!("{point_x} {point_y}"));
         }
     }
-    play_script(binary, &fixture(name), name, &(lines.join("\n") + "\n"))
+    play_script(
+        binary,
+        &staged(name, stalled),
+        name,
+        &(lines.join("\n") + "\n"),
+    )
+}
+
+fn staged(name: &str, stalled: bool) -> super::Fixture {
+    let staged = fixture(name);
+    if stalled {
+        fs::write(staged.home.join("keychain.stall"), "").unwrap();
+    }
+    staged
 }
 
 pub(crate) fn assert_shown(name: &str, scenario: &Scenario, output: &str) {
@@ -435,6 +454,36 @@ quit
         shows: &[
             "DUMP rights Some(Err(Label(\"submitting to forgejo.test needs a login: `review login forgejo.test`, or set FORGEJO_TOKEN or GITEA_TOKEN\")))",
             "tip=Some(\"submitting to forgejo.test needs a login: `review login forgejo.test`, or set FORGEJO_TOKEN or GITEA_TOKEN\")",
+        ],
+    }
+}
+
+pub(crate) fn keychain_stalled() -> Scenario {
+    Scenario {
+        script: "STALL
+wait 20
+dump
+shot {shots}/waiting.png
+idle
+wait 2
+dump
+shot {shots}/listed.png
+click-id pull/0
+idle
+wait 2
+hover-id submit-approve
+wait 80
+dump
+shot {shots}/rights.png
+quit
+",
+        shows: &[
+            "DUMP waiting owner/repo \"reading the login for forgejo.test from the keychain\"",
+            "DUMP login sites=[forgejo.test=timed-out=\"the keychain did not answer within 5 s: ",
+            "may be waiting on a dialog that asks to unlock the keychain or to allow access to the code-review item; answer it (or unlock the keychain), then refresh the Inbox or run the command again\"] stage=none",
+            "DUMP entry owner/repo#1 New drafts=0 requested=false \"Square the inputs\"",
+            "unanswered=[owner/repo:Unknown:\"the keychain did not answer within 5 s",
+            "DUMP rights Some(Err(Label(\"the keychain did not answer within 5 s",
         ],
     }
 }

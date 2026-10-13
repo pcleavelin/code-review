@@ -1,4 +1,4 @@
-pub enum KeychainError { Unsupported, NoKeychain(PathBuf), Process(ProcessError), Refused { program: Program, stderr: Captured }, Unreadable(Host), }
+pub enum KeychainError { Unsupported, NoKeychain(PathBuf), Process(ProcessError), Refused { program: Program, stderr: Captured, }, Unreadable(Host), TimedOut { program: Program, deadline: Deadline, }, }
 pub enum Forgotten { Removed, Absent, }
 pub struct Keychain { file: Option<PathBuf>, }
 pub fn user() -> Self

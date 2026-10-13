@@ -1,8 +1,9 @@
 use std::path::Path;
 
-use io_process::{Argument, Captured};
+use io_process::{Argument, Captured, Deadline};
 
 pub(crate) const KEYCHAIN_VARIABLE: &str = "REVIEW_KEYCHAIN";
+pub(crate) const KEYCHAIN_DEADLINE: Deadline = Deadline::seconds(5);
 pub(crate) const SERVICE: &str = "code-review";
 pub(crate) const SECURITY: &str = "security";
 pub(crate) const SECRET_TOOL: &str = "secret-tool";

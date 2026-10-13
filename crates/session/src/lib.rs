@@ -12,9 +12,9 @@ use io_keychain::KeychainError;
 use io_review::ReviewError;
 use io_vcs::VcsError;
 
-pub use crate::access::{Access, StartedLogin};
+pub use crate::access::{Access, Holds, StartedLogin};
 pub use crate::desk::{Desk, LoginTarget, PinTarget, Pinned, PullAddress, Why};
-pub use crate::repo::{Entry, Opened, Repo, RepoName, RequestedFrom};
+pub use crate::repo::{Entry, Opened, Repo, RepoName, RequestedFrom, Waiting};
 pub use io_config::Reach;
 pub use io_forge::{Cancel, DeviceAuthorization, Submitted};
 pub use io_keychain::Forgotten;
@@ -160,6 +160,10 @@ impl fmt::Display for SessionError {
 impl SessionError {
     pub const fn lacks_token(&self) -> bool {
         matches!(self, Self::Forge(ForgeError::NoToken(..)))
+    }
+
+    pub const fn keychain_timed_out(&self) -> bool {
+        matches!(self, Self::Keychain(KeychainError::TimedOut { .. }))
     }
 }
 

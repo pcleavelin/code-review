@@ -13,7 +13,7 @@ use image::codecs::png::PngDecoder;
 use image::codecs::webp::WebPDecoder;
 use image::imageops::FilterType;
 use image::{AnimationDecoder, Delay, DynamicImage, Frames, ImageFormat, RgbaImage};
-use io_process::{Argument, Captured, Process, ProcessError, Program};
+use io_process::{Argument, Captured, Deadline, Process, ProcessError, Program};
 
 const LARGEST: PixelCount = PixelCount::new(2048);
 const MOST_PIXELS: PixelCount = PixelCount::new(16 * 1024 * 1024);
@@ -24,26 +24,24 @@ const BROWSER_DEFAULT: Duration = Duration::from_millis(100);
 struct Literal(&'static str);
 
 const CURL: Literal = Literal("curl");
+const MAX_TIME: Literal = Literal("--max-time");
+const FETCH_DEADLINE: Deadline = Deadline::seconds(30);
 
-const CURL_ARGUMENTS: [Literal; 10] = [
+const CURL_ARGUMENTS: [Literal; 8] = [
     Literal("--silent"),
     Literal("--show-error"),
     Literal("--location"),
     Literal("--fail"),
-    Literal("--max-time"),
-    Literal("30"),
     Literal("--max-filesize"),
     Literal("25000000"),
     Literal("--config"),
     Literal("-"),
 ];
 
-const CURL_ARGUMENTS_NO_REDIRECT: [Literal; 9] = [
+const CURL_ARGUMENTS_NO_REDIRECT: [Literal; 7] = [
     Literal("--silent"),
     Literal("--show-error"),
     Literal("--fail"),
-    Literal("--max-time"),
-    Literal("30"),
     Literal("--max-filesize"),
     Literal("25000000"),
     Literal("--config"),
@@ -62,7 +60,7 @@ pub enum PictureError {
 impl fmt::Display for PictureError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Process(error) => write!(formatter, "curl did not run: {error:?}"),
+            Self::Process(error) => write!(formatter, "curl did not run: {error}"),
             Self::Fetch(stderr) => write!(formatter, "not fetched: {}", stderr.text().trim()),
             Self::Decode(error) => write!(formatter, "not a picture this tool reads: {error}"),
         }
@@ -122,15 +120,19 @@ fn run_curl(
     config: &Config,
     cache: &PictureCache,
 ) -> Result<Captured, PictureError> {
-    let arguments: Vec<Argument> = arguments
-        .iter()
-        .map(|argument| Argument::new(argument.0))
-        .collect();
+    let arguments: Vec<Argument> = [
+        Argument::new(MAX_TIME.0),
+        Argument::new(&FETCH_DEADLINE.whole_seconds().to_string()),
+    ]
+    .into_iter()
+    .chain(arguments.iter().map(|argument| Argument::new(argument.0)))
+    .collect();
     let output = Process::run_with_input(
         &Program::new(CURL.0),
         &arguments,
         &cache.0,
         &Captured::of(config.0.as_bytes()),
+        FETCH_DEADLINE,
     )
     .map_err(PictureError::Process)?;
     if output.success() {

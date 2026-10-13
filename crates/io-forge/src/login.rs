@@ -109,7 +109,7 @@ struct Answer {
 
 fn post(site: &ForgeHost, request: Option<Captured>) -> Result<Answer, ForgeError> {
     let request = request.ok_or_else(|| ForgeError::NoDeviceLogin(site.clone()))?;
-    let response = curl(&request)?;
+    let response = curl(&request, site.host())?;
     Ok(Answer {
         status: HttpStatus::new(response.status),
         body: ResponseBody::new(&response.body),

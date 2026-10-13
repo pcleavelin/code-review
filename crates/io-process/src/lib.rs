@@ -1,10 +1,12 @@
 use std::env;
 use std::fmt;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Prefix(&'static str);
@@ -124,11 +126,162 @@ pub struct Spawned {
     pub output: ChildStdout,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Deadline(Duration);
+
+impl Deadline {
+    pub const fn seconds(count: u64) -> Self {
+        Self(Duration::from_secs(count))
+    }
+
+    pub const fn whole_seconds(self) -> u64 {
+        self.0.as_secs()
+    }
+}
+
+impl fmt::Display for Deadline {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} s", self.0.as_secs())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Leading(usize);
+
+const NAMED_ARGUMENTS: Leading = Leading(2);
+
 #[derive(Debug)]
 pub enum ProcessError {
     Missing(Program),
-    Start { program: Program, error: io::Error },
+    Start {
+        program: Program,
+        error: io::Error,
+    },
     NoPipe(Program),
+    TimedOut {
+        program: Program,
+        leading: Vec<Argument>,
+        deadline: Deadline,
+    },
+}
+
+impl fmt::Display for ProcessError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing(program) => write!(formatter, "{program} is not on PATH: install it"),
+            Self::Start { program, error } => write!(formatter, "cannot run {program}: {error}"),
+            Self::NoPipe(program) => write!(formatter, "cannot write to {program}"),
+            Self::TimedOut {
+                program,
+                leading,
+                deadline,
+            } => {
+                write!(formatter, "{program}")?;
+                for argument in leading {
+                    write!(formatter, " {argument}")?;
+                }
+                write!(
+                    formatter,
+                    " did not finish within {deadline} and was stopped"
+                )
+            }
+        }
+    }
+}
+
+enum Stream {
+    Stdin(io::Result<()>),
+    Stdout(io::Result<Captured>),
+    Stderr(io::Result<Captured>),
+}
+
+fn read_all(mut pipe: impl Read) -> io::Result<Captured> {
+    let mut bytes = Vec::new();
+    pipe.read_to_end(&mut bytes).map(|_| Captured(bytes))
+}
+
+fn abandon(mut child: Child) {
+    drop(child.kill());
+    drop(child.wait());
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "io-process feeds and drains a program's pipes on threads of its own, left behind when the program outlives its deadline"
+)]
+fn detached(body: impl FnOnce() + Send + 'static) {
+    drop(thread::spawn(body));
+}
+
+fn exchange(
+    program: &Program,
+    arguments: &[Argument],
+    directory: &Path,
+    input: Option<&Captured>,
+    deadline: Deadline,
+) -> Result<Output, ProcessError> {
+    let failed = |error| ProcessError::Start {
+        program: program.clone(),
+        error,
+    };
+    let ends = Instant::now() + deadline.0;
+    let mut child = command(program, arguments, directory)?
+        .stdin(input.map_or_else(Stdio::null, |_| Stdio::piped()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(failed)?;
+    let (sender, streams) = mpsc::channel();
+    let mut awaited = 2;
+    if let Some(input) = input {
+        let Some(mut stdin) = child.stdin.take() else {
+            abandon(child);
+            return Err(ProcessError::NoPipe(program.clone()));
+        };
+        let bytes = input.0.clone();
+        let fed = sender.clone();
+        detached(move || {
+            let written = stdin.write_all(&bytes);
+            drop(stdin);
+            drop(fed.send(Stream::Stdin(written)));
+        });
+        awaited += 1;
+    }
+    let (Some(out_pipe), Some(err_pipe)) = (child.stdout.take(), child.stderr.take()) else {
+        abandon(child);
+        return Err(ProcessError::NoPipe(program.clone()));
+    };
+    let out = sender.clone();
+    detached(move || drop(out.send(Stream::Stdout(read_all(out_pipe)))));
+    detached(move || drop(sender.send(Stream::Stderr(read_all(err_pipe)))));
+    let mut written = Ok(());
+    let (mut stdout, mut stderr) = (Captured::default(), Captured::default());
+    for _ in 0..awaited {
+        match streams.recv_timeout(ends.saturating_duration_since(Instant::now())) {
+            Ok(Stream::Stdin(result)) => written = result,
+            Ok(Stream::Stdout(result)) => stdout = result.map_err(failed)?,
+            Ok(Stream::Stderr(result)) => stderr = result.map_err(failed)?,
+            Err(RecvTimeoutError::Timeout) => {
+                abandon(child);
+                return Err(ProcessError::TimedOut {
+                    program: program.clone(),
+                    leading: arguments.iter().take(NAMED_ARGUMENTS.0).cloned().collect(),
+                    deadline,
+                });
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                abandon(child);
+                return Err(ProcessError::NoPipe(program.clone()));
+            }
+        }
+    }
+    let status = child.wait().map_err(failed)?;
+    written.map_err(failed)?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -139,19 +292,9 @@ impl Process {
         program: &Program,
         arguments: &[Argument],
         directory: &Path,
+        deadline: Deadline,
     ) -> Result<Output, ProcessError> {
-        let output = command(program, arguments, directory)?
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|error| ProcessError::Start {
-                program: program.clone(),
-                error,
-            })?;
-        Ok(Output {
-            status: output.status,
-            stdout: Captured(output.stdout),
-            stderr: Captured(output.stderr),
-        })
+        exchange(program, arguments, directory, None, deadline)
     }
 
     pub fn run_with_input(
@@ -159,47 +302,9 @@ impl Process {
         arguments: &[Argument],
         directory: &Path,
         input: &Captured,
+        deadline: Deadline,
     ) -> Result<Output, ProcessError> {
-        let mut child = command(program, arguments, directory)?
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| ProcessError::Start {
-                program: program.clone(),
-                error,
-            })?;
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| ProcessError::NoPipe(program.clone()))?;
-        let (written, output) = thread::scope(|scope| {
-            let writer = scope.spawn(move || {
-                let written = stdin.write_all(&input.0);
-                drop(stdin);
-                written
-            });
-            let output = child.wait_with_output();
-            (writer.join(), output)
-        });
-        let output = output.map_err(|error| ProcessError::Start {
-            program: program.clone(),
-            error,
-        })?;
-        let written = written.unwrap_or_else(|_| {
-            Err(io::Error::other(format!(
-                "the thread writing to {program} stopped"
-            )))
-        });
-        written.map_err(|error| ProcessError::Start {
-            program: program.clone(),
-            error,
-        })?;
-        Ok(Output {
-            status: output.status,
-            stdout: Captured(output.stdout),
-            stderr: Captured(output.stderr),
-        })
+        exchange(program, arguments, directory, Some(input), deadline)
     }
 
     pub fn spawn(

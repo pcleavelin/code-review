@@ -1,9 +1,10 @@
+access::pub enum Holds { Login, Nothing, }
 access::pub enum StartedLogin { Device(DeviceAuthorization), Paste { site: ForgeHost, page: Option<WebLink>, }, }
 access::pub struct Access { keychain: Option<Keychain>, forges: Option<ForgesStore>, }
 access::pub fn find(reach: Reach) -> Self
 access::pub fn token(&self, forge: &Forge) -> Result<Option<Token>, SessionError>
 access::pub fn renew(&self, site: &ForgeHost) -> Result<Option<Token>, SessionError>
-access::pub fn holds(&self, site: &ForgeHost) -> bool
+access::pub fn holds(&self, site: &ForgeHost) -> Result<Holds, SessionError>
 access::pub fn start(&self, site: &ForgeHost) -> Result<StartedLogin, SessionError>
 access::pub fn finish( &self, authorization: &DeviceAuthorization, cancel: &Cancel, ) -> Result<ForgeHost, SessionError>
 access::pub fn keep(&self, site: &ForgeHost, token: Token) -> Result<(), SessionError>
@@ -33,6 +34,7 @@ desk::pub fn unpin(&mut self, asked: &RepoName) -> Result<RepoName, SessionError
 desk::pub fn find(&self, address: &PullAddress) -> Result<&Repo, SessionError>
 pub enum SessionError { Vcs(VcsError), NoRemote, Forge(ForgeError), Review(ReviewError), NotOpened(PrNumber, VcsError), Moved { number: PrNumber, reviewed: CommitId, now: CommitId, }, SubmitRefused { number: PrNumber, refusal: Refusal, }, NothingToDrop(PrNumber), SeenHeadGone { file: RelativePath, head: CommitId, }, NoPins, NoPinStore, Pins(io::Error), AlreadyPinned(RepoName), NoSuchRepo(RepoName, Vec<RepoName>), Ambiguous(PrNumber, Vec<RepoName>), Keychain(KeychainError), NoKeychain, NoClient { host: Host, gap: MissingClient, file: Option<PathBuf>, }, Renewal { site: ForgeHost, cause: ForgeError, }, TokenRefused { site: ForgeHost, cause: ForgeError, }, NoSite(LoginTarget), }
 pub const fn lacks_token(&self) -> bool
+pub const fn keychain_timed_out(&self) -> bool
 repo::pub struct RepoName(String);
 repo::pub fn new(text: &str) -> Self
 repo::pub fn as_str(&self) -> &str
@@ -41,6 +43,7 @@ repo::pub struct Opened { pub number: PrNumber, pub base: CommitId, pub head: Co
 repo::pub fn change(&self, path: &RelativePath) -> Option<&FileChange>
 repo::pub fn seen(&self, change: &FileChange) -> Seen
 repo::pub enum RequestedFrom { #[default] Any, You, }
+repo::pub enum Waiting { Keychain(Host), Forge(Host), Review(PrNumber), }
 repo::pub struct Entry { pub repo: RepoName, pub pull: PullRequest, pub progress: Option<Progress>, pub drafts: Vec<Draft>, pub standing: Standing, }
 repo::pub struct Repo { root: Root, name: RepoName, vcs: Vcs, store: ReviewStore, remote: Remote, url: RemoteUrl, access: Access, }
 repo::pub fn find(root: &Root, access: &Access) -> Result<Self, SessionError>
@@ -49,9 +52,8 @@ repo::pub const fn name(&self) -> &RepoName
 repo::pub const fn remote(&self) -> &Remote
 repo::pub fn web(&self) -> Option<Forge>
 repo::pub fn forge(&self) -> Result<ForgeClient, SessionError>
-repo::pub fn pulls(&self) -> Result<Vec<PullRequest>, SessionError>
-repo::pub fn inbox(&self) -> Result<Vec<Entry>, SessionError>
-repo::pub fn requested(&self) -> Result<Vec<PrNumber>, SessionError>
+repo::pub fn inbox(&self, report: &mut dyn FnMut(Waiting)) -> Result<Vec<Entry>, SessionError>
+repo::pub fn requested( &self, report: &mut dyn FnMut(Waiting), ) -> Result<Vec<PrNumber>, SessionError>
 repo::pub fn pull(&self, number: PrNumber) -> Result<PullRequest, SessionError>
 repo::pub fn conversation(&self, pull: &PullRequest) -> Result<Conversation, SessionError>
 repo::pub fn rights(&self, pull: &PullRequest) -> Result<Rights, SessionError>

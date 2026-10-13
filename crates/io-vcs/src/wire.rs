@@ -1,7 +1,14 @@
+use io_process::Deadline;
+
 pub(crate) struct CommandLine {
     pub(crate) program: &'static str,
     pub(crate) arguments: Vec<String>,
+    pub(crate) deadline: Deadline,
 }
+
+pub(crate) const GIT_READ_DEADLINE: Deadline = Deadline::seconds(60);
+pub(crate) const GIT_TREE_DEADLINE: Deadline = Deadline::seconds(600);
+pub(crate) const GIT_NETWORK_DEADLINE: Deadline = Deadline::seconds(1800);
 
 pub(crate) const GIT: &str = "git";
 pub(crate) const JJ_MARKER: &str = ".jj";
@@ -51,9 +58,10 @@ const LOCAL_REFS: &str = "refs/code-review";
 const BRANCH_REFS: &str = "refs/heads";
 const NO_FILE: &str = "/dev/null";
 
-fn git(arguments: &[&str]) -> CommandLine {
+fn git(deadline: Deadline, arguments: &[&str]) -> CommandLine {
     CommandLine {
         program: GIT,
+        deadline,
         arguments: arguments
             .iter()
             .map(|argument| (*argument).to_owned())
@@ -62,18 +70,21 @@ fn git(arguments: &[&str]) -> CommandLine {
 }
 
 pub(crate) fn clone(url: &str, into: &str) -> CommandLine {
-    git(&[
-        "clone",
-        "--quiet",
-        "--filter=blob:none",
-        "--no-checkout",
-        url,
-        into,
-    ])
+    git(
+        GIT_NETWORK_DEADLINE,
+        &[
+            "clone",
+            "--quiet",
+            "--filter=blob:none",
+            "--no-checkout",
+            url,
+            into,
+        ],
+    )
 }
 
 pub(crate) fn remote_url(remote: &str) -> CommandLine {
-    git(&["remote", "get-url", remote])
+    git(GIT_READ_DEADLINE, &["remote", "get-url", remote])
 }
 
 pub(crate) fn local_ref(number: u64, end: &str) -> String {
@@ -86,60 +97,75 @@ pub(crate) const BASE_END: &str = "base";
 pub(crate) fn fetch(remote: &str, number: u64, head: &str, base: &str) -> CommandLine {
     let head = format!("+{head}:{}", local_ref(number, HEAD_END));
     let base = format!("+{BRANCH_REFS}/{base}:{}", local_ref(number, BASE_END));
-    git(&["fetch", "--no-tags", "--quiet", remote, &head, &base])
+    git(
+        GIT_NETWORK_DEADLINE,
+        &["fetch", "--no-tags", "--quiet", remote, &head, &base],
+    )
 }
 
 pub(crate) fn resolve(reference: &str) -> CommandLine {
-    git(&[
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        &format!("{reference}^{{commit}}"),
-    ])
+    git(
+        GIT_READ_DEADLINE,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{reference}^{{commit}}"),
+        ],
+    )
 }
 
 pub(crate) fn diff(base: &str, head: &str) -> CommandLine {
-    git(&[
-        "-c",
-        "core.quotepath=off",
-        "diff",
-        "--no-color",
-        "--no-ext-diff",
-        "--find-renames",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-        "--unified=3",
-        &format!("{base}...{head}"),
-    ])
+    git(
+        GIT_READ_DEADLINE,
+        &[
+            "-c",
+            "core.quotepath=off",
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--find-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--unified=3",
+            &format!("{base}...{head}"),
+        ],
+    )
 }
 
 pub(crate) fn file_diff(from: &str, to: &str, path: &str) -> CommandLine {
-    git(&[
-        "-c",
-        "core.quotepath=off",
-        "diff",
-        "--no-color",
-        "--no-ext-diff",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-        "--unified=3",
-        from,
-        to,
-        "--",
-        path,
-    ])
+    git(
+        GIT_READ_DEADLINE,
+        &[
+            "-c",
+            "core.quotepath=off",
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--unified=3",
+            from,
+            to,
+            "--",
+            path,
+        ],
+    )
 }
 
 pub(crate) const FIELD: char = '\u{1f}';
 
 pub(crate) fn log(base: &str, head: &str) -> CommandLine {
-    git(&[
-        "log",
-        "--no-color",
-        "--reverse",
-        "--format=%H%x1f%an%x1f%aI%x1f%s",
-        &format!("{base}..{head}"),
-    ])
+    git(
+        GIT_READ_DEADLINE,
+        &[
+            "log",
+            "--no-color",
+            "--reverse",
+            "--format=%H%x1f%an%x1f%aI%x1f%s",
+            &format!("{base}..{head}"),
+        ],
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,43 +191,55 @@ pub(crate) fn parse_log(text: &str) -> Vec<WireCommit> {
 }
 
 pub(crate) fn commit_diff(commit: &str) -> CommandLine {
-    git(&[
-        "-c",
-        "core.quotepath=off",
-        "diff",
-        "--no-color",
-        "--no-ext-diff",
-        "--find-renames",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-        "--unified=3",
-        &format!("{commit}^"),
-        commit,
-    ])
+    git(
+        GIT_READ_DEADLINE,
+        &[
+            "-c",
+            "core.quotepath=off",
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--find-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--unified=3",
+            &format!("{commit}^"),
+            commit,
+        ],
+    )
 }
 
 pub(crate) fn show(commit: &str, path: &str) -> CommandLine {
-    git(&["show", &format!("{commit}:{path}")])
+    git(GIT_READ_DEADLINE, &["show", &format!("{commit}:{path}")])
 }
 
 pub(crate) fn add_worktree(tree: &str, commit: &str) -> CommandLine {
-    git(&["worktree", "add", "--detach", "--force", tree, commit])
+    git(
+        GIT_TREE_DEADLINE,
+        &["worktree", "add", "--detach", "--force", tree, commit],
+    )
 }
 
 pub(crate) fn remove_worktree(tree: &str) -> CommandLine {
-    git(&["worktree", "remove", "--force", "--force", tree])
+    git(
+        GIT_TREE_DEADLINE,
+        &["worktree", "remove", "--force", "--force", tree],
+    )
 }
 
 pub(crate) fn prune_worktrees() -> CommandLine {
-    git(&["worktree", "prune"])
+    git(GIT_READ_DEADLINE, &["worktree", "prune"])
 }
 
 pub(crate) fn delete_ref(reference: &str) -> CommandLine {
-    git(&["update-ref", "-d", reference])
+    git(GIT_READ_DEADLINE, &["update-ref", "-d", reference])
 }
 
 pub(crate) fn check_out(commit: &str) -> CommandLine {
-    git(&["checkout", "--detach", "--force", "--quiet", commit])
+    git(
+        GIT_TREE_DEADLINE,
+        &["checkout", "--detach", "--force", "--quiet", commit],
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -343,14 +381,17 @@ pub(crate) const UNSET: &str = "unset";
 pub(crate) const FALSE: &str = "false";
 
 pub(crate) fn check_attributes(commit: &str) -> CommandLine {
-    git(&[
-        "check-attr",
-        "-z",
-        "--stdin",
-        &format!("--source={commit}"),
-        LINGUIST_GENERATED,
-        GITLAB_GENERATED,
-    ])
+    git(
+        GIT_READ_DEADLINE,
+        &[
+            "check-attr",
+            "-z",
+            "--stdin",
+            &format!("--source={commit}"),
+            LINGUIST_GENERATED,
+            GITLAB_GENERATED,
+        ],
+    )
 }
 
 pub(crate) fn attribute_paths(paths: &[&str]) -> Vec<u8> {

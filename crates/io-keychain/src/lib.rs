@@ -6,17 +6,24 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use domain::{Grant, Host};
-use io_process::{Argument, Captured, Output, Process, ProcessError, Program};
+use io_process::{Argument, Captured, Deadline, Output, Process, ProcessError, Program};
 
-use crate::wire::{KEYCHAIN_VARIABLE, Tool};
+use crate::wire::{KEYCHAIN_DEADLINE, KEYCHAIN_VARIABLE, SERVICE, Tool};
 
 #[derive(Debug)]
 pub enum KeychainError {
     Unsupported,
     NoKeychain(PathBuf),
     Process(ProcessError),
-    Refused { program: Program, stderr: Captured },
+    Refused {
+        program: Program,
+        stderr: Captured,
+    },
     Unreadable(Host),
+    TimedOut {
+        program: Program,
+        deadline: Deadline,
+    },
 }
 
 impl fmt::Display for KeychainError {
@@ -30,15 +37,11 @@ impl fmt::Display for KeychainError {
                 "{KEYCHAIN_VARIABLE} names {}, which is not a keychain file: create it first (security create-keychain -p '' <file>)",
                 path.display()
             ),
-            Self::Process(ProcessError::Missing(program)) => {
-                write!(formatter, "{program} is not on PATH: install it")
-            }
-            Self::Process(ProcessError::Start { program, error }) => {
-                write!(formatter, "cannot run {program}: {error}")
-            }
-            Self::Process(ProcessError::NoPipe(program)) => {
-                write!(formatter, "cannot write to {program}")
-            }
+            Self::Process(error) => write!(formatter, "{error}"),
+            Self::TimedOut { program, deadline } => write!(
+                formatter,
+                "the keychain did not answer within {deadline}: {program} may be waiting on a dialog that asks to unlock the keychain or to allow access to the {SERVICE} item; answer it (or unlock the keychain), then refresh the Inbox or run the command again"
+            ),
             Self::Refused { program, stderr } => write!(
                 formatter,
                 "{program} refused: {}",
@@ -97,11 +100,24 @@ impl Keychain {
         input: Option<&Captured>,
     ) -> Result<Output, KeychainError> {
         let program = Program::new(tool.program());
+        let directory = env::temp_dir();
         match input {
-            Some(input) => Process::run_with_input(&program, arguments, &env::temp_dir(), input),
-            None => Process::run(&program, arguments, &env::temp_dir()),
+            Some(input) => {
+                Process::run_with_input(&program, arguments, &directory, input, KEYCHAIN_DEADLINE)
+            }
+            None => Process::run(&program, arguments, &directory, KEYCHAIN_DEADLINE),
         }
-        .map_err(KeychainError::Process)
+        .map_err(|error| match error {
+            ProcessError::TimedOut {
+                program: stopped,
+                deadline,
+                ..
+            } => KeychainError::TimedOut {
+                program: stopped,
+                deadline,
+            },
+            other => KeychainError::Process(other),
+        })
     }
 
     fn refused(tool: Tool, output: Output) -> KeychainError {

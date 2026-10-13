@@ -6,7 +6,7 @@ use io_forge::ForgeError;
 use io_process::{Argument, Opener};
 use platform::ClipboardRequest;
 use session::{
-    Access, Cancel, Desk, DeviceAuthorization, Forgotten, Repo, SessionError, StartedLogin,
+    Access, Cancel, Desk, DeviceAuthorization, Forgotten, Holds, Repo, SessionError, StartedLogin,
 };
 use ui::{Count, Label};
 
@@ -16,10 +16,11 @@ use crate::model::Tab;
 use crate::runtime::{Job, Landing, landed};
 use crate::status::{Status, Tone};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Held {
     In,
     Out,
+    TimedOut(Label),
 }
 
 pub(crate) enum Stage {
@@ -74,10 +75,12 @@ pub(crate) fn holding(access: &Access, sites: &BTreeSet<ForgeHost>) -> BTreeMap<
     sites
         .iter()
         .map(|site| {
-            let held = if access.holds(site) {
-                Held::In
-            } else {
-                Held::Out
+            let held = match access.holds(site) {
+                Ok(Holds::Login) => Held::In,
+                Err(error) if error.keychain_timed_out() => {
+                    Held::TimedOut(Label::new(error.to_string()))
+                }
+                Ok(Holds::Nothing) | Err(_) => Held::Out,
             };
             (site.clone(), held)
         })
