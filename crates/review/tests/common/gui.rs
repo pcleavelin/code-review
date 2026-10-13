@@ -1,6 +1,8 @@
-use super::{fixture, play_script};
+use super::{Deadline, Fixture, WINDOW_DEADLINE, fixture, large_fixture, play_script};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 #[macro_export]
 macro_rules! gui_scenarios {
@@ -9,9 +11,27 @@ macro_rules! gui_scenarios {
     };
 }
 
+#[macro_export]
+macro_rules! gui_scale_scenarios {
+    ($m:ident) => {
+        $m! { gui: scale }
+    };
+}
+
 pub(crate) struct Scenario {
     pub(crate) script: &'static str,
     pub(crate) shows: &'static [&'static str],
+}
+
+pub(crate) struct ScaleScenario {
+    pub(crate) scenario: Scenario,
+    pub(crate) within: Duration,
+    pub(crate) slowest_frame_ms: f64,
+}
+
+struct Setup {
+    fixture: fn(&str) -> Fixture,
+    within: Duration,
 }
 
 const OPEN: &str = "idle\nclick-id pull/0\nidle\nwait 2\n";
@@ -48,6 +68,37 @@ pub(crate) fn screenshots(name: &str) -> PathBuf {
 }
 
 pub(crate) fn play(binary: &Path, name: &str, scenario: &Scenario) -> String {
+    play_on(
+        binary,
+        name,
+        scenario,
+        &Setup {
+            fixture,
+            within: WINDOW_DEADLINE,
+        },
+    )
+}
+
+pub(crate) fn play_at_scale(binary: &Path, name: &str, scale: &ScaleScenario) -> String {
+    let start = Instant::now();
+    let output = play_on(
+        binary,
+        name,
+        &scale.scenario,
+        &Setup {
+            fixture: large_fixture,
+            within: scale.within,
+        },
+    );
+    eprintln!(
+        "SCALE {name} took {} ms with the fixture (bound {} ms)",
+        start.elapsed().as_millis(),
+        scale.within.as_millis()
+    );
+    output
+}
+
+fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> String {
     let stalled = scenario.script.starts_with(STALL);
     let script = scenario
         .script
@@ -64,7 +115,17 @@ pub(crate) fn play(binary: &Path, name: &str, scenario: &Scenario) -> String {
                 None => (lines[line_index][open + 2..close].to_owned(), None),
             };
             let probe = lines[..line_index].join("\n") + "\ndump\nquit\n";
-            let err = play_script(binary, &staged(name, stalled), name, &probe);
+            let step = format!("the script up to line {}, to find {prefix}", line_index + 1);
+            let err = play_script(
+                binary,
+                &staged(run, name, stalled),
+                &Deadline {
+                    scenario: name,
+                    step: &step,
+                    within: run.within,
+                },
+                &probe,
+            );
             let (left, top, width, height) = last_rectangle(&err, &prefix).unwrap_or_else(|| {
                 panic!(
                     "{name}: no rectangle for '{prefix}' before line {}\n{err}",
@@ -86,14 +147,18 @@ pub(crate) fn play(binary: &Path, name: &str, scenario: &Scenario) -> String {
     }
     play_script(
         binary,
-        &staged(name, stalled),
-        name,
+        &staged(run, name, stalled),
+        &Deadline {
+            scenario: name,
+            step: "the script",
+            within: run.within,
+        },
         &(lines.join("\n") + "\n"),
     )
 }
 
-fn staged(name: &str, stalled: bool) -> super::Fixture {
-    let staged = fixture(name);
+fn staged(run: &Setup, name: &str, stalled: bool) -> Fixture {
+    let staged = (run.fixture)(name);
     if stalled {
         fs::write(staged.home.join("keychain.stall"), "").unwrap();
     }
@@ -685,4 +750,67 @@ quit
             "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 274,",
         ],
     }
+}
+
+const SCALE_SOURCE_HEIGHT: usize = 2_100_000;
+const SCALE_SCROLL_STEP: usize = 50_000;
+
+pub(crate) fn scale() -> ScaleScenario {
+    let scrolled = (0..=SCALE_SOURCE_HEIGHT).step_by(SCALE_SCROLL_STEP).fold(
+        String::new(),
+        |mut lines, offset| {
+            writeln!(lines, "scroll source {offset}\nwait 2").ok();
+            lines
+        },
+    );
+    let script = format!(
+        "OPEN
+click-id change/0
+idle
+wait 3
+dump
+mouse 800 500
+{scrolled}wheel -20
+wait 2
+dump
+shot {{shots}}/bottom.png
+quit
+"
+    );
+    ScaleScenario {
+        scenario: Scenario {
+            script: Box::leak(script.into_boxed_str()),
+            shows: &[
+                "DUMP tab=Source focus=None file=Some(\"assets/table_0.txt\")",
+                "DUMP tab=Source focus=None file=Some(\"src/moved/",
+            ],
+        },
+        within: Duration::from_secs(75),
+        slowest_frame_ms: 200.0,
+    }
+}
+
+pub(crate) fn assert_frames(name: &str, scale: &ScaleScenario, output: &str) {
+    let slowest = output
+        .lines()
+        .rfind(|line| line.starts_with("DUMP frames "))
+        .and_then(|line| {
+            line.split("max=")
+                .nth(1)?
+                .split(' ')
+                .next()?
+                .parse::<f64>()
+                .ok()
+        })
+        .unwrap_or_else(|| panic!("{name}: the script printed no DUMP frames line\n{output}"));
+    eprintln!(
+        "SCALE {name} slowest frame while scrolling {slowest} ms (bound {} ms)",
+        scale.slowest_frame_ms
+    );
+    assert!(
+        slowest <= scale.slowest_frame_ms,
+        "{name}: the slowest frame took {slowest} ms, over the bound of {} ms (screenshots in {})\n--- output in full ---\n{output}",
+        scale.slowest_frame_ms,
+        screenshots(name).display()
+    );
 }

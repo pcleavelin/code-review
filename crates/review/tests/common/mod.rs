@@ -4,18 +4,21 @@
 )]
 
 pub(crate) mod gui;
+pub(crate) mod large;
 
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::Write as _;
 #[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt, symlink};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{self, Command, Stdio};
+use std::process::{self, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(crate) const HOST: &str = "forgejo.test";
 pub(crate) const SLUG: &str = "owner/repo";
@@ -138,8 +141,128 @@ fn find_tool(tool: &str) -> PathBuf {
         .unwrap_or_else(|| panic!("{tool} is not on PATH"))
 }
 
-pub(crate) fn git(root: &Path, arguments: &[&str]) -> String {
-    let out = Command::new("git")
+pub(crate) const COMMAND_DEADLINE: Duration = Duration::from_secs(60);
+pub(crate) const WINDOW_DEADLINE: Duration = Duration::from_secs(120);
+const KILLED_OUTPUT_WAIT: Duration = Duration::from_secs(10);
+
+pub(crate) struct Deadline<'a> {
+    pub(crate) scenario: &'a str,
+    pub(crate) step: &'a str,
+    pub(crate) within: Duration,
+}
+
+pub(crate) fn run_within(command: &mut Command, input: &[u8], bound: &Deadline<'_>) -> Output {
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| {
+            panic!(
+                "{}: `{}` did not start: {error}",
+                bound.scenario, bound.step
+            )
+        });
+    let group = child.id();
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let fed = input.to_vec();
+    thread::spawn(move || {
+        stdin.write_all(&fed).ok();
+    });
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        sender.send(child.wait_with_output()).ok();
+    });
+    if let Ok(output) = receiver.recv_timeout(bound.within) {
+        return output.expect("wait for the run");
+    }
+    let running = processes_in(group);
+    kill(group, &running);
+    let before = receiver
+        .recv_timeout(KILLED_OUTPUT_WAIT)
+        .ok()
+        .and_then(Result::ok)
+        .map(|output| {
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+        .unwrap_or_default();
+    let listing = running.iter().fold(String::new(), |mut listing, process| {
+        writeln!(listing, "  {}", process.row).ok();
+        listing
+    });
+    panic!(
+        "{}: `{}` did not finish within {:?}; killed its process group {group}, which was running:\n      PID     ELAPSED COMMAND\n{listing}--- its output before the kill ---\n{before}",
+        bound.scenario, bound.step, bound.within
+    );
+}
+
+struct Process {
+    pid: u32,
+    row: String,
+}
+
+fn processes_in(group: u32) -> Vec<Process> {
+    let Ok(listed) = Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid=,pgid=,etime=,command="])
+        .output()
+    else {
+        return Vec::new();
+    };
+    let table: Vec<(u32, u32, u32, String)> = String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let pid = words.next()?.parse().ok()?;
+            let parent = words.next()?.parse().ok()?;
+            let leader = words.next()?.parse().ok()?;
+            let elapsed = words.next()?;
+            let command = words.collect::<Vec<_>>().join(" ");
+            Some((
+                pid,
+                parent,
+                leader,
+                format!("{pid:>7} {elapsed:>11} {command}"),
+            ))
+        })
+        .collect();
+    let mut under = vec![group];
+    loop {
+        let more: Vec<u32> = table
+            .iter()
+            .filter(|(pid, parent, leader, _)| {
+                !under.contains(pid) && (under.contains(parent) || *leader == group)
+            })
+            .map(|(pid, ..)| *pid)
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        under.extend(more);
+    }
+    table
+        .into_iter()
+        .filter(|(pid, ..)| under.contains(pid))
+        .map(|(pid, _, _, row)| Process { pid, row })
+        .collect()
+}
+
+fn kill(group: u32, running: &[Process]) {
+    Command::new("kill")
+        .args(["-s", "KILL", "--", &format!("-{group}")])
+        .args(running.iter().map(|process| process.pid.to_string()))
+        .output()
+        .ok();
+}
+
+fn git_fed(root: &Path, arguments: &[&str], input: &[u8]) -> String {
+    let mut command = Command::new("git");
+    command
         .args([
             "-c",
             "user.name=test",
@@ -155,15 +278,27 @@ pub(crate) fn git(root: &Path, arguments: &[&str]) -> String {
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
-        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
-        .output()
-        .expect("run git");
+        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z");
+    let step = format!("git {}", arguments.join(" "));
+    let out = run_within(
+        &mut command,
+        input,
+        &Deadline {
+            scenario: &root.display().to_string(),
+            step: &step,
+            within: COMMAND_DEADLINE,
+        },
+    );
     assert!(
         out.status.success(),
         "git {arguments:?}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+pub(crate) fn git(root: &Path, arguments: &[&str]) -> String {
+    git_fed(root, arguments, b"")
 }
 
 fn put(root: &Path, files: &[(&str, &str)]) {
@@ -281,17 +416,32 @@ pub(crate) struct Fixture {
     pub(crate) home: PathBuf,
 }
 
-pub(crate) fn fixture(name: &str) -> Fixture {
+impl Fixture {
+    pub(crate) fn remove(self) {
+        fs::remove_dir_all(&self.home).ok();
+    }
+
+    fn scenario(&self) -> String {
+        self.home
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+}
+
+fn fresh(name: &str) -> PathBuf {
     let home = scratch(name);
     fs::remove_dir_all(&home).ok();
-    let forge = home.join("forge");
-    let local = home.join("local");
-    let tools = home.join("tools");
-    let api = home.join("api");
-    for dir in [&forge, &tools, &api] {
-        fs::create_dir_all(dir).unwrap();
+    for dir in ["forge", "tools", "api"] {
+        fs::create_dir_all(home.join(dir)).unwrap();
     }
-    git(&forge, &["init", "-q"]);
+    git(&home.join("forge"), &["init", "-q"]);
+    home
+}
+
+pub(crate) fn fixture(name: &str) -> Fixture {
+    let home = fresh(name);
+    let forge = home.join("forge");
     put(&forge, BASE);
     put(&forge, &[(GONE, &gone_text())]);
     git(&forge, &["add", "-A"]);
@@ -306,6 +456,26 @@ pub(crate) fn fixture(name: &str) -> Fixture {
     git(&forge, &["commit", "-q", "-m", "Say how big"]);
     git(&forge, &["update-ref", "refs/pull/1/head", "feature"]);
     git(&forge, &["checkout", "-q", "main"]);
+    serve(home)
+}
+
+pub(crate) fn large_fixture(name: &str) -> Fixture {
+    let home = fresh(name);
+    let forge = home.join("forge");
+    git_fed(
+        &forge,
+        &["fast-import", "--quiet"],
+        large::history().as_bytes(),
+    );
+    git(&forge, &["update-ref", "refs/pull/1/head", "feature"]);
+    serve(home)
+}
+
+fn serve(home: PathBuf) -> Fixture {
+    let forge = home.join("forge");
+    let local = home.join("local");
+    let tools = home.join("tools");
+    let api = home.join("api");
     git(
         &home,
         &[
@@ -378,9 +548,9 @@ fn rooted(text: &str, home: &Path) -> String {
         .replace(&home.display().to_string(), "<home>")
 }
 
-pub(crate) fn review(binary: &Path, fixture: &Fixture, arguments: &[&str]) -> String {
-    let out = Command::new(binary)
-        .args(arguments)
+fn command(binary: &Path, fixture: &Fixture) -> Command {
+    let mut command = Command::new(binary);
+    command
         .current_dir(&fixture.local)
         .env("PATH", &fixture.tools)
         .env("REVIEW_PINS", fixture.home.join("pins"))
@@ -389,9 +559,29 @@ pub(crate) fn review(binary: &Path, fixture: &Fixture, arguments: &[&str]) -> St
         .env("REVIEW_FORGES", fixture.home.join("forges"))
         .env_remove("GITLAB_TOKEN")
         .env_remove("FORGEJO_TOKEN")
-        .env_remove("GITEA_TOKEN")
-        .output()
-        .expect("run review");
+        .env_remove("GITEA_TOKEN");
+    command
+}
+
+pub(crate) fn review(binary: &Path, fixture: &Fixture, arguments: &[&str]) -> String {
+    review_within(binary, fixture, arguments, COMMAND_DEADLINE)
+}
+
+pub(crate) fn review_within(
+    binary: &Path,
+    fixture: &Fixture,
+    arguments: &[&str],
+    within: Duration,
+) -> String {
+    let out = run_within(
+        command(binary, fixture).args(arguments),
+        b"",
+        &Deadline {
+            scenario: &fixture.scenario(),
+            step: &format!("review {}", arguments.join(" ")),
+            within,
+        },
+    );
     let mut text = rooted(&String::from_utf8_lossy(&out.stdout), &fixture.home);
     for line in rooted(&String::from_utf8_lossy(&out.stderr), &fixture.home).lines() {
         writeln!(text, "! {line}").ok();
@@ -402,7 +592,12 @@ pub(crate) fn review(binary: &Path, fixture: &Fixture, arguments: &[&str]) -> St
     text
 }
 
-pub(crate) fn play_script(binary: &Path, fixture: &Fixture, name: &str, script: &str) -> String {
+pub(crate) fn play_script(
+    binary: &Path,
+    fixture: &Fixture,
+    bound: &Deadline<'_>,
+    script: &str,
+) -> String {
     let shots = fixture.home.join("shots");
     fs::create_dir_all(&shots).unwrap();
     let file = fixture.home.join("script.txt");
@@ -411,52 +606,19 @@ pub(crate) fn play_script(binary: &Path, fixture: &Fixture, name: &str, script: 
         script.replace("{shots}", &shots.display().to_string().replace('\\', "/")),
     )
     .unwrap();
-    let mut child = Command::new(binary)
-        .current_dir(&fixture.local)
-        .env("PATH", &fixture.tools)
-        .env("REVIEW_PINS", fixture.home.join("pins"))
-        .env("REVIEW_CLONES", fixture.home.join("clones"))
-        .env("REVIEW_KEYCHAIN", fixture.home.join("keychain.file"))
-        .env("REVIEW_FORGES", fixture.home.join("forges"))
-        .env_remove("GITLAB_TOKEN")
-        .env_remove("FORGEJO_TOKEN")
-        .env_remove("GITEA_TOKEN")
-        .env("REVIEW_SCRIPT", &file)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("run review");
-    let (sender, receiver) = mpsc::channel();
-    let stderr = child.stderr.take().unwrap();
-    thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if sender.send(line).is_err() {
-                break;
-            }
-        }
-    });
-    let start = Instant::now();
-    let mut out = String::new();
-    loop {
-        match receiver.recv_timeout(Duration::from_millis(100)) {
-            Ok(line) => {
-                out.push_str(&line);
-                out.push('\n');
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) if start.elapsed() > Duration::from_secs(120) => {
-                child.kill().ok();
-                panic!("{name}: the window did not quit within 120 s\n{out}");
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-        }
-    }
-    let status = child.wait().unwrap();
-    assert!(
-        status.success(),
-        "{name}: the window exited with {status}\n{out}"
+    let out = run_within(
+        command(binary, fixture).env("REVIEW_SCRIPT", &file),
+        b"",
+        bound,
     );
-    rooted(&out, &fixture.home)
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "{}: the window exited with {}\n{stderr}",
+        bound.scenario,
+        out.status
+    );
+    rooted(&stderr, &fixture.home)
 }
 
 pub(crate) fn assert_clean(name: &str, output: &str) {

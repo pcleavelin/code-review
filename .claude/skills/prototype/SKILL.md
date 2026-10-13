@@ -32,11 +32,15 @@ prototypes that differ in shape, and exactly one survives.
    restated behaviour is scrapped here. If every one is scrapped, go back to step 1 with
    what the failures taught, or to the owner if they say the request itself cannot work.
    A demonstration that would write to a forge (submitting a review) runs only against a pull
-   request the owner named for it.
+   request the owner named for it. A feature that works per changed file, per pull request
+   or per line is also run at scale: `REVIEW_BIN=<dir>/proto-<name>/target/release/review
+   cargo test -p review --test cli scale_ -- --nocapture` (and `--test gui scale`), and its
+   time and slowest frame there are noted next to the demonstration.
 5. Choose among the survivors, comparing in this order: the run removes the cost the case
-   names; the behaviour matches the restatement; the user's steps (fewer, and triggered the
-   way existing features are); fit with CLAUDE.md and the axioms (no second way, no new
-   concept where one exists); the size of the code and the number of crates it touches.
+   names; the behaviour matches the restatement; the cost at scale (time, slowest frame);
+   the user's steps (fewer, and triggered the way existing features are); fit with CLAUDE.md
+   and the axioms (no second way, no new concept where one exists); the size of the code and
+   the number of crates it touches.
    State the winner in the reply, and for every other design the reason it lost; the
    winner's reason completes the case.
 6. Keep the winner, scrap the rest. In the change's own workspace (CLAUDE.md),

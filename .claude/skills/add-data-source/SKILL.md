@@ -18,9 +18,15 @@ Each source of outside data has one `io-*` crate with one entry point per direct
    - `src/convert.rs`: wire to domain and back; nothing else names a wire type;
    - `src/lib.rs`: the entry points (`Store::load`, `Store::save`, `Client::list`, ...) and one
      error enum carrying data, with a `Display` that says what to do about it.
-   A process start goes through `io-process`, a file write through `io-store`. An environment
-   variable is read in the one file lint L7 allows for the crate. A secret (a token) never goes
-   on a command line or into a `Debug`/`Display`: it is passed on a process's stdin.
+   A process start goes through `io-process`, a file write through `io-store`. `io-process`
+   feeds a program's stdin on its own thread while it reads stdout and stderr, and bounds the
+   run with a deadline, so neither side waits on a full pipe; a new way to talk to a program
+   is added to `io-process`, never written beside it. An environment variable is read in the
+   one file lint L7 allows for the crate. A secret (a token) never goes on a command line or
+   into a `Debug`/`Display`: it is passed on a process's stdin.
 4. Tests: a round trip over real samples of the format, byte for byte, and no test touches the
-   network.
+   network. The program or format is fed the largest input a real repository produces and
+   seen to finish: a unit test with an input bigger than a pipe (megabytes, thousands of
+   paths), and the scale scenarios (`cargo test -p review --test cli scale_`, `--test gui
+   scale`), which run a pull request of thousands of files.
 5. `cargo xtask api`, then `finish`.

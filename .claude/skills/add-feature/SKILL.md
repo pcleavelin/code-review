@@ -21,7 +21,11 @@ A function is named where its surface is built, once: a command by its clap vari
      `add-data-source`).
 4. Tests: the behaviour stated before the code, as a unit test of the handler or domain method;
    then a CLI scenario line for every outcome (success and each error), or a GUI script that
-   triggers it and a dump that shows its effect (`add-test-scenario`).
+   triggers it and a dump that shows its effect (`add-test-scenario`). A feature that works
+   per changed file, per pull request or per line also gets a step in the scale scenarios,
+   with a bound measured on them (`add-test-scenario` step 4).
 5. The case (CLAUDE.md, "Every feature makes its case"), as `understand` and `prototype`
-   completed it, is the body of the commit that adds the feature.
+   completed it, is the body of the commit that adds the feature. For a feature that works
+   per changed file, per pull request or per line, it states the feature's cost on the scale
+   scenarios: each step's time and the slowest frame, before and after.
 6. `finish`.
