@@ -20,8 +20,9 @@ use crate::nav::Kept;
 use crate::review::{CardCollapse, OpenReview, ReviewAct, Submitting, Talk};
 use crate::text::{Counted, Noun};
 use crate::theme::{
-    ACCENT, COMMENT_BUTTONS_ROOM, COMMENT_FIELD_GUESS, COMMENT_LEAST_FIELD, Cells, FIELD, GREEN,
-    LINES_SELECTED, NOTE, ORANGE, RED, ROW_EXTRA, SELECTED, SUMMARY_FIELD, TEXT, VIOLET, WEAK,
+    self, ACCENT, BLOCK_SPACING, BORDER, COMMENT_BUTTONS_ROOM, COMMENT_FIELD_GUESS,
+    COMMENT_LEAST_FIELD, Cells, FIELD, GREEN, LINES_SELECTED, NOTE, NOTE_GAP, ORANGE, RED,
+    ROW_EXTRA, SECTION_GAP, SELECTED, SMALL_GAP, STRONG_TEXT, SUMMARY_FIELD, TEXT, VIOLET, WEAK,
 };
 use crate::widgets::{
     Chosen, CommentLook, Container, Enabled, Frame, Padding, RowAction, Scroller, TreeRow,
@@ -499,6 +500,7 @@ fn card(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     ]);
     frame.finish();
     frame.title(found.summary.as_str());
+    frame.spacer(SMALL_GAP);
     if collapse == CardCollapse::Open && !found.description.as_str().is_empty() {
         markdown(model, frame, &found.description, &Label::new("card"));
     }
@@ -651,6 +653,11 @@ fn snippet(model: &Model, frame: &mut Frame<'_>, key: &Label, place: &CodePlace)
 
 fn notes(model: &Model, frame: &mut Frame<'_>, thread: &Thread) {
     for (position, note) in thread.notes.iter().enumerate() {
+        if position > 0 {
+            frame.spacer(NOTE_GAP / 2);
+            frame.rule(BORDER);
+            frame.spacer(NOTE_GAP / 2);
+        }
         note_head(
             model,
             frame,
@@ -888,8 +895,11 @@ fn no_review(model: &Model, frame: &mut Frame<'_>) {
 }
 
 fn heading(frame: &mut Frame<'_>, text: &Label) {
-    frame.step_gap();
-    frame.label(text.as_str(), ACCENT);
+    frame.spacer(SECTION_GAP);
+    let size = theme::heading_font(frame.metrics.font, Count::new(2));
+    frame.sized_line(vec![Run::new(text.as_str(), STRONG_TEXT)], size);
+    frame.rule(BORDER);
+    frame.spacer(SMALL_GAP);
 }
 
 fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
@@ -915,14 +925,15 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
         .iter()
         .filter(|block| matches!(block, Block::Submitted { .. }))
         .count();
+    heading(frame, &Label::new("Conversation"));
     frame.start(Container::ToolbarSmall);
     frame.label(
         format!(
-            "Conversation  {}, {}",
+            "{}, {}",
             Counted::new(Count::new(reviews), Noun::Submission),
             Counted::new(Count::new(talk.threads.len()), Noun::Thread)
         ),
-        ACCENT,
+        WEAK,
     );
     let refresh = ids::TALK_REFRESH.target();
     if frame.small_button("refresh", refresh).clicked() {
@@ -935,7 +946,7 @@ fn conversation(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
     }
     for (position, block) in blocks.iter().enumerate() {
         if position > 0 {
-            frame.step_gap();
+            frame.spacer(BLOCK_SPACING);
         }
         match block {
             Block::Submitted {

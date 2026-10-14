@@ -26,9 +26,9 @@ use crate::theme::{
     CARD_FILL, CARD_STRIPE, COMMENT_DRAFT_FILL, COMMENT_PADDING, COMMENT_SAVED_FILL, Cells,
     DROP_BAND, FAINT, FIELD, FIELD_CARET_ROOM, FIELD_PADDING, FILE_HEADER_PADDING, FOLD_FILL, GAP,
     HOVER, INDENT_EXTRA, LABEL_PADDING, NAV_BUTTON, NAV_BUTTON_EXTRA, NOTE_ROWS_LEAST,
-    NOTE_ROWS_MOST, ORANGE, PALETTE_TAG, PANEL, PANEL_PADDING, REMOVED_FILL, RESOLVED_FILL,
+    NOTE_ROWS_MOST, ORANGE, PALETTE_TAG, PANEL, PANEL_PADDING, PIXEL, REMOVED_FILL, RESOLVED_FILL,
     ROW_PADDING, SELECTED, SMALL_BUTTON_EXTRA, SMALL_BUTTON_PADDING, SMALL_GAP, STATUS_GAP,
-    STEP_SPACER, TAB_PADDING, TAB_STRIP, TEXT, THREAD_FILL, TIGHT_GAP, TOOLTIP_PADDING, TREE_GUIDE,
+    TAB_PADDING, TAB_STRIP, TEXT, THREAD_FILL, TIGHT_GAP, TOOLTIP_PADDING, TREE_GUIDE,
     TREE_LEVEL_WIDTH, WEAK, WIDE_GAP,
 };
 
@@ -232,7 +232,7 @@ impl Container {
                 Layout::column()
                     .grow_width()
                     .padding(COMMENT_PADDING)
-                    .gap(TIGHT_GAP),
+                    .gap(SMALL_GAP),
                 Style::background(look.fill()).border(Sides::ALL, look.edge()),
                 Some(id),
             ),
@@ -547,8 +547,13 @@ impl Frame<'_> {
             .leaf(Kind::None, Layout::row().height(height), Style::NONE, None);
     }
 
-    pub(crate) fn step_gap(&mut self) {
-        self.spacer(STEP_SPACER);
+    pub(crate) fn rule(&mut self, color: Color) {
+        self.ui.leaf(
+            Kind::None,
+            Layout::row().grow_width().height(PIXEL),
+            Style::background(color),
+            None,
+        );
     }
 
     pub(crate) fn indent(&mut self, width: Px) {

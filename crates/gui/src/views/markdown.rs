@@ -17,7 +17,7 @@ use crate::review::{LinkTarget, ReviewAct};
 use crate::theme;
 use crate::theme::{
     ACCENT, BLOCK_GAP, BORDER, CODE_TEXT, EMPHASIS_TEXT, FIELD, LABEL_PADDING, MARKDOWN_GUESS,
-    PICTURE_TALLEST, PIXEL, RED, STRONG_TEXT, TEXT, WEAK,
+    PICTURE_TALLEST, PIXEL, PROSE_COLUMNS, PROSE_LEADING, RED, STRONG_TEXT, TEXT, WEAK,
 };
 use crate::widgets::{Container, Frame};
 
@@ -414,7 +414,8 @@ impl Writer<'_> {
         };
         let width = Count::new(
             usize::try_from(
-                u64::try_from(self.width.get()).unwrap_or(0) * u64::from(base_size.get())
+                u64::try_from(self.width.min(PROSE_COLUMNS).get()).unwrap_or(0)
+                    * u64::from(base_size.get())
                     / u64::from(size.get().max(1)),
             )
             .unwrap_or(0),
@@ -426,6 +427,9 @@ impl Writer<'_> {
             Count::new(width.get().saturating_sub(lead_columns)),
         );
         for (position, line) in lines.iter().enumerate() {
+            if position > 0 {
+                frame.spacer(PROSE_LEADING);
+            }
             let lead_text = if position == 0 || matches!(lead, Lead::Quote(_)) {
                 format!("{}{}", " ".repeat(indent.get()), marker.as_str())
             } else {
@@ -658,11 +662,12 @@ pub(super) fn markdown(model: &Model, frame: &mut Frame<'_>, written: &Prose, ke
         )
     };
     for block in markdown::parse(written) {
-        if previous
-            .as_ref()
-            .is_some_and(|before| !(listed(before) && listed(&block)))
-        {
-            frame.spacer(BLOCK_GAP);
+        if let Some(before) = previous.as_ref() {
+            frame.spacer(if listed(before) && listed(&block) {
+                PROSE_LEADING
+            } else {
+                BLOCK_GAP
+            });
         }
         match &block {
             Block::Text { lead, pieces } => writer.text(frame, lead, pieces, &mut number),
