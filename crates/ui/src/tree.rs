@@ -7,10 +7,14 @@ use crate::color::Color;
 use crate::geometry::{Axis, Count, Extent, Point, Px, Rect, Vector};
 use crate::id::Id;
 use crate::input::{Button, Buttons, Input, Pinch, Pointer};
-use crate::layout::{Align, Direction, Hold, Layout, ScrollAxes, Sides, Size, Stacking, Style};
+use crate::layout::{
+    Align, Anchoring, Bound, Direction, Hold, Layout, Memory, ScrollAxes, Sides, Size, Stacking,
+    Style,
+};
 use crate::text::{Label, Text, Wrap};
 
 const LEAST_WRAP: Count = Count::new(12);
+const REMEMBERED_MOST: Count = Count::new(16_384);
 
 pub trait Draw {
     fn draw(self: Box<Self>, canvas: &mut Canvas<'_>, rect: Rect);
@@ -225,6 +229,7 @@ struct Element {
     rect: Rect,
     clip: Rect,
     keep: Option<Extent>,
+    overflow: Px,
 }
 
 enum Pull {
@@ -277,6 +282,12 @@ impl Element {
                 least.unwrap_or(Px::ZERO) + padding,
             )
         };
+        if axis == Axis::Vertical && self.layout.bound == Bound::Slot {
+            self.overflow = match self.layout.size_along(axis) {
+                Size::Exact(value) => (fit - value).max(Px::ZERO),
+                Size::Fit | Size::Grow => Px::ZERO,
+            };
+        }
         let (value, least) = match self.layout.size_along(axis) {
             Size::Exact(value) => (value, value),
             Size::Grow => (Px::ZERO, least),
@@ -605,6 +616,102 @@ impl Element {
         }
     }
 
+    fn overflows(&self, found: &mut Vec<SlotOverflow>) {
+        if let Some(id) = self.id.filter(|_| self.overflow > Px::ZERO) {
+            found.push(SlotOverflow {
+                id,
+                height: self.size.height,
+                content: self.size.height + self.overflow,
+            });
+        }
+        for child in &self.children {
+            child.overflows(found);
+        }
+    }
+
+    const fn is_anchor(&self) -> bool {
+        matches!(self.layout.bound, Bound::Slot) || matches!(self.layout.memory, Memory::Remember)
+    }
+
+    fn content_origin(&self) -> Px {
+        self.rect.top + self.layout.padding - self.layout.scroll_offset().vertical
+    }
+
+    fn top_of(&self, id: Id) -> Option<Px> {
+        if self.id == Some(id) {
+            return Some(self.rect.top);
+        }
+        self.children.iter().find_map(|child| child.top_of(id))
+    }
+
+    fn first_shown(&self, top: Px) -> Option<(Id, Px)> {
+        if let Some(id) = self.id.filter(|_| self.is_anchor())
+            && self.rect.bottom() > top
+        {
+            return Some((id, self.rect.top));
+        }
+        self.children
+            .iter()
+            .find_map(|child| child.first_shown(top))
+    }
+
+    fn anchor(
+        &mut self,
+        anchors: &mut BTreeMap<Id, Anchor>,
+        moved: &[Id],
+        screen: Rect,
+        kept: &mut Kept,
+    ) {
+        if let (Some(id), Anchoring::Anchored) = (self.id, self.layout.anchoring) {
+            let before = anchors.get(&id).copied().filter(|_| !moved.contains(&id));
+            if let Some(before) = before
+                && let Some(now) = self.top_of(before.child)
+            {
+                let shift = now - self.content_origin() - before.top;
+                let scroll = self.layout.scroll_offset();
+                let most = (self.content.height - self.rect.height).max(Px::ZERO);
+                let wanted = (scroll.vertical + shift).clamp(Px::ZERO, most);
+                if wanted != scroll.vertical {
+                    self.layout.scroll = Some(scroll.with(Axis::Vertical, wanted));
+                    self.place(self.position, self.clip, screen);
+                    kept.corrections.insert(id, wanted);
+                }
+            }
+            let visible = self.rect.top + self.layout.padding;
+            let origin = self.content_origin();
+            match self
+                .children
+                .iter()
+                .find_map(|child| child.first_shown(visible))
+            {
+                Some((child, top)) => {
+                    anchors.insert(
+                        id,
+                        Anchor {
+                            child,
+                            top: top - origin,
+                        },
+                    );
+                }
+                None => {
+                    anchors.remove(&id);
+                }
+            }
+        }
+        for child in &mut self.children {
+            child.anchor(anchors, moved, screen, kept);
+        }
+    }
+
+    fn remember(&self, remembered: &mut BTreeMap<Id, Extent>) {
+        if let (Some(id), Memory::Remember) = (self.id, self.layout.memory) {
+            remembered.insert(id, self.rect.extent());
+        }
+        for child in &self.children {
+            child.remember(remembered);
+        }
+    }
+
     fn record(
         &self,
         placements: &mut BTreeMap<Id, Placement>,
@@ -794,6 +901,19 @@ struct Kept {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Anchor {
+    child: Id,
+    top: Px,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SlotOverflow {
+    pub id: Id,
+    pub height: Px,
+    pub content: Px,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DuplicateId {
     pub id: Id,
     pub first: Rect,
@@ -805,6 +925,9 @@ pub struct Ui {
     roots: Vec<Element>,
     stack: Vec<Element>,
     previous: BTreeMap<Id, Placement>,
+    remembered: BTreeMap<Id, Extent>,
+    anchors: BTreeMap<Id, Anchor>,
+    overflows: Vec<SlotOverflow>,
     hot: Option<Id>,
     active: Option<Id>,
     last_mouse: Point,
@@ -964,6 +1087,7 @@ impl Ui {
                 .held
                 .filter(|held| Some(held.id) == id)
                 .map(|held| held.rect.extent()),
+            overflow: Px::ZERO,
         });
         id.map(|id| self.interaction(id)).unwrap_or_default()
     }
@@ -997,8 +1121,19 @@ impl Ui {
         self.previous.get(&id).copied()
     }
 
+    pub fn remembered(&self, id: Id) -> Option<Extent> {
+        self.previous
+            .get(&id)
+            .map(|placement| placement.rect.extent())
+            .or_else(|| self.remembered.get(&id).copied())
+    }
+
     pub fn duplicate_ids(&self) -> &[DuplicateId] {
         &self.duplicates
+    }
+
+    pub fn slot_overflows(&self) -> &[SlotOverflow] {
+        &self.overflows
     }
 
     pub fn on_scrollbar(&self, id: Id) -> bool {
@@ -1121,6 +1256,14 @@ impl Ui {
             root.place(at, screen, screen);
         }
         let moved = mem::take(&mut self.kept.moved);
+        let unanchored: Vec<Id> = moved
+            .iter()
+            .copied()
+            .chain(self.scroll_drag.map(|grab| grab.id))
+            .collect();
+        for root in &mut self.roots {
+            root.anchor(&mut self.anchors, &unanchored, screen, &mut self.kept);
+        }
         if let Some(held) = self.held
             && moved.iter().any(|scroller| {
                 self.roots
@@ -1142,8 +1285,18 @@ impl Ui {
 
         self.previous.clear();
         self.duplicates.clear();
+        self.overflows.clear();
+        for root in &self.roots {
+            root.overflows(&mut self.overflows);
+        }
         for root in &self.roots {
             root.record(&mut self.previous, &mut self.duplicates, Layer::Base);
+        }
+        if Count::new(self.remembered.len()) > REMEMBERED_MOST {
+            self.remembered.clear();
+        }
+        for root in &self.roots {
+            root.remember(&mut self.remembered);
         }
         self.last_mouse = self.pointer.mouse;
     }

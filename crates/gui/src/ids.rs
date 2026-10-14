@@ -588,6 +588,31 @@ pub(crate) fn card_box() -> Id {
     Id::new("card-box")
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SlotKind {
+    Code,
+    Fold,
+    Removed,
+    Rows,
+}
+
+impl SlotKind {
+    const fn name(self) -> Element {
+        Element::new(match self {
+            Self::Code => "code",
+            Self::Fold => "fold",
+            Self::Removed => "removed",
+            Self::Rows => "rows",
+        })
+    }
+}
+
+pub(crate) fn slot(path: &RelativePath, piece: SlotKind, at: Count) -> Id {
+    Id::new("slot")
+        .with(piece.name().as_str())
+        .with(in_file(path, at).as_str())
+}
+
 pub(crate) fn snippet() -> Id {
     Id::new("snippet")
 }

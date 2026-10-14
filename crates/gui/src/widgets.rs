@@ -24,12 +24,12 @@ use crate::status::Status;
 use crate::theme::{
     self, ACCENT, BACKGROUND, BADGE, BADGE_PADDING, BAR_PADDING, BORDER, BUTTON_PADDING, CARD_EDGE,
     CARD_FILL, CARD_STRIPE, COMMENT_DRAFT_FILL, COMMENT_PADDING, COMMENT_SAVED_FILL, Cells,
-    DROP_BAND, FAINT, FIELD, FIELD_CARET_ROOM, FIELD_PADDING, FOLD_FILL, GAP, HOVER, INDENT_EXTRA,
-    LABEL_PADDING, NAV_BUTTON, NAV_BUTTON_EXTRA, NOTE_ROWS_LEAST, NOTE_ROWS_MOST, ORANGE,
-    PALETTE_TAG, PANEL, PANEL_PADDING, REMOVED_FILL, RESOLVED_FILL, ROW_PADDING, SELECTED,
-    SMALL_BUTTON_EXTRA, SMALL_BUTTON_PADDING, SMALL_GAP, STATUS_GAP, STEP_SPACER, TAB_PADDING,
-    TAB_STRIP, TEXT, THREAD_FILL, TIGHT_GAP, TOOLTIP_PADDING, TREE_GUIDE, TREE_LEVEL_WIDTH, WEAK,
-    WIDE_GAP,
+    DROP_BAND, FAINT, FIELD, FIELD_CARET_ROOM, FIELD_PADDING, FILE_HEADER_PADDING, FOLD_FILL, GAP,
+    HOVER, INDENT_EXTRA, LABEL_PADDING, NAV_BUTTON, NAV_BUTTON_EXTRA, NOTE_ROWS_LEAST,
+    NOTE_ROWS_MOST, ORANGE, PALETTE_TAG, PANEL, PANEL_PADDING, REMOVED_FILL, RESOLVED_FILL,
+    ROW_PADDING, SELECTED, SMALL_BUTTON_EXTRA, SMALL_BUTTON_PADDING, SMALL_GAP, STATUS_GAP,
+    STEP_SPACER, TAB_PADDING, TAB_STRIP, TEXT, THREAD_FILL, TIGHT_GAP, TOOLTIP_PADDING, TREE_GUIDE,
+    TREE_LEVEL_WIDTH, WEAK, WIDE_GAP,
 };
 
 use crate::field::Fields;
@@ -146,6 +146,7 @@ pub(crate) enum Container {
     Comment { look: CommentLook, id: Id },
     Card(Id),
     CardBody,
+    Slot { id: Id, height: Px },
     CommentRow(Id),
     Removed(Id),
     Folded,
@@ -223,7 +224,7 @@ impl Container {
     fn comment_shape(self) -> Shape {
         match self {
             Self::CommentRow(id) => Shape::new(
-                Layout::row().grow_width().padding(SMALL_GAP),
+                Layout::row().grow_width().padding(SMALL_GAP).remembered(),
                 Style::NONE,
                 Some(id),
             ),
@@ -238,6 +239,29 @@ impl Container {
             _ => Shape::new(
                 Layout::column().grow_width(),
                 Style::background(REMOVED_FILL),
+                None,
+            ),
+        }
+    }
+
+    fn block_shape(self) -> Shape {
+        match self {
+            Self::Card(id) => Shape::new(
+                Layout::row().grow_width(),
+                Style::background(CARD_FILL).border(Sides::ALL, CARD_EDGE),
+                Some(id),
+            ),
+            Self::Slot { id, height } => Shape::new(
+                Layout::column().grow_width().slot(height),
+                Style::NONE,
+                Some(id),
+            ),
+            _ => Shape::new(
+                Layout::column()
+                    .grow_width()
+                    .padding(COMMENT_PADDING)
+                    .gap(TIGHT_GAP),
+                Style::NONE,
                 None,
             ),
         }
@@ -286,33 +310,21 @@ impl Container {
             ),
             Self::CommentRow(_) | Self::Comment { .. } => self.comment_shape(),
             Self::Removed(id) => Shape::new(
-                Layout::column().grow_width(),
+                Layout::column().grow_width().remembered(),
                 Style::background(REMOVED_FILL),
                 Some(id),
             ),
             Self::FileHeader { id, height } => Shape::new(
                 Layout::row()
                     .grow_width()
-                    .height(height)
-                    .padding(BAR_PADDING)
+                    .slot(height)
+                    .padding(FILE_HEADER_PADDING)
                     .gap(SMALL_GAP)
                     .cross(Align::Center),
                 Style::background(PANEL).border(Sides::TOP.with(Sides::BOTTOM), BORDER),
                 Some(id),
             ),
-            Self::Card(id) => Shape::new(
-                Layout::row().grow_width(),
-                Style::background(CARD_FILL).border(Sides::ALL, CARD_EDGE),
-                Some(id),
-            ),
-            Self::CardBody => Shape::new(
-                Layout::column()
-                    .grow_width()
-                    .padding(COMMENT_PADDING)
-                    .gap(TIGHT_GAP),
-                Style::NONE,
-                None,
-            ),
+            Self::Card(_) | Self::CardBody | Self::Slot { .. } => self.block_shape(),
             Self::Folded => Shape::new(
                 Layout::row().grow_width(),
                 Style::background(FOLD_FILL),
@@ -1368,7 +1380,8 @@ impl Frame<'_> {
                 .grow_width()
                 .height(height)
                 .padding(PANEL_PADDING),
-        };
+        }
+        .anchored();
         let style = background.map_or(Style::NONE, Style::background);
         let interaction = self.ui.open(
             Kind::None,

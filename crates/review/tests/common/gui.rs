@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_card, across }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_card, across, steady_scroll }
     };
 }
 
@@ -869,6 +869,82 @@ quit
             "status=\"logged in to Jira on jira.test; the token is in the system keychain\"",
             "status=\"logged out of Jira on jira.test; its token is gone from the keychain\"",
         ],
+    }
+}
+
+const STEADY_SCRIPT: &str = "OPEN\nclick-id change/1\nidle\nwait 3\nmouse 800 400\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel -10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nwheel 10\nwait 1\nrect file-header@notes.md\nquit\n";
+
+const STEADY_SHOWS: [&str; 64] = [
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 412, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 402, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 392, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 382, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 372, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 362, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 352, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 342, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 332, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 322, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 312, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 302, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 292, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 282, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 272, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 262, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 252, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 242, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 232, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 222, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 212, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 202, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 192, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 182, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 172, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 162, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 152, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 142, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 132, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 122, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 112, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 102, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 112, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 122, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 132, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 142, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 152, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 162, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 172, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 182, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 192, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 202, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 212, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 222, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 232, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 242, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 252, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 262, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 272, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 282, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 292, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 302, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 312, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 322, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 332, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 342, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 352, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 362, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 372, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 382, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 392, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 402, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 412, ",
+    "DUMP rect file-header@notes.md = Some(Rect { x: 361, y: 422, ",
+];
+
+pub(crate) fn steady_scroll() -> Scenario {
+    Scenario {
+        script: STEADY_SCRIPT,
+        shows: &STEADY_SHOWS,
     }
 }
 

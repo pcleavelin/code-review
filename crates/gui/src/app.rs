@@ -52,6 +52,7 @@ pub(crate) struct App {
     cursor: Cursor,
     hidden_focus: Count,
     reported_duplicates: BTreeSet<Id>,
+    reported_overflows: BTreeSet<Id>,
 }
 
 #[derive(Debug, Default)]
@@ -117,6 +118,7 @@ impl App {
             settings,
             hidden_focus: Count::ZERO,
             reported_duplicates: BTreeSet::new(),
+            reported_overflows: BTreeSet::new(),
         };
         app.model.set_tab(Tab::Inbox);
         app.index_working_copy();
@@ -140,6 +142,7 @@ impl App {
             cursor: Cursor::Default,
             hidden_focus: Count::ZERO,
             reported_duplicates: BTreeSet::new(),
+            reported_overflows: BTreeSet::new(),
         }
     }
 
@@ -499,6 +502,14 @@ impl App {
                 dump::report(format_args!(
                     "script: two elements were laid out under one id, at {:?} and at {:?}: only the second takes clicks, so give each its own id (`with` or `nth` on its control in ids.rs)",
                     duplicate.first, duplicate.second
+                ));
+            }
+        }
+        for overflow in self.ui.slot_overflows() {
+            if self.reported_overflows.insert(overflow.id) {
+                dump::report(format_args!(
+                    "script: an element drew {} px into a slot of {} px: a slot's height is what the view laid out for it, so the element must draw exactly that tall (or the view must lay out what it draws)",
+                    overflow.content, overflow.height
                 ));
             }
         }

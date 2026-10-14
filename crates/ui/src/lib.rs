@@ -14,9 +14,13 @@ pub use geometry::{Axis, Coordinate, Count, Extent, FontSize, Point, Px, Rect, S
 pub use icon::{Icon, IconName};
 pub use id::Id;
 pub use input::{Button, Buttons, Clicks, Glyph, Input, Key, Mods, Pinch, Pointer, Press, Typed};
-pub use layout::{Align, Direction, Layout, ScrollAxes, Sides, Size, Style};
+pub use layout::{
+    Align, Anchoring, Bound, Direction, Layout, Memory, ScrollAxes, Sides, Size, Style,
+};
 pub use text::{Cell, Grid, Label, Run, Text, Wrap};
-pub use tree::{Capture, Draw, DuplicateId, Interaction, Kind, Placement, Scrollbar, Ui};
+pub use tree::{
+    Capture, Draw, DuplicateId, Interaction, Kind, Placement, Scrollbar, SlotOverflow, Ui,
+};
 
 #[cfg(test)]
 mod tests;

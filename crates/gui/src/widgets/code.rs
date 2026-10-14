@@ -1,7 +1,7 @@
 use domain::{Column, FileId, Language, Line, Span};
 use ui::{
     Button, Canvas, Color, Count, Draw, Extent, Id, Interaction, Kind, Layout, Point, Px, Rect,
-    ScrollAxes, Style,
+    ScrollAxes, Scrollbar, Style,
 };
 
 use crate::action::Action;
@@ -217,6 +217,13 @@ impl Frame<'_> {
         let layout = match block.width {
             Width::Wide => Layout::row().grow_width(),
             Width::Fit => Layout::row().width(extent.width),
+        };
+        let layout = match block.across {
+            AcrossScroll::Shared {
+                bar: AcrossBar::Drawn,
+                ..
+            } => layout.height(extent.height + Scrollbar::WIDTH),
+            AcrossScroll::Shared { .. } | AcrossScroll::Own => layout,
         };
         let axes = match bar {
             AcrossBar::Drawn => ScrollAxes::HORIZONTAL,

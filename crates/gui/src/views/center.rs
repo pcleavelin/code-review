@@ -11,7 +11,7 @@ use crate::action::Action;
 use crate::diffs::{Loading, SidesKey};
 use crate::field::Which;
 use crate::grid::{self, GUTTER};
-use crate::ids::{self, Target};
+use crate::ids::{self, SlotKind, Target};
 use crate::keys::{self, LineGesture};
 use crate::model::{HIT_LIMIT, HitsShown, Model};
 use crate::review::{Picking, ReviewAct, merged};
@@ -197,8 +197,8 @@ pub(super) fn noted<'inset>(
         };
         let height = frame
             .ui
-            .placement(inset.row_id())
-            .map_or(inset.height, |placement| placement.rect.height);
+            .remembered(inset.row_id())
+            .map_or(inset.height, |extent| extent.height);
         all.push(Noted {
             side,
             line,
@@ -286,11 +286,7 @@ fn insets<'inset>(
                 lines: block.lines.clone(),
             },
         };
-        let height = frame
-            .ui
-            .placement(inset.row_id())
-            .map_or(inset.height, |placement| placement.rect.height);
-        all.push(Inset { height, ..inset });
+        all.push(inset);
     }
     all.extend(noted(model, frame, path).into_iter().map(|noted| Inset {
         at: within(place_at(&blocks, noted.side, noted.line)),
@@ -414,11 +410,15 @@ impl Sheet {
             }
             next_inset += 1;
         }
-        Self {
-            pieces,
-            total: top,
-            row,
-        }
+        let total = top + bar_room(&mut pieces);
+        Self { pieces, total, row }
+    }
+
+    fn last_code(&self) -> Option<Count> {
+        self.pieces
+            .iter()
+            .rposition(|placed| matches!(placed.piece, Piece::Code { .. }))
+            .map(Count::new)
     }
 
     fn line_top(&self, line: Line) -> Option<Px> {
@@ -435,6 +435,23 @@ impl Sheet {
     fn shows(&self, line: Line) -> bool {
         self.line_top(line).is_some()
     }
+}
+
+fn bar_room(pieces: &mut [Placed]) -> Px {
+    let Some(last_code) = pieces
+        .iter()
+        .rposition(|placed| matches!(placed.piece, Piece::Code { .. }))
+    else {
+        return Px::ZERO;
+    };
+    for (position, placed) in pieces.iter_mut().enumerate().skip(last_code) {
+        if position == last_code {
+            placed.height += Scrollbar::WIDTH;
+        } else {
+            placed.top += Scrollbar::WIDTH;
+        }
+    }
+    Scrollbar::WIDTH
 }
 
 pub(super) struct Segment<'path> {
@@ -521,8 +538,15 @@ pub(super) fn inset(
     let gutter = frame.cell_width() * GUTTER;
     match &inset.kind {
         InsetKind::Removed { lines, .. } => {
-            frame.start(Container::Removed(inset.row_id()));
             let row = frame.row_height();
+            let first_old = lines
+                .first()
+                .map_or(Count::ZERO, |gone| line_count(gone.old));
+            frame.start(Container::Slot {
+                id: ids::slot(path, SlotKind::Removed, first_old),
+                height: row * Count::new(lines.len()),
+            });
+            frame.start(Container::Removed(inset.row_id()));
             let RowsShown { first, past } = removed_rows(Count::new(lines.len()), viewed, row);
             gap(frame, row * first);
             let picked = model
@@ -577,6 +601,7 @@ pub(super) fn inset(
                 frame,
                 row * Count::new(lines.len().saturating_sub(past.get())),
             );
+            frame.finish();
             frame.finish();
         }
         InsetKind::Thread(thread) => {
@@ -703,14 +728,14 @@ fn fold_buttons(path: &RelativePath, start: Line, end: Line, last: Line) -> Vec<
 pub(super) fn fold(frame: &mut Frame<'_>, path: &RelativePath, start: Line, end: Line, last: Line) {
     let count = end.value() - start.value() + 1;
     frame.start(Container::Folded);
-    frame.label_runs(vec![Run::new(format!("{:>5} ", "\u{2026}"), WEAK)]);
+    frame.text_line(vec![Run::new(format!("{:>5} ", "\u{2026}"), WEAK)]);
     for FoldButton { target, run, span } in fold_buttons(path, start, end, last) {
         if frame.inline_button(vec![run], target).clicked() {
             frame.push(Action::Review(ReviewAct::Unfold(path.clone(), span)));
         }
         frame.attach_tip(target);
     }
-    frame.label_runs(vec![Run::new(
+    frame.text_line(vec![Run::new(
         format!(
             " {count} unchanged line{} ({}-{})",
             if count == 1 { "" } else { "s" },
@@ -871,10 +896,11 @@ fn draw<'path>(
     range: Band,
 ) -> Drawn<'path> {
     let row = sheet.row;
-    let visible: Vec<&Placed> = sheet
+    let visible: Vec<(usize, &Placed)> = sheet
         .pieces
         .iter()
-        .filter(|placed| range.reaches(placed.top, placed.height))
+        .enumerate()
+        .filter(|(_, placed)| range.reaches(placed.top, placed.height))
         .collect();
     let columns = sheet
         .pieces
@@ -888,33 +914,36 @@ fn draw<'path>(
         })
         .max(removed_columns(insets.iter()));
     let across = shown.model.across.get(ids::LINES.id());
-    let last_code = visible
-        .iter()
-        .rposition(|placed| matches!(placed.piece, Piece::Code { .. }));
-    let first_top = visible.first().map_or(Px::ZERO, |placed| {
-        cut(placed, row, range).map_or(placed.top, |lines| lines.top)
-    });
-    frame.spacer(first_top);
+    let last_code = sheet.last_code();
+    let first_top = visible.first().map_or(Px::ZERO, |(_, placed)| placed.top);
+    gap(frame, first_top);
     let mut drawn = first_top;
     let mut segments = Vec::new();
-    for (position, placed) in visible.iter().enumerate() {
+    for (position, placed) in visible.iter().copied() {
         match placed.piece {
-            Piece::Code { .. } => {
-                let Some(lines) = cut(placed, row, range) else {
-                    continue;
-                };
-                let bar = if last_code == Some(position) {
-                    AcrossBar::Drawn
-                } else {
-                    AcrossBar::Omitted
-                };
-                let segment = code_piece(frame, shown, &lines, columns, bar, marks);
-                drawn += rows(lines.first, lines.end, row) + row;
-                segments.push(segment);
+            Piece::Code { start, .. } => {
+                frame.start(Container::Slot {
+                    id: ids::slot(shown.path, SlotKind::Code, line_count(start)),
+                    height: placed.height,
+                });
+                if let Some(lines) = cut(placed, row, range) {
+                    gap(frame, lines.top - placed.top);
+                    let bar = if last_code == Some(Count::new(position)) {
+                        AcrossBar::Drawn
+                    } else {
+                        AcrossBar::Omitted
+                    };
+                    segments.push(code_piece(frame, shown, &lines, columns, bar, marks));
+                }
+                frame.finish();
             }
             Piece::Fold { start, end } => {
+                frame.start(Container::Slot {
+                    id: ids::slot(shown.path, SlotKind::Fold, line_count(start)),
+                    height: placed.height,
+                });
                 fold(frame, shown.path, start, end, shown.last);
-                drawn += placed.height;
+                frame.finish();
             }
             Piece::Inset(number) => {
                 if let Some(shown_inset) = insets.get(number.get()) {
@@ -932,9 +961,9 @@ fn draw<'path>(
                         },
                     );
                 }
-                drawn += placed.height;
             }
         }
+        drawn += placed.height;
     }
     Drawn {
         segments,

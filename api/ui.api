@@ -162,7 +162,10 @@ layout::pub enum Direction { Row, Column, }
 layout::pub const fn main(self) -> Axis
 layout::pub enum Align { Start, Center, }
 layout::pub enum Hold { #[default] Free, Steady, }
-layout::pub struct Layout { pub direction: Direction, pub width: Size, pub height: Size, pub floating: Option<Point>, pub(crate) stacking: Stacking, pub padding: Px, pub gap: Px, pub cross: Align, pub scroll: Option<Point>, pub scroll_axes: ScrollAxes, pub hold: Hold, }
+layout::pub enum Bound { #[default] Loose, Slot, }
+layout::pub enum Anchoring { #[default] Free, Anchored, }
+layout::pub enum Memory { #[default] Forget, Remember, }
+layout::pub struct Layout { pub direction: Direction, pub width: Size, pub height: Size, pub floating: Option<Point>, pub(crate) stacking: Stacking, pub padding: Px, pub gap: Px, pub cross: Align, pub scroll: Option<Point>, pub scroll_axes: ScrollAxes, pub hold: Hold, pub memory: Memory, pub bound: Bound, pub anchoring: Anchoring, }
 layout::pub const fn row() -> Self
 layout::pub const fn column() -> Self
 layout::pub const fn size_along(self, axis: Axis) -> Size
@@ -178,6 +181,9 @@ layout::pub const fn padding(mut self, padding: Px) -> Self
 layout::pub const fn gap(mut self, gap: Px) -> Self
 layout::pub const fn cross(mut self, align: Align) -> Self
 layout::pub const fn scroll(mut self, offset: Point) -> Self
+layout::pub const fn slot(mut self, height: Px) -> Self
+layout::pub const fn anchored(mut self) -> Self
+layout::pub const fn remembered(mut self) -> Self
 layout::pub const fn steady(mut self) -> Self
 layout::pub const fn scroll_axes(mut self, scroll_axes: ScrollAxes) -> Self
 layout::pub const fn floating(mut self, at: Point) -> Self
@@ -236,8 +242,9 @@ tree::pub const fn drag(self) -> Option<Point>
 tree::pub const fn wheel(self) -> Vector
 tree::pub const fn pinch(self) -> Pinch
 tree::pub const fn rect(self) -> Option<Rect>
+tree::pub struct SlotOverflow { pub id: Id, pub height: Px, pub content: Px, }
 tree::pub struct DuplicateId { pub id: Id, pub first: Rect, pub second: Rect, }
-tree::pub struct Ui { roots: Vec<Element>, stack: Vec<Element>, previous: BTreeMap<Id, Placement>, hot: Option<Id>, active: Option<Id>, last_mouse: Point, aim: Aim, scroll_drag: Option<ScrollGrab>, pointer: Pointer, size: Extent, capture: Capture, held: Option<Held>, kept: Kept, duplicates: Vec<DuplicateId>, }
+tree::pub struct Ui { roots: Vec<Element>, stack: Vec<Element>, previous: BTreeMap<Id, Placement>, remembered: BTreeMap<Id, Extent>, anchors: BTreeMap<Id, Anchor>, overflows: Vec<SlotOverflow>, hot: Option<Id>, active: Option<Id>, last_mouse: Point, aim: Aim, scroll_drag: Option<ScrollGrab>, pointer: Pointer, size: Extent, capture: Capture, held: Option<Held>, kept: Kept, duplicates: Vec<DuplicateId>, }
 tree::pub const fn capture(&mut self, capture: Capture)
 tree::pub fn begin(&mut self, input: &Input)
 tree::pub const fn holding(&self) -> bool
@@ -252,7 +259,9 @@ tree::pub fn close(&mut self)
 tree::pub fn leaf( &mut self, kind: Kind, layout: Layout, style: Style, id: Option<Id>, ) -> Interaction
 tree::pub const fn dragging(&self) -> bool
 tree::pub fn placement(&self, id: Id) -> Option<Placement>
+tree::pub fn remembered(&self, id: Id) -> Option<Extent>
 tree::pub fn duplicate_ids(&self) -> &[DuplicateId]
+tree::pub fn slot_overflows(&self) -> &[SlotOverflow]
 tree::pub fn on_scrollbar(&self, id: Id) -> bool
 tree::pub fn scroll_by_wheel(&mut self, id: Id, offset: &mut Point) -> Point
 tree::pub fn end(&mut self, measure: &mut dyn Measure)

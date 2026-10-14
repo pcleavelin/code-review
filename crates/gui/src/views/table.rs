@@ -9,13 +9,13 @@ use ui::{Button, Canvas, Count, Grid, Point, Px, Rect};
 use crate::action::Action;
 use crate::diffs::{Loading, Sides, SidesKey};
 use crate::grid::{self, GUTTER, Gutter};
-use crate::ids;
+use crate::ids::{self, SlotKind};
 use crate::keys::{self, CodeGesture, LineGesture};
 use crate::model::Model;
 use crate::peek::Intent;
 use crate::review::{Picking, RemovedPick, ReviewAct};
 use crate::theme::{ADDED_FILL, BORDER, LINES_SELECTED, PIXEL, RED, REMOVED_FILL, WEAK};
-use crate::widgets::{Frame, Padding};
+use crate::widgets::{Container, Frame, Padding};
 
 use super::center::{self, Aimed, Band, Inset, Noted, Stretch, Viewed};
 
@@ -45,6 +45,10 @@ impl RowAt {
 
     fn down(self, rows: usize) -> Self {
         Self(self.0 + rows)
+    }
+
+    const fn count(self) -> Count {
+        Count::new(self.0)
     }
 
     fn rows_to(self, end: Self) -> Count {
@@ -675,13 +679,8 @@ impl<'body> TableBody<'body> {
             .iter()
             .filter(|placed| band.reaches(placed.top, placed.height))
             .collect();
-        let first_top = visible
-            .first()
-            .map_or(Px::ZERO, |placed| match placed.piece {
-                Piece::Rows { .. } => placed.top + row * Count::new(rows_above(placed)),
-                Piece::Fold { .. } | Piece::Inset(_) => placed.top,
-            });
-        frame.spacer(first_top);
+        let first_top = visible.first().map_or(Px::ZERO, |placed| placed.top);
+        center::gap(frame, first_top);
         let mut drawn_to = first_top;
         for placed in visible {
             match placed.piece {
@@ -690,13 +689,29 @@ impl<'body> TableBody<'body> {
                         usize::try_from((band.bottom - placed.top.max(band.offset)).ratio(row))
                             .unwrap_or(0)
                             + 1;
-                    let first = start.down(rows_above(placed)).min(to);
+                    let skipped = rows_above(placed);
+                    let first = start.down(skipped).min(to);
                     let end = first.down(room).min(to);
+                    frame.start(Container::Slot {
+                        id: ids::slot(self.path, SlotKind::Rows, start.count()),
+                        height: placed.height,
+                    });
+                    center::gap(frame, row * Count::new(skipped));
                     table.rows(model, frame, first, end);
-                    drawn_to += row * first.rows_to(end);
+                    frame.finish();
+                    drawn_to += placed.height;
                 }
                 Piece::Fold { start, end } => {
+                    frame.start(Container::Slot {
+                        id: ids::slot(
+                            self.path,
+                            SlotKind::Fold,
+                            Count::new(usize::try_from(start.value()).unwrap_or(0)),
+                        ),
+                        height: placed.height,
+                    });
                     center::fold(frame, self.path, start, end, self.last);
+                    frame.finish();
                     drawn_to += placed.height;
                 }
                 Piece::Inset(number) => {

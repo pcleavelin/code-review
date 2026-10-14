@@ -165,6 +165,7 @@ pub(crate) const FIELD_CARET_ROOM: Px = Px::new(6);
 pub(crate) const NOTE_ROWS_LEAST: ui::Count = ui::Count::new(3);
 pub(crate) const NOTE_ROWS_MOST: ui::Count = ui::Count::new(12);
 pub(crate) const BAR_PADDING: Px = Px::new(4);
+pub(crate) const FILE_HEADER_PADDING: Px = Px::new(3);
 pub(crate) const PANEL_PADDING: Px = Px::new(4);
 pub(crate) const TOOLTIP_PADDING: Px = Px::new(6);
 pub(crate) const COMMENT_PADDING: Px = Px::new(6);

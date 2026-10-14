@@ -42,6 +42,27 @@ pub enum Hold {
     Steady,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Bound {
+    #[default]
+    Loose,
+    Slot,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Anchoring {
+    #[default]
+    Free,
+    Anchored,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Memory {
+    #[default]
+    Forget,
+    Remember,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Layout {
     pub direction: Direction,
@@ -55,6 +76,9 @@ pub struct Layout {
     pub scroll: Option<Point>,
     pub scroll_axes: ScrollAxes,
     pub hold: Hold,
+    pub memory: Memory,
+    pub bound: Bound,
+    pub anchoring: Anchoring,
 }
 
 impl Layout {
@@ -71,6 +95,9 @@ impl Layout {
             scroll: None,
             scroll_axes: ScrollAxes::VERTICAL,
             hold: Hold::Free,
+            memory: Memory::Forget,
+            bound: Bound::Loose,
+            anchoring: Anchoring::Free,
         }
     }
 
@@ -156,6 +183,25 @@ impl Layout {
     #[must_use]
     pub const fn scroll(mut self, offset: Point) -> Self {
         self.scroll = Some(offset);
+        self
+    }
+
+    #[must_use]
+    pub const fn slot(mut self, height: Px) -> Self {
+        self.height = Size::Exact(height);
+        self.bound = Bound::Slot;
+        self
+    }
+
+    #[must_use]
+    pub const fn anchored(mut self) -> Self {
+        self.anchoring = Anchoring::Anchored;
+        self
+    }
+
+    #[must_use]
+    pub const fn remembered(mut self) -> Self {
+        self.memory = Memory::Remember;
         self
     }
 

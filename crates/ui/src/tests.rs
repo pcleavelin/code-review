@@ -5,8 +5,8 @@ use strum::VariantArray;
 use crate::{
     Axis, Button, Buttons, Canvas, Capture, Cell, Color, Command, Coordinate, Count, DuplicateId,
     Extent, FontSize, Glyph, Grid, Icon, Id, Input, Key, Kind, Label, Layout, Measure, Mods, Pinch,
-    Point, Press, Px, Rect, Run, Scale, ScrollAxes, Scrollbar, Sides, Style, Text, Ui, Vector,
-    Wrap,
+    Point, Press, Px, Rect, Run, Scale, ScrollAxes, Scrollbar, Sides, SlotOverflow, Style, Text,
+    Ui, Vector, Wrap,
 };
 
 struct Cells;
@@ -1220,4 +1220,94 @@ fn a_duplicate_id_names_both_places_until_a_frame_lays_it_out_once() {
     );
     boxes(&mut ui, &["twice", "once"]);
     assert_eq!(ui.duplicate_ids(), []);
+}
+
+#[test]
+fn a_slot_keeps_its_height_and_reports_content_that_overflows_it() {
+    let mut ui = Ui::default();
+    ui.begin(&input(100, 100));
+    ui.open(Kind::None, Layout::column(), Style::default(), None);
+    ui.open(
+        Kind::None,
+        Layout::column().slot(px(20)),
+        Style::default(),
+        Some(Id::new("slot")),
+    );
+    ui.leaf(
+        Kind::None,
+        Layout::row().height(px(32)),
+        Style::default(),
+        None,
+    );
+    ui.close();
+    ui.leaf(
+        Kind::None,
+        Layout::row().height(px(10)),
+        Style::default(),
+        Some(Id::new("after")),
+    );
+    ui.close();
+    ui.end(&mut Cells);
+    assert_eq!(ui.placement(Id::new("after")).unwrap().rect.top, px(20));
+    assert_eq!(
+        ui.slot_overflows(),
+        [SlotOverflow {
+            id: Id::new("slot"),
+            height: px(20),
+            content: px(32),
+        }]
+    );
+}
+
+fn anchored_list(ui: &mut Ui, offset: &mut Point, above: i32) {
+    let id = Id::new("list");
+    ui.begin(&input(100, 100));
+    ui.scroll_by_wheel(id, offset);
+    ui.open(
+        Kind::None,
+        Layout::column()
+            .width(px(50))
+            .height(px(50))
+            .scroll(*offset)
+            .anchored(),
+        Style::default(),
+        Some(id),
+    );
+    for (name, height) in [("above", above), ("kept", 30), ("below", 100)] {
+        ui.leaf(
+            Kind::None,
+            Layout::column().slot(px(height)),
+            Style::default(),
+            Some(Id::new(name)),
+        );
+    }
+    ui.close();
+    ui.end(&mut Cells);
+}
+
+#[test]
+fn an_anchored_scroller_holds_its_top_item_still_when_an_item_above_it_grows() {
+    let mut ui = Ui::default();
+    let mut offset = Point::new(px(0), px(40));
+    anchored_list(&mut ui, &mut offset, 30);
+    let before = ui.placement(Id::new("kept")).unwrap().rect.top;
+    anchored_list(&mut ui, &mut offset, 60);
+    assert_eq!(ui.placement(Id::new("kept")).unwrap().rect.top, before);
+    anchored_list(&mut ui, &mut offset, 60);
+    assert_eq!(offset.vertical, px(70));
+    assert_eq!(ui.placement(Id::new("kept")).unwrap().rect.top, before);
+}
+
+#[test]
+fn an_anchored_scroller_follows_an_offset_the_app_sets() {
+    let mut ui = Ui::default();
+    let mut offset = Point::new(px(0), px(40));
+    anchored_list(&mut ui, &mut offset, 30);
+    let mut jumped = Point::new(px(0), px(10));
+    anchored_list(&mut ui, &mut jumped, 60);
+    assert_eq!(jumped.vertical, px(10));
+    assert_eq!(
+        ui.placement(Id::new("kept")).unwrap().rect.top,
+        ui.placement(Id::new("list")).unwrap().rect.top + px(50)
+    );
 }
