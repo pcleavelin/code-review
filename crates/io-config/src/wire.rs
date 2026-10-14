@@ -317,3 +317,20 @@ pub(crate) fn parse_forges(text: &str) -> Option<WireForges> {
         jira: lines.iter().copied().filter_map(jira).collect(),
     })
 }
+
+pub(crate) fn with_jira(text: Option<&str>, host: &str) -> Option<String> {
+    let text = text.unwrap_or_default();
+    if text.trim().is_empty() {
+        return Some(format!("{FORGES_HEADER}\n{JIRA} {host}\n"));
+    }
+    let forges = parse_forges(text)?;
+    if forges
+        .jira
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(host))
+    {
+        return Some(text.to_owned());
+    }
+    let ended = if text.ends_with('\n') { "" } else { "\n" };
+    Some(format!("{text}{ended}{JIRA} {host}\n"))
+}

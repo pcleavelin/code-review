@@ -227,6 +227,11 @@ case "$url" in
   rest=${url#https://*/api/v1/}; rest=${rest%%\?*}
   file="$api/$(printf '%s' "$rest" | tr '/' '-').json"
   if [ -f "$file" ]; then body=$(cat "$file"); else body='{"message":"not found"}'; status=404; fi;;
+*/rest/api/2/myself)
+  case "$config" in
+  *"Authorization: Basic $(printf %s "$(cat "$api/jira-login" 2>/dev/null)" | base64)\""*) body='{"displayName":"Ann Smith"}';;
+  *) body=''; status=401;;
+  esac;;
 */rest/api/2/issue/*)
   key=${url#*/rest/api/2/issue/}; key=${key%%\?*}
   case "$config" in
@@ -1165,7 +1170,9 @@ mod scenario {
         let login = run(&["login", "jira.test"], "ann@acme.test:jtoken\n");
         assert_eq!(login.code, Some(0), "{}", login.stderr);
         assert!(
-            login.stdout.contains("logged in to jira.test"),
+            login
+                .stdout
+                .contains("logged in to Jira on jira.test as Ann Smith"),
             "{}",
             login.stdout
         );
@@ -1188,6 +1195,23 @@ mod scenario {
             logout.stdout.contains("logged out of jira.test"),
             "{}",
             logout.stdout
+        );
+        let cloud = run(&["login", "acme.atlassian.net"], "ann@acme.test:jtoken\n");
+        assert_eq!(cloud.code, Some(0), "{}", cloud.stderr);
+        assert!(
+            fs::read_to_string(&forge.forges)
+                .unwrap()
+                .ends_with("jira jira.test\njira acme.atlassian.net\n"),
+            "{}",
+            cloud.stdout
+        );
+        let wrong = run(&["login", "jira.test"], "ann@acme.test:wrong\n");
+        assert!(
+            wrong
+                .stderr
+                .contains("jira.test refused the email and token"),
+            "{}",
+            wrong.stderr
         );
     }
 

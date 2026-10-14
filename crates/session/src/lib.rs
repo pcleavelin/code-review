@@ -65,6 +65,8 @@ pub enum SessionError {
     NoSite(LoginTarget),
     Jira(JiraError),
     JiraLoggedOut(JiraSite),
+    NoForgesFile,
+    Forges(PathBuf, io::Error),
 }
 
 struct Listed<'names>(&'names [RepoName]);
@@ -152,6 +154,12 @@ impl fmt::Display for SessionError {
                 "{cause}: the forge refused the token the keychain holds for {site}; log in again with 'review login {site}'"
             ),
             Self::Jira(error) => write!(formatter, "{error}"),
+            Self::NoForgesFile => formatter.write_str(
+                "no place for the forges file: set REVIEW_FORGES or a config directory",
+            ),
+            Self::Forges(path, error) => {
+                write!(formatter, "the forges file {} was not written: {error}", path.display())
+            }
             Self::JiraLoggedOut(site) => write!(
                 formatter,
                 "not logged in to {site}: `review login {site}` and paste email:api-token (Jira Cloud) or a personal access token"

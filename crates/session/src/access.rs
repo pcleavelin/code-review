@@ -2,8 +2,8 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use domain::{
-    Card, CardKey, ClientId, Forge, ForgeHost, Grant, Host, JiraSite, PictureSource, PullRequest,
-    Token, UnixTime, WebLink,
+    Card, CardField, CardKey, ClientId, Forge, ForgeHost, Grant, Host, JiraSite, PictureSource,
+    PullRequest, Token, UnixTime, WebLink,
 };
 use io_config::{ForgesStore, Reach};
 use io_forge::{Cancel, DeviceAuthorization, LoginMethod};
@@ -181,15 +181,24 @@ impl Access {
     }
 
     pub fn jira_site(&self, target: &LoginTarget) -> Option<JiraSite> {
+        let asked = JiraSite::from_address(target.as_str())?;
         self.jira_sites()
             .into_iter()
-            .find(|site| site.host().as_str().eq_ignore_ascii_case(target.as_str()))
+            .find(|site| site == &asked)
+            .or_else(|| asked.is_cloud().then_some(asked))
     }
 
-    pub fn keep_jira(&self, site: &JiraSite, token: Token) -> Result<(), SessionError> {
-        self.keychain()?
+    pub fn login_jira(&self, site: &JiraSite, token: Token) -> Result<CardField, SessionError> {
+        let keychain = self.keychain()?;
+        let forges = self.forges.as_ref().ok_or(SessionError::NoForgesFile)?;
+        let name = io_jira::myself(site, &token)?;
+        forges
+            .add_jira(site)
+            .map_err(|error| SessionError::Forges(forges.path().to_path_buf(), error))?;
+        keychain
             .save(site.host(), &Grant::lasting(token))
-            .map_err(SessionError::Keychain)
+            .map_err(SessionError::Keychain)?;
+        Ok(name)
     }
 
     pub fn forget_jira(&self, site: &JiraSite) -> Result<Forgotten, SessionError> {

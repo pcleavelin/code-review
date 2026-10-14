@@ -214,6 +214,20 @@ impl ForgesStore {
             .unwrap_or_default()
     }
 
+    pub fn add_jira(&self, site: &JiraSite) -> io::Result<()> {
+        let text = fs::read_to_string(&self.path).ok();
+        let written = wire::with_jira(text.as_deref(), site.host().as_str()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "{} does not start with `review forges 1`",
+                    self.path.display()
+                ),
+            )
+        })?;
+        save_text(&self.path, written)
+    }
+
     fn read(&self) -> Option<wire::WireForges> {
         fs::read_to_string(&self.path)
             .ok()

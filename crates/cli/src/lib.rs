@@ -122,8 +122,8 @@ pub fn finish_jira_login(
     let token = pasted
         .and_then(|pasted| Token::new(&pasted.0))
         .ok_or_else(|| Failure::NoJiraToken(site.clone()))?;
-    desk.access().keep_jira(site, token)?;
-    wire::jira_logged_in(output, site);
+    let name = desk.access().login_jira(site, token)?;
+    wire::jira_logged_in(output, site, &name);
     Ok(())
 }
 

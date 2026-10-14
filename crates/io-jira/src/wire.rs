@@ -105,8 +105,25 @@ pub(crate) fn authorization(token: &str) -> String {
     }
 }
 
-pub(crate) fn config(host: &str, key: &str, token: &str) -> String {
-    let url = format!("https://{host}/rest/api/2/issue/{key}?fields={FIELDS}");
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ApiPath(String);
+
+impl ApiPath {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+pub(crate) fn myself_path() -> ApiPath {
+    ApiPath("myself".to_owned())
+}
+
+pub(crate) fn issue_path(key: &str) -> ApiPath {
+    ApiPath(format!("issue/{key}?fields={FIELDS}"))
+}
+
+pub(crate) fn config(host: &str, path: &str, token: &str) -> String {
+    let url = format!("https://{host}/rest/api/2/{path}");
     format!(
         "url = \"{}\"\nheader = \"Accept: application/json\"\nheader = \"{}\"\nwrite-out = \"{WRITE_OUT}\"\n",
         escaped(&url),
@@ -172,6 +189,11 @@ fn attachments_of(fields: &Value) -> Vec<WireAttachment> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub(crate) fn parse_name(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    value.get("displayName")?.as_str().map(str::to_owned)
 }
 
 pub(crate) fn parse_card(body: &str) -> Option<WireCard> {

@@ -247,6 +247,26 @@ pub(crate) const TOKEN_FIELD: Control = Control::new(
     Element::new("field@token"),
     Words::new("paste the access token made on the forge's page; enter keeps it"),
 );
+pub(crate) const JIRA_SITE_FIELD: Control = Control::new(
+    Element::new("field@jira-site"),
+    Words::new("the Jira site's address, or any link to it (yourcompany.atlassian.net)"),
+);
+pub(crate) const JIRA_EMAIL_FIELD: Control = Control::new(
+    Element::new("field@jira-email"),
+    Words::new(
+        "the email you sign in to Jira Cloud with; empty for a Data Center personal access token",
+    ),
+);
+pub(crate) const JIRA_LOGIN: Control = Control::new(
+    Element::new("jira-login"),
+    Words::new(
+        "log in to Jira: its site, your email and an API token, checked with Jira and kept in the system keychain",
+    ),
+);
+pub(crate) const JIRA_TOKENS: Control = Control::new(
+    Element::new("jira-tokens"),
+    Words::new("open Atlassian's page that makes API tokens"),
+);
 pub(crate) const CHANGE_ROW: Control = Control::new(
     Element::new("change"),
     Words::new("show this changed file at its first change"),
@@ -512,6 +532,10 @@ pub(crate) const CONTROLS: &[Control] = &[
     LOGIN_CANCEL,
     LOGIN_SAVE,
     TOKEN_FIELD,
+    JIRA_SITE_FIELD,
+    JIRA_EMAIL_FIELD,
+    JIRA_LOGIN,
+    JIRA_TOKENS,
     CHANGE_ROW,
     SEEN,
     NEXT_UNSEEN,
@@ -582,6 +606,10 @@ pub(crate) fn inbox() -> Id {
 
 pub(crate) fn thread_box() -> Id {
     Id::new("thread-box")
+}
+
+pub(crate) fn jira_form() -> Id {
+    Id::new("jira-form")
 }
 
 pub(crate) fn card_box() -> Id {

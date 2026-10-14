@@ -229,6 +229,8 @@ impl App {
             | Which::Inbox
             | Which::Pin
             | Which::Token
+            | Which::JiraSite
+            | Which::JiraEmail
             | Which::Column(_) => AfterSubmit::Keep,
             Which::Command | Which::ViewSearch => AfterSubmit::Clear,
         };
@@ -258,6 +260,8 @@ impl App {
             Which::Draft => self.review(ReviewAct::SaveDraft),
             Which::Pin => self.review(ReviewAct::Pin),
             Which::Token => self.login(LoginAct::Save),
+            Which::JiraSite => self.model.fields.focus(Which::JiraEmail),
+            Which::JiraEmail => self.model.fields.focus(Which::Token),
             Which::SymbolFilter
             | Which::Palette
             | Which::Summary
@@ -361,9 +365,9 @@ impl App {
             }
             Ok(cli::Touched::JiraLoginStarted(site)) => {
                 self.model.console.append(
-                    "in this window, paste the token in the Inbox's token field instead; the Console keeps every line typed in it\n",
+                    "in this window, fill in the Inbox's Jira login form instead; the Console keeps every line typed in it\n",
                 );
-                self.login(LoginAct::StartJira(site));
+                self.login(LoginAct::StartJira(Some(site)));
             }
             Ok(cli::Touched::Nothing | cli::Touched::Review(_)) => {}
         }

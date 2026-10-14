@@ -190,3 +190,25 @@ fn the_forges_file_names_the_jira_sites_and_skips_lines_it_cannot_read() {
     assert_eq!(store.load().len(), 1);
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn a_jira_site_is_added_to_the_forges_file_once_and_its_other_lines_stay() {
+    assert_eq!(
+        wire::with_jira(None, "acme.atlassian.net").as_deref(),
+        Some("review forges 1\njira acme.atlassian.net\n")
+    );
+    let kept = "review forges 1\nclient gitlab.test cid";
+    assert_eq!(
+        wire::with_jira(Some(kept), "acme.atlassian.net").as_deref(),
+        Some("review forges 1\nclient gitlab.test cid\njira acme.atlassian.net\n")
+    );
+    let known = "review forges 1\njira ACME.atlassian.net\n";
+    assert_eq!(
+        wire::with_jira(Some(known), "acme.atlassian.net").as_deref(),
+        Some(known)
+    );
+    assert_eq!(
+        wire::with_jira(Some("something else\n"), "acme.atlassian.net"),
+        None
+    );
+}

@@ -10,7 +10,7 @@ use ui::{Axis, Id, Px, Ui};
 use crate::diffs::Loading;
 use crate::field::{Fields, Shown, Which};
 use crate::ids;
-use crate::login::{Held, Logins, Stage};
+use crate::login::{Held, JiraForm, Logins, Stage};
 use crate::model::{Model, Scrolls};
 use crate::nav::Nav;
 use crate::palette::Palette;
@@ -360,24 +360,29 @@ impl Dump for Logins {
             "login sites=[{}] stage={stage}",
             sites.join(" ")
         ));
-        if !self.jira.is_empty() || self.jira_paste.is_some() {
-            let jira: Vec<String> = self
-                .jira
-                .iter()
-                .map(|(site, held)| {
-                    let held = match held {
-                        Held::In => "in".to_owned(),
-                        Held::Out => "out".to_owned(),
-                        Held::TimedOut(why) => format!("timed-out={}", Quoted(why.as_str())),
-                    };
-                    format!("{site}={held}")
-                })
-                .collect();
-            lines.line(format_args!(
-                "jira sites=[{}] pasting={}",
-                jira.join(" "),
-                Optional(self.jira_paste.as_ref())
-            ));
+        {
+            let jira: Vec<String> =
+                self.jira
+                    .iter()
+                    .map(|(site, held)| {
+                        let held = match held {
+                            Held::In => "in".to_owned(),
+                            Held::Out => "out".to_owned(),
+                            Held::TimedOut(why) => format!("timed-out={}", Quoted(why.as_str())),
+                        };
+                        let name = self.jira_names.get(site).map_or_else(String::new, |name| {
+                            format!(" as {}", Quoted(name.as_str()))
+                        });
+                        format!("{site}={held}{name}")
+                    })
+                    .collect();
+            let form = match &self.jira_form {
+                None => "none".to_owned(),
+                Some(JiraForm::Editing) => "editing".to_owned(),
+                Some(JiraForm::Checking(site)) => format!("checking {site}"),
+                Some(JiraForm::Refused(why)) => format!("refused {}", Quoted(why.as_str())),
+            };
+            lines.line(format_args!("jira sites=[{}] form={form}", jira.join(" ")));
         }
     }
 }

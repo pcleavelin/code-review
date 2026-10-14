@@ -24,7 +24,7 @@ use crate::app::App;
 use crate::diffs::{DiffJobs, Diffs, Loading, SidesKey};
 use crate::field::Which;
 use crate::keys::Going;
-use crate::login::{self, Ended, Holdings, LoginStatus, Logins};
+use crate::login::{self, Ended, Holdings, JiraLanded, LoginStatus, Logins};
 use crate::model::{LineSelection, Model, Tab};
 use crate::nav::{Aim, Kept};
 use crate::panels::View;
@@ -198,6 +198,7 @@ pub(crate) struct ReviewJobs {
     submit: Option<Job<Result<Submitted, Label>>>,
     pin: Option<Job<Result<PinLanded, Label>>>,
     pub(crate) login: Option<Job<Ended>>,
+    pub(crate) jira: Option<Job<JiraLanded>>,
     relist: Relist,
     pub(crate) diffs: DiffJobs,
     pub(crate) pictures: PictureJobs,
@@ -215,6 +216,7 @@ impl ReviewJobs {
             || self.talk.is_some()
             || self.rights.is_some()
             || self.card.is_some()
+            || self.jira.is_some()
             || self.submit.is_some()
             || self.pin.is_some()
             || self.diffs.busy()
@@ -1470,6 +1472,7 @@ impl App {
         self.poll_talk();
         self.poll_rights();
         self.poll_card();
+        self.poll_jira();
         self.poll_submit();
         self.poll_diffs();
         self.poll_pictures();

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use domain::{JiraSite, Progress, Standing};
+use domain::{Progress, Standing};
 use platform::Cursor;
 use session::{Entry, Pinned, RequestedFrom};
 use strum::VariantArray;
@@ -10,15 +10,15 @@ use crate::action::Action;
 use crate::columns::{GridAct, InboxColumn, Order, Resizing, Sorting};
 use crate::field::Which;
 use crate::ids;
-use crate::login::{Held, Login, LoginAct, Stage};
+use crate::login::{Held, JiraForm, Login, LoginAct, Stage};
 use crate::model::Model;
 use crate::review::{Broken, Cure, Inbox, Pinning, Requests, ReviewAct};
 use crate::text::Needle;
 use crate::theme::{
-    ACCENT, COLUMN_EDGE, Cells, FORGE_STATE, GREEN, INBOX_FIELD, ORANGE, PIN_FIELD, RED, SELECTED,
-    TEXT, TOKEN_FIELD, WEAK,
+    ACCENT, COLUMN_EDGE, Cells, FORGE_STATE, FORM_LABEL, GREEN, INBOX_FIELD, JIRA_FIELD, ORANGE,
+    PIN_FIELD, RED, SELECTED, TEXT, TOKEN_FIELD, WEAK,
 };
-use crate::widgets::{Chosen, Container, Frame, Padding, Scroller};
+use crate::widgets::{Chosen, CommentLook, Container, Frame, Padding, Scroller};
 
 const STANDINGS: [Standing; 4] = [
     Standing::New,
@@ -195,38 +195,10 @@ fn forges(model: &Model, frame: &mut Frame<'_>) {
         strip(model, frame, login);
         return;
     }
-    if let Some(site) = &logins.jira_paste {
-        jira_strip(model, frame, site);
-        return;
-    }
     let sites = logins.sites(&model.review.desk);
-    if sites.is_empty() && logins.jira.is_empty() {
-        return;
-    }
     frame.start(Container::ToolbarSmall);
     frame.label("forges", WEAK);
-    for (site, held) in &logins.jira {
-        let host = Label::new(site.to_string());
-        site_state(
-            frame,
-            &Label::new(format!("Jira {site}")),
-            Some(held),
-            LoginFailed::No,
-        );
-        if held == &Held::In {
-            let logout = ids::LOGOUT.with(&host);
-            if frame.small_button("log out", logout).clicked() {
-                frame.push(Action::Login(LoginAct::LogoutJira(site.clone())));
-            }
-            frame.attach_tip(logout);
-        } else {
-            let login = ids::LOGIN.with(&host);
-            if frame.small_button("log in", login).clicked() {
-                frame.push(Action::Login(LoginAct::StartJira(site.clone())));
-            }
-            frame.attach_tip(login);
-        }
-    }
+    jira_sites(model, frame);
     for site in sites {
         let host = Label::new(site.to_string());
         let held = logins.held.get(&site);
@@ -251,6 +223,127 @@ fn forges(model: &Model, frame: &mut Frame<'_>) {
         }
     }
     frame.finish();
+    if let Some(form) = &logins.jira_form {
+        jira_form(model, frame, form);
+    }
+}
+
+fn jira_sites(model: &Model, frame: &mut Frame<'_>) {
+    let logins = &model.review.logins;
+    if logins.jira.is_empty() {
+        frame.label_runs(vec![
+            Run::new("Jira", TEXT),
+            Run::new(" not logged in", WEAK),
+        ]);
+        if logins.jira_form.is_none() {
+            let login = ids::JIRA_LOGIN.target();
+            if frame.small_button("log in", login).clicked() {
+                frame.push(Action::Login(LoginAct::StartJira(None)));
+            }
+            frame.attach_tip(login);
+        }
+        return;
+    }
+    for (site, held) in &logins.jira {
+        let host = Label::new(site.to_string());
+        let (state, color) = match (held, logins.jira_names.get(site)) {
+            (Held::In, Some(name)) => (format!(" logged in as {name}"), GREEN),
+            (Held::In, None) => (" logged in".to_owned(), GREEN),
+            (Held::Out, _) => (" not logged in".to_owned(), WEAK),
+            (Held::TimedOut(_), _) => (" keychain not answering".to_owned(), ORANGE),
+        };
+        frame.label_runs(vec![
+            Run::new(format!("Jira {site}"), TEXT),
+            Run::new(state, color),
+        ]);
+        if held == &Held::In {
+            let logout = ids::LOGOUT.with(&host);
+            if frame.small_button("log out", logout).clicked() {
+                frame.push(Action::Login(LoginAct::LogoutJira(site.clone())));
+            }
+            frame.attach_tip(logout);
+        } else if logins.jira_form.is_none() {
+            let login = ids::LOGIN.with(&host);
+            if frame.small_button("log in", login).clicked() {
+                frame.push(Action::Login(LoginAct::StartJira(Some(site.clone()))));
+            }
+            frame.attach_tip(login);
+        }
+    }
+}
+
+fn form_row(model: &Model, frame: &mut Frame<'_>, which: Which, words: [Label; 2]) {
+    let [name, hint] = words;
+    frame.start(Container::FitRow);
+    let width = FORM_LABEL.of(frame.cell_width());
+    frame.cell(vec![Run::new(name, WEAK)], width);
+    frame.field(&model.fields, which, &hint, JIRA_FIELD);
+}
+
+fn jira_form(model: &Model, frame: &mut Frame<'_>, form: &JiraForm) {
+    frame.start(Container::Comment {
+        look: CommentLook::Thread,
+        id: ids::jira_form(),
+    });
+    frame.title("Log in to Jira");
+    form_row(
+        model,
+        frame,
+        Which::JiraSite,
+        [
+            Label::new("site"),
+            Label::new("yourcompany.atlassian.net, or any link to the site"),
+        ],
+    );
+    frame.finish();
+    form_row(
+        model,
+        frame,
+        Which::JiraEmail,
+        [
+            Label::new("email"),
+            Label::new("you@company.com; empty for a Data Center personal access token"),
+        ],
+    );
+    frame.finish();
+    form_row(
+        model,
+        frame,
+        Which::Token,
+        [Label::new("API token"), Label::new("paste the token")],
+    );
+    let tokens = ids::JIRA_TOKENS.target();
+    if frame.small_button("create a token", tokens).clicked() {
+        frame.push(Action::Login(LoginAct::OpenPage));
+    }
+    frame.attach_tip(tokens);
+    frame.finish();
+    frame.start(Container::ToolbarSmall);
+    let save = ids::LOGIN_SAVE.target();
+    let checking = matches!(form, JiraForm::Checking(_));
+    if frame
+        .small_button(if checking { "checking..." } else { "log in" }, save)
+        .clicked()
+    {
+        frame.push(Action::Login(LoginAct::Save));
+    }
+    frame.attach_tip(save);
+    let cancel = ids::LOGIN_CANCEL.target();
+    if frame.small_button("cancel", cancel).clicked() {
+        frame.push(Action::Login(LoginAct::Cancel));
+    }
+    frame.attach_tip(cancel);
+    frame.finish();
+    match form {
+        JiraForm::Editing => frame.note(
+            "the token is checked with Jira, then kept in the system keychain",
+            WEAK,
+            Padding::Step,
+        ),
+        JiraForm::Checking(site) => frame.note(format!("asking {site}..."), ORANGE, Padding::Step),
+        JiraForm::Refused(why) => frame.note(why.as_str(), RED, Padding::Step),
+    }
+    frame.finish();
 }
 
 fn site_state(frame: &mut Frame<'_>, name: &Label, held: Option<&Held>, failed: LoginFailed) {
@@ -271,33 +364,6 @@ fn site_state(frame: &mut Frame<'_>, name: &Label, held: Option<&Held>, failed: 
             color,
         ),
     ]);
-}
-
-fn jira_strip(model: &Model, frame: &mut Frame<'_>, site: &JiraSite) {
-    frame.start(Container::ToolbarSmall);
-    frame.label_runs(vec![
-        Run::new(format!("Jira on {site}"), TEXT),
-        Run::new(": paste email:api-token", WEAK),
-    ]);
-    open_page(frame);
-    frame.field(
-        &model.fields,
-        Which::Token,
-        &Label::new("you@example.com:api-token"),
-        TOKEN_FIELD,
-    );
-    let save = ids::LOGIN_SAVE.target();
-    if frame.small_button("save", save).clicked() {
-        frame.push(Action::Login(LoginAct::Save));
-    }
-    frame.attach_tip(save);
-    frame.grow();
-    let cancel = ids::LOGIN_CANCEL.target();
-    if frame.small_button("cancel", cancel).clicked() {
-        frame.push(Action::Login(LoginAct::Cancel));
-    }
-    frame.attach_tip(cancel);
-    frame.finish();
 }
 
 fn strip(model: &Model, frame: &mut Frame<'_>, login: &Login) {

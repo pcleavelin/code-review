@@ -5,9 +5,10 @@ use std::path::Path;
 
 use clap::{Args, CommandFactory, Parser};
 use domain::{
-    Block, Card, ChangeKind, Conversation, Decision, Depth, Draft, FileChange, ForgeHost, Index,
-    JiraSite, Line, LineKind, Location, Mark, PrNumber, Program, Progress, Review, Seen, Side,
-    SourceFile, SourceLine, Span, Standing, Symbol, SymbolId, Thread, ThreadState, WebLink,
+    Block, Card, CardField, ChangeKind, Conversation, Decision, Depth, Draft, FileChange,
+    ForgeHost, Index, JiraSite, Line, LineKind, Location, Mark, PrNumber, Program, Progress,
+    Review, Seen, Side, SourceFile, SourceLine, Span, Standing, Symbol, SymbolId, Thread,
+    ThreadState, WebLink,
 };
 use session::{
     DeviceAuthorization, Entry, Forgotten, Opened, Pinned, PullAddress, RepoName, RequestedFrom,
@@ -471,10 +472,10 @@ pub(crate) fn jira_paste(output: &mut Output, site: &JiraSite) {
     );
 }
 
-pub(crate) fn jira_logged_in(output: &mut Output, site: &JiraSite) {
+pub(crate) fn jira_logged_in(output: &mut Output, site: &JiraSite, name: &CardField) {
     write_line!(
         output,
-        "logged in to {site}; the token is in the system keychain"
+        "logged in to Jira on {site} as {name}; the token is in the system keychain"
     );
 }
 

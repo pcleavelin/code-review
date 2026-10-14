@@ -24,3 +24,4 @@ pub fn find(reach: Reach) -> Option<Self>
 pub fn path(&self) -> &Path
 pub fn load(&self) -> Vec<OAuthApp>
 pub fn jira_sites(&self) -> Vec<JiraSite>
+pub fn add_jira(&self, site: &JiraSite) -> io::Result<()>

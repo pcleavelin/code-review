@@ -1,4 +1,5 @@
 pub struct HttpStatus(u16);
-pub enum JiraError { Process(ProcessError), Unreachable(JiraSite, Captured), LoggedOut(JiraSite), NoCard(CardKey), Http(JiraSite, HttpStatus), Malformed(JiraSite), }
+pub enum JiraError { Process(ProcessError), Unreachable(JiraSite, Captured), LoggedOut(JiraSite), NoCard(CardKey), Http(JiraSite, HttpStatus), Malformed(JiraSite), NotJira(JiraSite), Refused(JiraSite), }
 pub fn card(site: &JiraSite, token: &Token, key: &CardKey) -> Result<Card, JiraError>
+pub fn myself(site: &JiraSite, token: &Token) -> Result<CardField, JiraError>
 pub fn picture_source(token: &Token, link: &WebLink) -> PictureSource

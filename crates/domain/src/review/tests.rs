@@ -1,9 +1,9 @@
 use crate::review::{
     Block, BranchName, CardKey, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision,
-    DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, LineKind, Login,
-    Moment, Note, Pairing, PrNumber, Prose, Provenance, RefName, Refusal, RepoSlug, Review,
-    Revision, Rights, Seen, Side, Standing, Submission, SubmissionId, Thread, ThreadId,
-    ThreadState,
+    DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, JiraSite,
+    LineKind, Login, Moment, Note, Pairing, PrNumber, Prose, Provenance, RefName, Refusal,
+    RepoSlug, Review, Revision, Rights, Seen, Side, Standing, Submission, SubmissionId, Thread,
+    ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
 
@@ -638,4 +638,33 @@ fn a_card_key_is_found_in_a_title_or_a_branch_and_not_inside_another_word() {
     assert_eq!(found("PROJ-12x is not a key"), None);
     assert_eq!(found("proj-12 and -12 and PROJ- are not keys"), None);
     assert_eq!(found("UTF-8 decoding"), Some("UTF-8".to_owned()));
+}
+
+#[test]
+fn a_jira_site_is_read_from_a_host_or_any_link_to_it() {
+    let site = |text: &str| JiraSite::from_address(text).map(|site| site.to_string());
+    assert_eq!(
+        site(" Acme.Atlassian.net ").as_deref(),
+        Some("acme.atlassian.net")
+    );
+    assert_eq!(
+        site("https://acme.atlassian.net/browse/PROJ-7?focus=1").as_deref(),
+        Some("acme.atlassian.net")
+    );
+    assert_eq!(
+        site("http://jira.example.org/").as_deref(),
+        Some("jira.example.org")
+    );
+    assert_eq!(site("jira"), None);
+    assert_eq!(site("https://"), None);
+    assert!(
+        JiraSite::from_address("acme.atlassian.net")
+            .unwrap()
+            .is_cloud()
+    );
+    assert!(
+        !JiraSite::from_address("atlassian.net.example.org")
+            .unwrap()
+            .is_cloud()
+    );
 }

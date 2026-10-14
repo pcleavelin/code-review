@@ -366,6 +366,11 @@ case "$url" in
 */rest/api/2/attachment/content/*)
   case "$config" in *"Authorization: Basic "*) cat "{api}/jira-picture.png"; printf '\n'; exit 0;; esac
   exit 22;;
+*/rest/api/2/myself)
+  case "$config" in
+  *"Authorization: Basic $(printf %s "$(cat "{api}/jira-login" 2>/dev/null)" | base64)\""*) printf '{{"displayName":"Ann Smith"}}'; status=200;;
+  *) status=401;;
+  esac;;
 */rest/api/2/issue/*)
   key=${{url#*/rest/api/2/issue/}}; key=${{key%%\?*}}
   case "$config" in
@@ -548,6 +553,7 @@ fn serve(home: PathBuf) -> Fixture {
             ("poll-2.status", "400"),
             ("poll-granted.json", GRANTED),
             ("poll-granted.status", "200"),
+            ("jira-login", "ann@acme.test:jtoken"),
         ],
     );
     Fixture { local, tools, home }

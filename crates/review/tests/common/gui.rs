@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_card, across, steady_scroll }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll }
     };
 }
 
@@ -37,6 +37,7 @@ struct Setup {
 const OPEN: &str = "idle\nclick-id pull/0\nidle\nwait 2\n";
 const STALL: &str = "STALL\n";
 const CARD: &str = "CARD\n";
+const NOJIRA: &str = "NOJIRA\n";
 const JIRA_PICTURE: [u8; 70] = [
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
     0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 248, 207, 80, 15, 0, 3,
@@ -108,10 +109,12 @@ pub(crate) fn play_at_scale(binary: &Path, name: &str, scale: &ScaleScenario) ->
 fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> String {
     let stalled = scenario.script.starts_with(STALL);
     let carded = scenario.script.starts_with(CARD);
+    let unlinked = scenario.script.starts_with(NOJIRA);
     let script = scenario
         .script
         .trim_start_matches(STALL)
         .trim_start_matches(CARD)
+        .trim_start_matches(NOJIRA)
         .replace("OPEN\n", OPEN);
     let mut lines: Vec<String> = script.lines().map(str::to_owned).collect();
     for line_index in 0..lines.len() {
@@ -127,7 +130,15 @@ fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> Strin
             let step = format!("the script up to line {}, to find {prefix}", line_index + 1);
             let err = play_script(
                 binary,
-                &staged(run, name, stalled, carded),
+                &staged(
+                    run,
+                    name,
+                    &Staging {
+                        stalled,
+                        carded,
+                        unlinked,
+                    },
+                ),
                 &Deadline {
                     scenario: name,
                     step: &step,
@@ -156,7 +167,15 @@ fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> Strin
     }
     play_script(
         binary,
-        &staged(run, name, stalled, carded),
+        &staged(
+            run,
+            name,
+            &Staging {
+                stalled,
+                carded,
+                unlinked,
+            },
+        ),
         &Deadline {
             scenario: name,
             step: "the script",
@@ -166,12 +185,25 @@ fn play_on(binary: &Path, name: &str, scenario: &Scenario, run: &Setup) -> Strin
     )
 }
 
-fn staged(run: &Setup, name: &str, stalled: bool, carded: bool) -> Fixture {
+struct Staging {
+    stalled: bool,
+    carded: bool,
+    unlinked: bool,
+}
+
+fn staged(run: &Setup, name: &str, staging: &Staging) -> Fixture {
     let staged = (run.fixture)(name);
-    if stalled {
+    if staging.unlinked {
+        fs::write(
+            staged.home.join("forges"),
+            "review forges 1\nclient gitlab.test cid123\n",
+        )
+        .unwrap();
+    }
+    if staging.stalled {
         fs::write(staged.home.join("keychain.stall"), "").unwrap();
     }
-    if carded {
+    if staging.carded {
         let api = staged.home.join("api");
         for pulls in ["pulls.json", "pulls-1.json"] {
             let text = fs::read_to_string(api.join(pulls)).unwrap();
@@ -850,9 +882,19 @@ dump
 click-id login@jira.test
 wait 2
 dump
-shot {shots}/paste.png
-text ann@acme.test:jtoken
+shot {shots}/form.png
+text ann@acme.test
 key enter
+text wrong
+key enter
+idle
+wait 2
+dump
+shot {shots}/refused.png
+key a ctrl
+text jtoken
+key enter
+idle
 wait 2
 dump
 mouse 10 500
@@ -863,11 +905,42 @@ dump
 quit
 ",
         shows: &[
-            "DUMP jira sites=[jira.test=out] pasting=None",
-            "DUMP jira sites=[jira.test=out] pasting=Some(jira.test)",
-            "DUMP jira sites=[jira.test=in] pasting=None",
-            "status=\"logged in to Jira on jira.test; the token is in the system keychain\"",
+            "DUMP jira sites=[jira.test=out] form=none",
+            "DUMP jira sites=[jira.test=out] form=editing",
+            "DUMP field focused=Some(field@jira-email)",
+            "DUMP jira sites=[jira.test=out] form=refused \"jira.test refused the email and token",
+            "DUMP jira sites=[jira.test=in as \"Ann Smith\"] form=none",
+            "status=\"logged in to Jira on jira.test as Ann Smith; the token is in the system keychain\"",
             "status=\"logged out of Jira on jira.test; its token is gone from the keychain\"",
+        ],
+    }
+}
+
+pub(crate) fn jira_first_login() -> Scenario {
+    Scenario {
+        script: "NOJIRA
+idle
+wait 2
+dump
+click-id jira-login
+wait 2
+dump
+text https://jira.test/browse/PROJ-7
+key enter
+text ann@acme.test
+key enter
+text jtoken
+key enter
+idle
+wait 2
+dump
+shot {shots}/logged-in.png
+quit
+",
+        shows: &[
+            "DUMP jira sites=[] form=none",
+            "DUMP field focused=Some(field@jira-site)",
+            "DUMP jira sites=[jira.test=in as \"Ann Smith\"] form=none",
         ],
     }
 }

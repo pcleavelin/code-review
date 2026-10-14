@@ -77,6 +77,8 @@ pub(crate) enum Which {
     Inbox,
     Pin,
     Token,
+    JiraSite,
+    JiraEmail,
     Column(InboxColumn),
 }
 
@@ -100,6 +102,8 @@ impl Which {
             Self::Inbox => ids::INBOX_FIELD,
             Self::Pin => ids::PIN_FIELD,
             Self::Token => ids::TOKEN_FIELD,
+            Self::JiraSite => ids::JIRA_SITE_FIELD,
+            Self::JiraEmail => ids::JIRA_EMAIL_FIELD,
             Self::Column(_) => ids::COLUMN_FIELD,
         }
     }
@@ -115,6 +119,8 @@ impl Which {
             | Self::Inbox
             | Self::Pin
             | Self::Token
+            | Self::JiraSite
+            | Self::JiraEmail
             | Self::Column(_) => FieldShape::Single,
         }
     }
@@ -131,6 +137,8 @@ impl Which {
             | Self::Summary
             | Self::Inbox
             | Self::Pin
+            | Self::JiraSite
+            | Self::JiraEmail
             | Self::Column(_) => Shown::Clear,
         }
     }
@@ -779,6 +787,8 @@ pub(crate) struct Fields {
     inbox: Field,
     pin: Field,
     token: Field,
+    jira_site: Field,
+    jira_email: Field,
     columns: [Field; InboxColumn::VARIANTS.len()],
     focused: Option<Holding>,
 }
@@ -811,6 +821,8 @@ impl Fields {
             Which::Inbox => &self.inbox,
             Which::Pin => &self.pin,
             Which::Token => &self.token,
+            Which::JiraSite => &self.jira_site,
+            Which::JiraEmail => &self.jira_email,
             Which::Column(column) => self
                 .columns
                 .get(column_at(column).get())
@@ -830,6 +842,8 @@ impl Fields {
             Which::Inbox => &mut self.inbox,
             Which::Pin => &mut self.pin,
             Which::Token => &mut self.token,
+            Which::JiraSite => &mut self.jira_site,
+            Which::JiraEmail => &mut self.jira_email,
             Which::Column(column) => match self.columns.get_mut(column_at(column).get()) {
                 Some(field) => field,
                 None => &mut self.inbox,

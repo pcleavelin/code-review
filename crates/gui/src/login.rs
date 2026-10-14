@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use domain::{ForgeHost, JiraSite, Token, UserCode, WebLink};
+use domain::{CardField, ForgeHost, JiraSite, Token, UserCode, WebLink};
 use io_forge::ForgeError;
 use io_process::{Argument, Opener};
 use platform::ClipboardRequest;
@@ -54,7 +54,20 @@ pub(crate) struct Logins {
     asked: BTreeSet<ForgeHost>,
     pub(crate) login: Option<Login>,
     pub(crate) jira: BTreeMap<JiraSite, Held>,
-    pub(crate) jira_paste: Option<JiraSite>,
+    pub(crate) jira_form: Option<JiraForm>,
+    pub(crate) jira_names: BTreeMap<JiraSite, CardField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum JiraForm {
+    Editing,
+    Checking(JiraSite),
+    Refused(Label),
+}
+
+pub(crate) struct JiraLanded {
+    site: JiraSite,
+    result: Result<CardField, Label>,
 }
 
 pub(crate) struct Holdings {
@@ -139,7 +152,7 @@ pub(crate) enum LoginAct {
     Cancel,
     Save,
     Logout(ForgeHost),
-    StartJira(JiraSite),
+    StartJira(Option<JiraSite>),
     LogoutJira(JiraSite),
 }
 
@@ -156,8 +169,10 @@ pub(crate) enum LoginStatus {
     Out(ForgeHost, Forgotten),
     Cancelled(ForgeHost),
     Failed(ForgeHost, Label),
-    JiraPaste(JiraSite),
-    JiraIn(JiraSite),
+    JiraForm,
+    NoJiraSite,
+    JiraChecking(JiraSite),
+    JiraIn(JiraSite, CardField),
     JiraOut(JiraSite, Forgotten),
     JiraFailed(JiraSite, Label),
 }
@@ -165,15 +180,17 @@ pub(crate) enum LoginStatus {
 impl LoginStatus {
     pub(crate) const fn tone(&self) -> Tone {
         match self {
-            Self::Waiting(_) | Self::Paste(_) | Self::JiraPaste(_) => Tone::Plain,
+            Self::Waiting(_) | Self::Paste(_) | Self::JiraForm | Self::JiraChecking(_) => {
+                Tone::Plain
+            }
             Self::CodeCopied(_)
             | Self::PageOpened(_)
             | Self::In(_)
             | Self::Listed(..)
             | Self::Out(..)
-            | Self::JiraIn(_)
+            | Self::JiraIn(..)
             | Self::JiraOut(..) => Tone::Done,
-            Self::NoToken | Self::Cancelled(_) => Tone::Warning,
+            Self::NoToken | Self::NoJiraSite | Self::Cancelled(_) => Tone::Warning,
             Self::PageFailed(_) | Self::Failed(..) | Self::JiraFailed(..) => Tone::Problem,
         }
     }
@@ -222,13 +239,17 @@ impl fmt::Display for LoginStatus {
                     why.as_str()
                 )
             }
-            Self::JiraPaste(site) => write!(
-                formatter,
-                "logging in to Jira on {site}: paste email:api-token in the Inbox and press enter"
+            Self::JiraForm => formatter.write_str(
+                "logging in to Jira: its site, your email and an API token, then log in",
             ),
-            Self::JiraIn(site) => write!(
+            Self::NoJiraSite => formatter
+                .write_str("type the Jira site's address first, such as yourcompany.atlassian.net"),
+            Self::JiraChecking(site) => {
+                write!(formatter, "asking {site} who the token belongs to...")
+            }
+            Self::JiraIn(site, name) => write!(
                 formatter,
-                "logged in to Jira on {site}; the token is in the system keychain"
+                "logged in to Jira on {site} as {name}; the token is in the system keychain"
             ),
             Self::JiraOut(site, Forgotten::Removed) => write!(
                 formatter,
@@ -247,59 +268,112 @@ impl App {
     }
 
     pub(crate) fn login(&mut self, act: LoginAct) {
+        let in_form = self.model.review.logins.jira_form.is_some();
         match act {
             LoginAct::Start(site) => self.start_login(&site),
             LoginAct::CopyCode => self.copy_code(),
-            LoginAct::OpenPage if self.model.review.logins.jira_paste.is_some() => {
-                self.open_page(JIRA_TOKENS);
-            }
+            LoginAct::OpenPage if in_form => self.open_page(JIRA_TOKENS),
             LoginAct::OpenPage => self.open_login_page(),
-            LoginAct::Cancel if self.model.review.logins.jira_paste.is_some() => {
-                self.end_jira_paste();
-            }
+            LoginAct::Cancel if in_form => self.end_jira_form(),
             LoginAct::Cancel => self.cancel_login(),
-            LoginAct::Save if self.model.review.logins.jira_paste.is_some() => {
-                self.save_jira_token();
-            }
+            LoginAct::Save if in_form => self.login_jira(),
             LoginAct::Save => self.save_token(),
             LoginAct::Logout(site) => self.logout(&site),
-            LoginAct::StartJira(site) => self.start_jira(site),
+            LoginAct::StartJira(site) => self.start_jira(site.as_ref()),
             LoginAct::LogoutJira(site) => self.logout_jira(&site),
         }
     }
 
-    fn start_jira(&mut self, site: JiraSite) {
+    fn start_jira(&mut self, site: Option<&JiraSite>) {
         self.stop_login();
-        self.model.review.logins.jira_paste = Some(site.clone());
-        self.model.fields.start_empty(Which::Token);
-        self.model.fields.focus(Which::Token);
+        self.model.review.logins.jira_form = Some(JiraForm::Editing);
+        let fields = &mut self.model.fields;
+        fields.start_empty(Which::Token);
+        fields.start_empty(Which::JiraEmail);
+        match site {
+            Some(site) => {
+                fields.start_with(Which::JiraSite, &Label::new(site.to_string()));
+                fields.focus(Which::JiraEmail);
+            }
+            None => fields.start_empty(Which::JiraSite),
+        }
         self.model.set_tab(Tab::Inbox);
-        self.say_login(LoginStatus::JiraPaste(site));
+        self.say_login(LoginStatus::JiraForm);
     }
 
-    fn end_jira_paste(&mut self) {
-        self.model.review.logins.jira_paste = None;
-        self.model.fields.start_empty(Which::Token);
-        self.model.fields.release(Which::Token);
+    fn end_jira_form(&mut self) {
+        self.model.review.logins.jira_form = None;
+        for which in [Which::JiraSite, Which::JiraEmail, Which::Token] {
+            self.model.fields.start_empty(which);
+            self.model.fields.release(which);
+        }
     }
 
-    fn save_jira_token(&mut self) {
-        let Some(site) = self.model.review.logins.jira_paste.clone() else {
+    fn login_jira(&mut self) {
+        if matches!(
+            self.model.review.logins.jira_form,
+            Some(JiraForm::Checking(_))
+        ) {
+            return;
+        }
+        let fields = &self.model.fields;
+        let Some(site) = JiraSite::from_address(fields.get(Which::JiraSite).text().as_str()) else {
+            self.say_login(LoginStatus::NoJiraSite);
+            self.model.fields.focus(Which::JiraSite);
             return;
         };
-        let Some(token) = Token::new(self.model.fields.get(Which::Token).text().as_str()) else {
+        let email = fields
+            .get(Which::JiraEmail)
+            .text()
+            .as_str()
+            .trim()
+            .to_owned();
+        let secret = fields.get(Which::Token).text().as_str().trim().to_owned();
+        let joined = if email.is_empty() {
+            secret.clone()
+        } else {
+            format!("{email}:{secret}")
+        };
+        let Some(token) = Token::new(&joined).filter(|_| !secret.is_empty()) else {
             self.say_login(LoginStatus::NoToken);
+            self.model.fields.focus(Which::Token);
             return;
         };
-        match self.model.review.desk.access().keep_jira(&site, token) {
-            Ok(()) => {
-                self.end_jira_paste();
-                self.model.review.logins.jira.insert(site.clone(), Held::In);
-                self.say_login(LoginStatus::JiraIn(site));
+        self.model.review.logins.jira_form = Some(JiraForm::Checking(site.clone()));
+        self.say_login(LoginStatus::JiraChecking(site.clone()));
+        let access = self.model.review.desk.access().clone();
+        self.jobs.jira = Some(Job::start(move || JiraLanded {
+            result: access
+                .login_jira(&site, token)
+                .map_err(|error| Label::new(error.to_string())),
+            site,
+        }));
+    }
+
+    pub(crate) fn poll_jira(&mut self) {
+        let landed_login = match landed(&mut self.jobs.jira) {
+            Landing::Waiting => return,
+            Landing::Landed(landed_login) => landed_login,
+            Landing::Failed => {
+                self.model.review.logins.jira_form = Some(JiraForm::Refused(Label::new(
+                    "the thread asking Jira stopped; try again",
+                )));
+                return;
+            }
+        };
+        let JiraLanded { site, result } = landed_login;
+        match result {
+            Ok(name) => {
+                self.end_jira_form();
+                let logins = &mut self.model.review.logins;
+                logins.jira.insert(site.clone(), Held::In);
+                logins.jira_names.insert(site.clone(), name.clone());
+                self.say_login(LoginStatus::JiraIn(site, name));
                 self.ask_card();
             }
-            Err(error) => {
-                self.say_login(LoginStatus::JiraFailed(site, Label::new(error.to_string())));
+            Err(why) => {
+                self.model.review.logins.jira_form = Some(JiraForm::Refused(why.clone()));
+                self.say_login(LoginStatus::JiraFailed(site, why));
             }
         }
     }
@@ -342,7 +416,7 @@ impl App {
 
     pub(crate) fn carry_login(&mut self, started: StartedLogin, browser: Browser) {
         self.stop_login();
-        self.model.review.logins.jira_paste = None;
+        self.model.review.logins.jira_form = None;
         let access = self.model.review.desk.access().clone();
         let logins = &mut self.model.review.logins;
         let site = match started {

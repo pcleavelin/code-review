@@ -240,6 +240,8 @@ impl App {
             Which::Inbox,
             Which::Pin,
             Which::Token,
+            Which::JiraSite,
+            Which::JiraEmail,
         ]
         .into_iter()
         .chain(InboxColumn::VARIANTS.iter().copied().map(Which::Column))

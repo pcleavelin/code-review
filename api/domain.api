@@ -242,6 +242,8 @@ review::card::pub fn of_pull(pull: &PullRequest) -> Option<Self>
 review::card::pub fn as_str(&self) -> &str
 review::card::pub struct JiraSite(Host);
 review::card::pub const fn new(host: Host) -> Self
+review::card::pub fn from_address(text: &str) -> Option<Self>
+review::card::pub fn is_cloud(&self) -> bool
 review::card::pub const fn host(&self) -> &Host
 review::card::pub fn card_link(&self, key: &CardKey) -> Option<WebLink>
 review::card::pub fn serves(&self, link: &WebLink) -> bool

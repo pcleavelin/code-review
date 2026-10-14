@@ -117,10 +117,18 @@ fn an_email_and_token_log_in_as_basic_and_a_lone_token_as_a_bearer() {
     );
     assert_eq!(wire::authorization("a:"), "Authorization: Basic YTo=");
     assert_eq!(wire::authorization("ab:"), "Authorization: Basic YWI6");
-    let basic = wire::config("acme.atlassian.net", "PROJ-1", "ann@acme.com:abc\"def");
+    let basic = wire::config(
+        "acme.atlassian.net",
+        wire::issue_path("PROJ-1").as_str(),
+        "ann@acme.com:abc\"def",
+    );
     assert!(basic.contains("url = \"https://acme.atlassian.net/rest/api/2/issue/PROJ-1?fields="));
     assert!(basic.contains("header = \"Authorization: Basic YW5uQGFjbWUuY29tOmFiYyJkZWY=\"\n"));
-    let bearer = wire::config("jira.example.org", "PROJ-1", "pat123");
+    let bearer = wire::config(
+        "jira.example.org",
+        wire::issue_path("PROJ-1").as_str(),
+        "pat123",
+    );
     assert!(bearer.contains("header = \"Authorization: Bearer pat123\"\n"));
 }
 
@@ -139,4 +147,18 @@ fn the_status_is_read_from_the_last_line_curl_writes() {
     assert_eq!(response.status, HttpStatus::new(404));
     assert_eq!(response.body, "{\"a\":\n1}");
     assert!(wire::parse_response("no status").is_none());
+}
+
+#[test]
+fn the_login_check_reads_the_display_name() {
+    assert_eq!(
+        wire::parse_name(r#"{"accountId":"5570","displayName":"Ann Smith","active":true}"#)
+            .as_deref(),
+        Some("Ann Smith")
+    );
+    assert!(wire::parse_name(r#"{"errorMessages":[]}"#).is_none());
+    assert!(
+        wire::config("acme.atlassian.net", wire::myself_path().as_str(), "a:b")
+            .contains("/rest/api/2/myself\"")
+    );
 }

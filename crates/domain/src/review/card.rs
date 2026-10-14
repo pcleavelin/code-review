@@ -1,6 +1,6 @@
 use std::fmt;
 
-use super::{Host, Prose, PullRequest, WebLink};
+use super::{Host, Prose, PullRequest, Spelling, WebLink};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CardKey(String);
@@ -68,12 +68,47 @@ impl fmt::Display for CardKey {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SiteMark {
+    Secure,
+    Plain,
+    Cloud,
+}
+
+impl SiteMark {
+    const fn spelling(self) -> Spelling {
+        Spelling::new(match self {
+            Self::Secure => "https://",
+            Self::Plain => "http://",
+            Self::Cloud => ".atlassian.net",
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct JiraSite(Host);
 
 impl JiraSite {
     pub const fn new(host: Host) -> Self {
         Self(host)
+    }
+
+    pub fn from_address(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let bare = [SiteMark::Secure, SiteMark::Plain]
+            .into_iter()
+            .find_map(|mark| text.strip_prefix(mark.spelling().as_str()))
+            .unwrap_or(text);
+        let host = bare.split(['/', '?', '#']).next()?;
+        Host::new(host)
+            .filter(|host| host.as_str().contains('.'))
+            .map(Self)
+    }
+
+    pub fn is_cloud(&self) -> bool {
+        self.0
+            .as_str()
+            .ends_with(SiteMark::Cloud.spelling().as_str())
     }
 
     pub const fn host(&self) -> &Host {
