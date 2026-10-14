@@ -889,11 +889,18 @@ click-id draft-add
 wait 3
 dump
 shot {shots}/range.png
+tab review
+wait 2
+scroll review 5000
+wait 2
+rect snippet@draft/1
+shot {shots}/range-snippet.png
 quit
 ",
         shows: &[
             "file=Some(\"src/lib.rs\") gone=None sel=Some((6, 8))",
             "DUMP draft 1 src/lib.rs:7-9 New reply=None \"shift selected\"",
+            "DUMP rect snippet@draft/1 = Some(Rect { x: 361, y: 666, w: 906, h: 88 })",
         ],
     }
 }

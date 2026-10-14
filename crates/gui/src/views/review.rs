@@ -47,6 +47,14 @@ pub(super) fn kind_word(kind: ChangeKind) -> Label {
     })
 }
 
+fn span_numbers(lines: Span) -> Label {
+    Label::new(if lines.start() == lines.end() {
+        lines.end().number().to_string()
+    } else {
+        format!("{}-{}", lines.start().number(), lines.end().number())
+    })
+}
+
 pub(super) fn lines_word(lines: Span) -> Label {
     Label::new(if lines.start() == lines.end() {
         format!("line {}", lines.end().number())
@@ -541,7 +549,7 @@ fn place_row(model: &Model, frame: &mut Frame<'_>, talk: &Conversation, thread: 
         format!(
             "{}:{}{}",
             place.file,
-            place.line.number(),
+            span_numbers(place.lines()).as_str(),
             side_word(place.side).as_str()
         ),
         if outdated { WEAK } else { ACCENT },
@@ -557,13 +565,19 @@ fn place_row(model: &Model, frame: &mut Frame<'_>, talk: &Conversation, thread: 
         frame.attach_tip(target);
         frame.label_runs(vec![state]);
         frame.finish();
-        snippet(model, frame, thread, place);
+        snippet(model, frame, &Label::new(thread.id.as_str()), place);
     }
 }
 
 const SNIPPET_ABOVE: Count = Count::new(2);
 
-fn snippet_grid(model: &Model, place: &CodePlace) -> Option<Grid> {
+struct Snippet {
+    grids: Vec<Grid>,
+    marked: Count,
+}
+
+fn snippet_of(model: &Model, place: &CodePlace) -> Option<Snippet> {
+    let lines = place.lines();
     match place.side {
         Side::New => {
             let source = model
@@ -571,51 +585,67 @@ fn snippet_grid(model: &Model, place: &CodePlace) -> Option<Grid> {
                 .find_file(&place.file)
                 .and_then(|file| model.index.file(file))?;
             let last = source.text().count().last()?;
-            let span = Span::new(
-                Line::new(
-                    place
-                        .line
-                        .value()
-                        .saturating_sub(u32::try_from(SNIPPET_ABOVE.get()).unwrap_or(0)),
-                ),
-                place.line.min(last),
-            )?;
-            Some(grid::build(source, span, Gutter::Numbered))
+            let first = lines
+                .start()
+                .value()
+                .saturating_sub(u32::try_from(SNIPPET_ABOVE.get()).unwrap_or(0));
+            let span = Span::new(Line::new(first), place.line.min(last))?;
+            let marked = lines.start().value() - first;
+            Some(Snippet {
+                grids: vec![grid::build(source, span, Gutter::Numbered)],
+                marked: Count::new(usize::try_from(marked).unwrap_or(0)),
+            })
         }
         Side::Old => {
             let change = model.review.change(&place.file)?;
-            change
+            let grids: Vec<Grid> = change
                 .removals()
                 .iter()
                 .flat_map(|removal| removal.lines.iter())
-                .find(|removed| removed.old == place.line)
+                .filter(|removed| lines.contains(removed.old))
                 .map(|removed| grid::removed(removed.old, removed.text, None))
+                .collect();
+            (!grids.is_empty()).then_some(Snippet {
+                grids,
+                marked: Count::ZERO,
+            })
         }
     }
 }
 
-fn snippet(model: &Model, frame: &mut Frame<'_>, thread: &Thread, place: &CodePlace) {
-    let Some(grid) = snippet_grid(model, place) else {
+fn snippet(model: &Model, frame: &mut Frame<'_>, key: &Label, place: &CodePlace) {
+    let Some(snippet) = snippet_of(model, place) else {
         return;
     };
-    let grid = Rc::new(grid);
+    let grids: Vec<Rc<Grid>> = snippet.grids.into_iter().map(Rc::new).collect();
     let row = frame.row_height();
     let font = frame.metrics.font;
     let pad = frame.cell_width() / 2;
-    let rows = grid.rows();
-    let marked = row * Count::new(rows.get().saturating_sub(1));
+    let rows = grids
+        .iter()
+        .fold(Count::ZERO, |rows, grid| rows + grid.rows());
+    let marked = snippet.marked;
     let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
         canvas.rect(rect, FIELD);
         canvas.rect(
-            Rect::new(rect.left, rect.top + pad + marked, rect.width, row),
+            Rect::new(
+                rect.left,
+                rect.top + pad + row * marked,
+                rect.width,
+                row * Count::new(rows.get().saturating_sub(marked.get())),
+            ),
             LINES_SELECTED,
         );
-        canvas.grid(Point::new(rect.left + pad, rect.top + pad), font, &grid);
+        let mut top = rect.top + pad;
+        for grid in &grids {
+            canvas.grid(Point::new(rect.left + pad, top), font, grid);
+            top += row * grid.rows();
+        }
     };
     frame.custom_block(
         Box::new(draw),
         row * rows + pad * 2,
-        ids::snippet().with(thread.id.as_str()),
+        ids::snippet().with(key.as_str()),
     );
 }
 
@@ -950,15 +980,24 @@ fn your_review(model: &Model, frame: &mut Frame<'_>, open: &OpenReview) {
             None,
             Some(RowAction::new("remove", remove)),
         );
+        let place = CodePlace {
+            file: draft.file.clone(),
+            side: draft.side,
+            start: draft.start,
+            line: draft.line,
+        };
         if clicks.acted() {
             frame.push(Action::Review(ReviewAct::RemoveDraft(draft.id)));
         } else if clicks.row.clicked() {
-            frame.push(Action::Review(ReviewAct::OpenPlace(domain::CodePlace {
-                file: draft.file.clone(),
-                side: draft.side,
-                start: draft.start,
-                line: draft.line,
-            })));
+            frame.push(Action::Review(ReviewAct::OpenPlace(place.clone())));
+        }
+        if draft.reply.is_none() {
+            snippet(
+                model,
+                frame,
+                &Label::new(format!("draft/{}", draft.id)),
+                &place,
+            );
         }
     }
     frame.field(
