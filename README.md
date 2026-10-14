@@ -9,7 +9,7 @@ ability to sort and filter.
 
 The PR overview is as you'd expect from GitHub, but also has optional Jira integration
 to view the ticket associated with the PR (so long as the ticket number is in the title
-or description).
+or branch name).
 ![Review tab](docs/screenshots/review.png)
 
 The Source view contains all the changes for each file together with typical LSP actions,
@@ -22,9 +22,7 @@ The command palette can be used to navigate to files, symbols, or pull requests.
 ## Using it
 
 ```
-cargo build --release
-target/release/review              # the window
-target/release/review help         # the same commands in the terminal
+cargo run --release
 ```
 
 It needs `git` and `curl` on your PATH. LSP integration covers Rust, C, Python,
