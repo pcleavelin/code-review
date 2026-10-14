@@ -267,6 +267,30 @@ pub(crate) const JIRA_TOKENS: Control = Control::new(
     Element::new("jira-tokens"),
     Words::new("open Atlassian's page that makes API tokens"),
 );
+pub(crate) const VIEWER_OUT: Control = Control::new(
+    Element::new("viewer-out"),
+    Words::new("zoom out (-); pinch or ctrl+wheel zoom where the pointer is"),
+);
+pub(crate) const VIEWER_FIT: Control = Control::new(
+    Element::new("viewer-fit"),
+    Words::new("fit the picture in the window (0)"),
+);
+pub(crate) const VIEWER_ACTUAL: Control = Control::new(
+    Element::new("viewer-actual"),
+    Words::new("show the picture at its own size, one pixel to a pixel (1)"),
+);
+pub(crate) const VIEWER_IN: Control = Control::new(
+    Element::new("viewer-in"),
+    Words::new("zoom in (+); drag or scroll to move around"),
+);
+pub(crate) const VIEWER_BROWSER: Control = Control::new(
+    Element::new("viewer-browser"),
+    Words::new("open the picture in the browser"),
+);
+pub(crate) const VIEWER_CLOSE: Control = Control::new(
+    Element::new("viewer-close"),
+    Words::new("close the picture (escape)"),
+);
 pub(crate) const CHANGE_ROW: Control = Control::new(
     Element::new("change"),
     Words::new("show this changed file at its first change"),
@@ -349,7 +373,7 @@ pub(crate) const MD_CODE: Control = Control::new(
 );
 pub(crate) const PICTURE: Control = Control::new(
     Element::new("picture"),
-    Words::new("open the picture in the browser"),
+    Words::new("open the picture to zoom in and move around it"),
 );
 pub(crate) const FOLD: Control = Control::new(
     Element::new("fold"),
@@ -536,6 +560,12 @@ pub(crate) const CONTROLS: &[Control] = &[
     JIRA_EMAIL_FIELD,
     JIRA_LOGIN,
     JIRA_TOKENS,
+    VIEWER_OUT,
+    VIEWER_FIT,
+    VIEWER_ACTUAL,
+    VIEWER_IN,
+    VIEWER_BROWSER,
+    VIEWER_CLOSE,
     CHANGE_ROW,
     SEEN,
     NEXT_UNSEEN,
@@ -606,6 +636,14 @@ pub(crate) fn inbox() -> Id {
 
 pub(crate) fn thread_box() -> Id {
     Id::new("thread-box")
+}
+
+pub(crate) fn viewer() -> Id {
+    Id::new("viewer")
+}
+
+pub(crate) fn viewer_stage() -> Id {
+    Id::new("viewer-stage")
 }
 
 pub(crate) fn jira_form() -> Id {

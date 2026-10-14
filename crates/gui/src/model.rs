@@ -17,6 +17,7 @@ use crate::review::Reviewing;
 use crate::settings::SettingsMenu;
 use crate::status::{ConsoleLog, Status};
 use crate::theme;
+use crate::viewer::Viewer;
 use crate::work::WorkState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, VariantArray)]
@@ -161,6 +162,7 @@ pub(crate) struct Model {
     pub(crate) settings: Settings,
     pub(crate) fonts: Option<Fonts>,
     pub(crate) settings_menu: Option<SettingsMenu>,
+    pub(crate) viewer: Option<Viewer>,
 }
 
 impl Model {
@@ -202,6 +204,7 @@ impl Model {
             settings: Settings::default(),
             fonts: None,
             settings_menu: None,
+            viewer: None,
         }
     }
 }

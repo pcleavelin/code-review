@@ -19,6 +19,7 @@ use crate::peek::{Peek, Probe, Queries};
 use crate::review::{Inbox, Requests, Reviewing, Talk};
 use crate::settings::{SettingsMenu, ShownFont, ThemeName};
 use crate::status::Status;
+use crate::viewer::{Fitting, Viewer};
 use crate::work::{Services, WorkState};
 
 #[derive(Default)]
@@ -588,6 +589,36 @@ impl Dump for Option<SettingsMenu> {
             ThemeName::new(settings.theme()),
             ShownFont::new(settings),
             settings.size().get()
+        ));
+    }
+}
+
+impl Dump for Option<Viewer> {
+    fn dump(&self, context: &Context<'_>, lines: &mut DumpLines) {
+        let Some(viewer) = self else {
+            return;
+        };
+        let zoom = match viewer.fitting {
+            Fitting::Fit => "fit".to_owned(),
+            Fitting::Zoomed(zoom) => format!("{}%", zoom.percent()),
+        };
+        let placed = context
+            .model
+            .review
+            .pictures
+            .get(&viewer.link)
+            .and_then(|loading| match loading {
+                Loading::Got(animation) => Some(animation.size()),
+                Loading::Asking | Loading::Failed(_) => None,
+            })
+            .zip(context.ui.placement(ids::viewer_stage()))
+            .map(|(size, stage)| format!("{:?}", viewer.placed(size, stage.rect)));
+        lines.line(format_args!(
+            "viewer {} zoom={zoom} pan=({}, {}) drawn={}",
+            viewer.link.as_str(),
+            viewer.pan.horizontal,
+            viewer.pan.vertical,
+            Optional(placed)
         ));
     }
 }

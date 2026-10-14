@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use platform::Cursor;
 use ui::{
-    Align, Button, Canvas, Color, Count, Draw, FontSize, Grid, Icon, Id, Interaction, Kind, Label,
-    Layout, Point, Px, Rect, Run, ScrollAxes, Scrollbar, Sides, Size, Style, Text, Ui, Wrap,
+    Align, Button, Canvas, Color, Count, Draw, Extent, FontSize, Grid, Icon, Id, Interaction, Kind,
+    Label, Layout, Point, Px, Rect, Run, ScrollAxes, Scrollbar, Sides, Size, Style, Text, Ui, Wrap,
 };
 
 use crate::action::Action;
@@ -29,7 +29,7 @@ use crate::theme::{
     NOTE_ROWS_MOST, ORANGE, PALETTE_TAG, PANEL, PANEL_PADDING, PIXEL, REMOVED_FILL, RESOLVED_FILL,
     ROW_PADDING, SELECTED, SMALL_BUTTON_EXTRA, SMALL_BUTTON_PADDING, SMALL_GAP, STATUS_GAP,
     TAB_PADDING, TAB_STRIP, TEXT, THREAD_FILL, TIGHT_GAP, TOOLTIP_PADDING, TREE_GUIDE,
-    TREE_LEVEL_WIDTH, WEAK, WIDE_GAP,
+    TREE_LEVEL_WIDTH, VIEWER_SHADE, WEAK, WIDE_GAP,
 };
 
 use crate::field::Fields;
@@ -146,6 +146,7 @@ pub(crate) enum Container {
     Comment { look: CommentLook, id: Id },
     Card(Id),
     CardBody,
+    Viewer { size: Extent },
     Slot { id: Id, height: Px },
     CommentRow(Id),
     Removed(Id),
@@ -325,6 +326,16 @@ impl Container {
                 Some(id),
             ),
             Self::Card(_) | Self::CardBody | Self::Slot { .. } => self.block_shape(),
+            Self::Viewer { size } => Shape::new(
+                Layout::column()
+                    .floating(Point::new(Px::ZERO, Px::ZERO))
+                    .width(size.width)
+                    .height(size.height)
+                    .padding(PANEL_PADDING)
+                    .gap(SMALL_GAP),
+                Style::background(VIEWER_SHADE),
+                Some(ids::viewer()),
+            ),
             Self::Folded => Shape::new(
                 Layout::row().grow_width(),
                 Style::background(FOLD_FILL),
@@ -537,6 +548,15 @@ impl Frame<'_> {
         self.ui.leaf(
             Kind::Custom(draw),
             Layout::row().grow_width().height(height),
+            Style::NONE,
+            Some(id),
+        )
+    }
+
+    pub(crate) fn stage(&mut self, draw: Box<dyn Draw>, id: Id) -> Interaction {
+        self.ui.leaf(
+            Kind::Custom(draw),
+            Layout::row().grow(),
             Style::NONE,
             Some(id),
         )

@@ -19,6 +19,7 @@ use crate::theme::{
     ACCENT, BLOCK_GAP, BORDER, CODE_TEXT, EMPHASIS_TEXT, FIELD, LABEL_PADDING, MARKDOWN_GUESS,
     PICTURE_TALLEST, PIXEL, PROSE_COLUMNS, PROSE_LEADING, RED, STRONG_TEXT, TEXT, WEAK,
 };
+use crate::viewer::ViewerAct;
 use crate::widgets::{Container, Frame};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -627,7 +628,7 @@ impl Writer<'_> {
                     .custom_block(Box::new(draw), height, target.id())
                     .clicked()
                 {
-                    frame.push(Action::Review(ReviewAct::OpenLink(link.clone())));
+                    frame.push(Action::Viewer(ViewerAct::Open(link.clone())));
                 }
             }
         }

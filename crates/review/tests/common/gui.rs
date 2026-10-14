@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer }
     };
 }
 
@@ -870,6 +870,42 @@ quit
             "DUMP card PROJ-7 \"Square every input before the sum\" status=\"In Review\" InProgress kind=\"Story\" Story collapse=Open",
             "DUMP picture https://jira.test/rest/api/2/attachment/content/7 got",
             "DUMP card PROJ-7 \"Square every input before the sum\" status=\"In Review\" InProgress kind=\"Story\" Story collapse=Collapsed",
+        ],
+    }
+}
+
+pub(crate) fn picture_viewer() -> Scenario {
+    Scenario {
+        script: "CARD
+OPEN
+tab review
+idle
+wait 3
+idle
+wait 3
+click-id picture@card/10
+wait 2
+dump
+click-id viewer-in
+wait 2
+dump
+key 0
+wait 2
+dump
+drag 800 500 860 540
+wait 2
+dump
+shot {shots}/viewer.png
+key escape
+wait 2
+absent viewer
+dump
+quit
+",
+        shows: &[
+            "DUMP viewer https://jira.test/rest/api/2/attachment/content/7 zoom=fit pan=(0, 0)",
+            "DUMP viewer https://jira.test/rest/api/2/attachment/content/7 zoom=125% pan=(0, 0)",
+            "DUMP viewer https://jira.test/rest/api/2/attachment/content/7 zoom=fit pan=(60, 40)",
         ],
     }
 }

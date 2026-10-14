@@ -2,6 +2,7 @@ use ui::{Button, Coordinate, Glyph, Input, Interaction, Key, Label, Mods, Pointe
 
 use crate::field::{Edit, EnterMods, Motion, Unit, Which};
 use crate::review::ReviewAct;
+use crate::viewer::{Step, ViewerAct};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Chord {
@@ -283,6 +284,25 @@ pub(crate) fn palette_edits(input: &Input) -> Vec<Edit> {
                 edit,
                 Edit::Enter(_) | Edit::Escape | Edit::Move(Motion::Up | Motion::Down, _)
             )
+        })
+        .collect()
+}
+
+pub(crate) fn viewer_keys(input: &Input) -> Vec<ViewerAct> {
+    input
+        .keys
+        .iter()
+        .filter(|press| !press.mods.ctrl() && !press.mods.alt())
+        .filter_map(|press| match press.key {
+            Key::Escape => Some(ViewerAct::Close),
+            Key::Character(glyph) => match glyph.get() {
+                '+' | '=' => Some(ViewerAct::Step(Step::In, None)),
+                '-' => Some(ViewerAct::Step(Step::Out, None)),
+                '0' => Some(ViewerAct::Fit),
+                '1' => Some(ViewerAct::Actual),
+                _ => None,
+            },
+            _ => None,
         })
         .collect()
 }

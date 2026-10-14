@@ -209,6 +209,7 @@ pub(crate) const JIRA_FIELD: Cells = Cells::new(56);
 pub(crate) const FORM_LABEL: Cells = Cells::new(11);
 pub(crate) const FORGE_STATE: Cells = Cells::new(14);
 pub(crate) const THREAD_FILL: Color = ACCENT.with_alpha(18);
+pub(crate) const VIEWER_SHADE: Color = Color::rgba(8, 9, 11, 248);
 pub(crate) const CARD_FILL: Color = VIOLET.with_alpha(20);
 pub(crate) const CARD_EDGE: Color = VIOLET.with_alpha(110);
 pub(crate) const CARD_STRIPE: Px = Px::new(4);

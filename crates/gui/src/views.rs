@@ -12,6 +12,7 @@ mod settings;
 mod stack;
 mod table;
 mod tooltip;
+mod viewer;
 
 use crate::model::Model;
 use crate::widgets::{Container, Frame};
@@ -30,5 +31,6 @@ pub(crate) fn build(model: &Model, frame: &mut Frame<'_>) {
     panel_tree::picker(model, frame);
     palette::palette(model, frame);
     settings::settings(model, frame);
+    viewer::viewer(model, frame);
     tooltip::tooltip(model, frame);
 }

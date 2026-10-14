@@ -22,6 +22,7 @@ mod settings;
 mod status;
 mod text;
 mod theme;
+mod viewer;
 mod views;
 mod widgets;
 mod work;

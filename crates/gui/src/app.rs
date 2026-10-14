@@ -191,6 +191,12 @@ impl App {
     }
 
     pub(crate) fn keys(&mut self, input: &Input) {
+        if self.model.viewer.is_some() {
+            for act in keys::viewer_keys(input) {
+                self.apply(Action::Viewer(act));
+            }
+            return;
+        }
         if keys::settings_toggled(input) {
             self.apply(Action::Settings(SettingsAct::Toggle));
             return;
@@ -266,7 +272,7 @@ impl App {
             ui: &self.ui,
             services: &self.services,
         };
-        let parts: [&dyn Dump; 11] = [
+        let parts: [&dyn Dump; 12] = [
             &model.nav,
             &model.review,
             &model.review.logins,
@@ -278,6 +284,7 @@ impl App {
             &model.queries,
             &model.palette,
             &model.settings_menu,
+            &model.viewer,
         ];
         for part in parts {
             part.dump(&context, &mut lines);
@@ -308,11 +315,13 @@ impl platform::App for App {
         self.model.review.pictures.wake = None;
         self.keys(input);
         self.model.refresh_palette();
-        self.ui.capture(if self.model.settings_menu.is_some() {
-            Capture::Floating
-        } else {
-            Capture::Everything
-        });
+        self.ui.capture(
+            if self.model.settings_menu.is_some() || self.model.viewer.is_some() {
+                Capture::Floating
+            } else {
+                Capture::Everything
+            },
+        );
         keys::turn_wheel(&mut input.pointer);
         self.ui.begin(input);
         if self.ui.pointer().pressed.contains(Button::Left) {

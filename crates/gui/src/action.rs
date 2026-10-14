@@ -17,6 +17,7 @@ use crate::peek::{HoverStep, Intent, Peek, Probe, Probing, WantedDefinition};
 use crate::review::ReviewAct;
 use crate::settings::SettingsAct;
 use crate::status::Status;
+use crate::viewer::ViewerAct;
 use crate::work::Request;
 
 pub(crate) enum Action {
@@ -58,6 +59,7 @@ pub(crate) enum Action {
     Review(ReviewAct),
     Login(LoginAct),
     Grid(GridAct),
+    Viewer(ViewerAct),
 }
 
 impl App {
@@ -136,6 +138,7 @@ impl App {
             Action::Settings(act) => self.change_setting(act),
             Action::Review(act) => self.review(act),
             Action::Login(act) => self.login(act),
+            Action::Viewer(act) => self.viewer(act),
         }
     }
 
