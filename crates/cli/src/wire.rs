@@ -53,7 +53,7 @@ pub(crate) enum Command {
     #[command(about = "<pr>                             the description and every comment thread")]
     Discussion(PrArguments),
     #[command(
-        about = "<pr>                             the Jira card whose key (PROJ-123) the title or the head branch names; needs `jira <host>` in the forges file and `review login <host>`"
+        about = "<pr>                             the Jira card whose key (PROJ-123) the title or the head branch names; needs `review login <site>` once (or the Inbox's Jira login)"
     )]
     Card(PrArguments),
     #[command(

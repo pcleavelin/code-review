@@ -16,7 +16,8 @@ session's first stop with nothing in flight is. This is the order that gets it g
    Each lint message states the rule and the one way to satisfy it; do not look for a way
    around a message, do what it says. If a rule itself looks wrong for the case, stop and use
    the `tripped` skill instead of working around it. Run `cargo xtask gate --full` once, in
-   step 7, not after every fix.
+   step 7, not after every fix. A change to markdown alone (README, TODO, CLAUDE.md, the
+   skills) or to pictures runs no gate and no checks: nothing compiles it.
 2. Naming. Spawn one Sonnet subagent with the change (`jj diff --git`) and this brief: for each
    name the diff introduces (types, variants, functions, fields, modules), find how the code
    already names the same concept (`api/*.api`, the Concepts table in CLAUDE.md, a grep) and
