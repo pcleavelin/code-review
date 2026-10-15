@@ -112,6 +112,8 @@
                 clippy
                 rustfmt
                 rust-analyzer
+                typescript-language-server
+                typescript
                 pkg-config
                 jujutsu
                 git
