@@ -134,23 +134,55 @@ pub(crate) enum Container {
     PanelColumn,
     ConsoleColumn,
     Stack,
-    StepRow { selected: Chosen },
+    StepRow {
+        selected: Chosen,
+    },
     FillRow,
     FitRow,
-    Tooltip { at: Point },
-    ElementTip { at: Point },
-    Picker { at: Point, width: Px },
-    Palette { at: Point, width: Px },
-    Settings { at: Point, width: Px },
+    Tooltip {
+        at: Point,
+    },
+    ElementTip {
+        at: Point,
+    },
+    Picker {
+        at: Point,
+        width: Px,
+    },
+    Palette {
+        at: Point,
+        width: Px,
+    },
+    Settings {
+        at: Point,
+        width: Px,
+    },
     PanelHeader,
-    Comment { look: CommentLook, id: Id },
+    Comment {
+        look: CommentLook,
+        id: Id,
+    },
     Card(Id),
     CardBody,
-    Viewer { size: Extent },
-    Slot { id: Id, height: Px },
+    Viewer {
+        size: Extent,
+    },
+    Slot {
+        id: Id,
+        height: Px,
+    },
     CommentRow(Id),
     Folded,
-    FileHeader { id: Id, height: Px },
+    FileHeader {
+        id: Id,
+        height: Px,
+    },
+    Pinned {
+        at: Point,
+        width: Px,
+        height: Px,
+        push: Px,
+    },
     Markdown(Id),
 }
 
@@ -244,6 +276,37 @@ impl Container {
         }
     }
 
+    fn header_shape(self) -> Shape {
+        match self {
+            Self::Pinned {
+                at,
+                width,
+                height,
+                push,
+            } => Shape::new(
+                Layout::column()
+                    .overlay(at)
+                    .width(width)
+                    .height(height)
+                    .scroll(Point::new(Px::ZERO, push))
+                    .scroll_axes(ScrollAxes::HORIZONTAL),
+                Style::background(FIELD),
+                Some(ids::pinned_header()),
+            ),
+            Self::FileHeader { id, height } => Shape::new(
+                Layout::row()
+                    .grow_width()
+                    .slot(height)
+                    .padding(FILE_HEADER_PADDING)
+                    .gap(SMALL_GAP)
+                    .cross(Align::Center),
+                Style::background(PANEL).border(Sides::TOP.with(Sides::BOTTOM), BORDER),
+                Some(id),
+            ),
+            _ => self.block_shape(),
+        }
+    }
+
     fn block_shape(self) -> Shape {
         match self {
             Self::Card(id) => Shape::new(
@@ -309,16 +372,7 @@ impl Container {
                 None,
             ),
             Self::CommentRow(_) | Self::Comment { .. } => self.comment_shape(),
-            Self::FileHeader { id, height } => Shape::new(
-                Layout::row()
-                    .grow_width()
-                    .slot(height)
-                    .padding(FILE_HEADER_PADDING)
-                    .gap(SMALL_GAP)
-                    .cross(Align::Center),
-                Style::background(PANEL).border(Sides::TOP.with(Sides::BOTTOM), BORDER),
-                Some(id),
-            ),
+            Self::FileHeader { .. } | Self::Pinned { .. } => self.header_shape(),
             Self::Card(_) | Self::CardBody | Self::Slot { .. } => self.block_shape(),
             Self::Viewer { size } => Shape::new(
                 Layout::column()

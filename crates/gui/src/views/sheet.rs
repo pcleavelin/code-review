@@ -123,6 +123,13 @@ pub(super) struct Pointed {
     pub(super) spot: Spot,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct HeaderPin {
+    pub(super) section: Count,
+    pub(super) height: Px,
+    pub(super) push: Px,
+}
+
 pub(super) struct Sheet<'body> {
     pub(super) sections: Vec<Section<'body>>,
     pub(super) pieces: Vec<Placed>,
@@ -520,6 +527,27 @@ impl<'body> Sheet<'body> {
         near.or(first)
     }
 
+    pub(super) fn header_of(&self, section: Count) -> Px {
+        self.pieces_of(section)
+            .first()
+            .filter(|placed| placed.piece == Piece::Header)
+            .map_or(Px::ZERO, |placed| placed.height)
+    }
+
+    pub(super) fn pinned(&self, offset: Px) -> Option<HeaderPin> {
+        let section = self.holding(offset)?;
+        let header = self
+            .pieces_of(section)
+            .first()
+            .filter(|placed| placed.piece == Piece::Header && placed.top <= offset)?;
+        let push = (header.height - (self.bottom_of(section) - offset)).max(Px::ZERO);
+        (push < header.height).then_some(HeaderPin {
+            section,
+            height: header.height,
+            push,
+        })
+    }
+
     pub(super) fn holding(&self, offset: Px) -> Option<Count> {
         self.at(offset).map(|placed| placed.section).or_else(|| {
             self.pieces
@@ -766,5 +794,52 @@ mod tests {
         assert_eq!(at(291), Some(Spot::Head(line(10))));
         assert_eq!(at(292), None);
         assert_eq!(at(400), None);
+    }
+
+    fn two_files(path: &RelativePath) -> Sheet<'_> {
+        let mut sheet = Sheet {
+            sections: Vec::new(),
+            pieces: Vec::new(),
+            total: Px::ZERO,
+            row: Px::new(16),
+        };
+        for _ in 0..2 {
+            sheet.push(
+                path,
+                None,
+                Some(Px::new(30)),
+                Laid {
+                    body: Body::Collapsed,
+                    insets: Vec::new(),
+                    pieces: vec![Measured::new(
+                        Piece::Lines {
+                            start: line(0),
+                            end: line(9),
+                        },
+                        Px::new(160),
+                    )],
+                },
+            );
+        }
+        sheet
+    }
+
+    #[test]
+    fn the_header_of_the_file_at_the_top_is_pinned_until_the_next_header_pushes_it_off() {
+        let path = RelativePath::new("a.rs");
+        let sheet = two_files(&path);
+        let pin = |offset: i32| {
+            sheet
+                .pinned(Px::new(offset))
+                .map(|pin| (pin.section.get(), pin.push.get()))
+        };
+        assert_eq!(pin(0), Some((0, 0)));
+        assert_eq!(pin(100), Some((0, 0)));
+        assert_eq!(pin(160), Some((0, 0)));
+        assert_eq!(pin(175), Some((0, 15)));
+        assert_eq!(pin(189), Some((0, 29)));
+        assert_eq!(pin(190), Some((1, 0)));
+        assert_eq!(pin(370), Some((1, 20)));
+        assert_eq!(pin(380), None);
     }
 }

@@ -630,6 +630,10 @@ pub(crate) fn file_header() -> Id {
     Id::new("file-header")
 }
 
+pub(crate) fn pinned_header() -> Id {
+    Id::new("pinned-header")
+}
+
 pub(crate) fn inbox() -> Id {
     Id::new("inbox")
 }

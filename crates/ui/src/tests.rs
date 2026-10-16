@@ -1341,3 +1341,32 @@ fn a_child_as_large_as_its_parent_takes_the_pointer_whatever_their_ids() {
     assert_eq!(hot_of_nested("slot", "line"), Some(Id::new("line")));
     assert_eq!(hot_of_nested("line", "slot"), Some(Id::new("slot")));
 }
+
+#[test]
+fn an_overlay_takes_the_pointer_from_the_smaller_elements_beneath_it() {
+    let mut ui = Ui::default();
+    let mut frame = input(100, 100);
+    frame.pointer.mouse = Point::new(px(5), px(5));
+    for _ in 0..2 {
+        ui.begin(&frame);
+        ui.open(Kind::None, Layout::column().grow(), Style::default(), None);
+        ui.leaf(
+            Kind::None,
+            Layout::row().width(px(10)).height(px(10)),
+            Style::default(),
+            Some(Id::new("line")),
+        );
+        ui.leaf(
+            Kind::None,
+            Layout::row()
+                .width(px(50))
+                .height(px(30))
+                .overlay(Point::new(px(0), px(0))),
+            Style::default(),
+            Some(Id::new("header")),
+        );
+        ui.close();
+        ui.end(&mut Cells);
+    }
+    assert_eq!(ui.hot(), Some(Id::new("header")));
+}

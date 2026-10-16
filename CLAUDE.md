@@ -124,7 +124,8 @@ rule applies.
   commit: it lasts as long as git keeps the object, and `--since-seen` says so once it is gone.
 - **The diff is drawn on the head file, folded to the change.** The Source view shows every
   changed file in one column, in the order of Changes, each under a header that marks it seen,
-  collapses it and links it; picking a file in Changes scrolls to its header, and scrolling makes
+  collapses it and links it; the header of the file at the top stays pinned there, in unified
+  and split layouts, until the next file's header pushes it off; picking a file in Changes scrolls to its header, and scrolling makes
   the file in sight the selection. A file the pull request does not change is shown alone. Each
   file is the head file with added lines tinted and removed lines, threads that are not outdated and drafts
   inserted where they belong; lines more than three away from a change fold

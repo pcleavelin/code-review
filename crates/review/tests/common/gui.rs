@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer, select_lines }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer, select_lines, pinned_header }
     };
 }
 
@@ -639,7 +639,7 @@ idle
 wait 2
 dump
 mouse 800 400
-wheel 70
+wheel 20
 wait 3
 shot {shots}/head.png
 click-id link-open@src/lib.rs
@@ -1277,6 +1277,64 @@ quit
             "DUMP picked old.txt 3-5",
             "file=Some(\"src/lib.rs\") gone=None sel=Some((7, 7))",
             "DUMP picked src/lib.rs 10-10",
+        ],
+    }
+}
+
+pub(crate) fn pinned_header() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/0
+idle
+wait 3
+mouse 800 400
+wheel -500
+wait 3
+rect file-header@old.txt
+rect pinned-header
+shot {shots}/pinned.png
+scroll source 6410
+wait 3
+rect file-header@old.txt
+rect file-header@src/lib.rs
+shot {shots}/pushed.png
+click-id seen@old.txt
+wait 2
+dump
+scroll source 3000
+wait 3
+click-id collapse@old.txt
+wait 1
+rect file-header@old.txt
+rect file-header@src/lib.rs
+rect pinned-header
+wait 1
+rect file-header@old.txt
+rect file-header@src/lib.rs
+rect pinned-header
+wait 3
+rect file-header@old.txt
+rect file-header@src/lib.rs
+rect pinned-header
+dump
+shot {shots}/collapsed.png
+click-id collapse@old.txt
+wait 3
+click-id layout
+idle
+wait 3
+scroll source 3000
+wait 3
+rect file-header@old.txt
+shot {shots}/split.png
+quit
+",
+        shows: &[
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 96,",
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 86,",
+            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 116,",
+            "DUMP change old.txt Deleted +0 -400 Seen",
+            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 126,",
         ],
     }
 }

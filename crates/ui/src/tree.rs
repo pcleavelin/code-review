@@ -847,7 +847,7 @@ enum Level {
     Nested,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Layer {
     Base,
     Overlay,
@@ -971,6 +971,7 @@ impl Ui {
             .max_by_key(|(id, placement)| {
                 let visible = placement.rect.intersect(placement.clip);
                 (
+                    placement.layer,
                     Reverse(visible.width.wide() * visible.height.wide()),
                     placement.depth,
                     **id,

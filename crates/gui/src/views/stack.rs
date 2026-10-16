@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use domain::{CodePlace, FileChange, FileId, Line, Linked, LinkedFile, Revision, Side, Span};
-use ui::{Axis, Button, Count, Icon, Label, Px, Run};
+use ui::{Axis, Button, Count, Icon, Label, Point, Px, Run};
 
 use crate::action::Action;
 use crate::grid;
@@ -19,7 +19,9 @@ use crate::widgets::{CodeLine, Container, Frame, Padding, Scroller};
 
 use super::center::{self, Aimed, Band, InsetKind, gap, into_view};
 use super::review;
-use super::sheet::{Body, Piece, Placed, Pointed, Section, Sheet, Spot, head_id, rows_shown};
+use super::sheet::{
+    Body, HeaderPin, Piece, Placed, Pointed, Section, Sheet, Spot, head_id, rows_shown,
+};
 use super::table::Table;
 
 enum Showing<'model> {
@@ -53,7 +55,7 @@ pub(super) fn source(model: &Model, frame: &mut Frame<'_>) {
                 model,
                 frame,
                 changes,
-                sheet.kept(model.scrolls.get(ids::source())),
+                kept_place(&sheet, model.scrolls.get(ids::source())),
             );
             column(model, frame, &sheet);
         }
@@ -99,6 +101,42 @@ fn changes_toolbar(
     frame.finish();
 }
 
+fn kept_place(sheet: &Sheet<'_>, offset: Px) -> Option<Kept> {
+    let covered = sheet
+        .pinned(offset)
+        .map_or(Px::ZERO, |pinned| pinned.height - pinned.push);
+    sheet.kept(offset + covered)
+}
+
+fn pinned_header(
+    model: &Model,
+    frame: &mut Frame<'_>,
+    sheet: &Sheet<'_>,
+    pin: HeaderPin,
+    rect: ui::Rect,
+) {
+    let Some(section) = sheet.section(pin.section) else {
+        return;
+    };
+    frame.start(Container::Pinned {
+        at: Point::new(rect.left + PANEL_PADDING, rect.top),
+        width: rect.width - PANEL_PADDING * 2,
+        height: PANEL_PADDING + pin.height - pin.push,
+        push: pin.push,
+    });
+    gap(frame, PANEL_PADDING);
+    file_header(
+        model,
+        frame,
+        section,
+        pin.height,
+        Heading::Pinned {
+            top: sheet.top_of(pin.section),
+        },
+    );
+    frame.finish();
+}
+
 fn reachable(frame: &Frame<'_>) -> Px {
     frame
         .ui
@@ -132,18 +170,25 @@ fn aimed(
         .ui
         .placement(ids::source())
         .map_or(SOURCE_GUESS, |placement| placement.rect.height);
+    let covered = sheet.header_of(at);
     let row = frame.row_height();
     let editor = match request.aim {
-        Aim::Editor => sheet
-            .editor(at)
-            .map(|stretch| into_view(stretch.top, stretch.height, row, offset, view)),
+        Aim::Editor => sheet.editor(at).map(|stretch| {
+            into_view(
+                stretch.top,
+                stretch.height,
+                row,
+                offset + covered,
+                view - covered,
+            ) - covered
+        }),
         Aim::Line | Aim::Top => None,
     };
     if editor.is_some() {
         return editor;
     }
     match sheet.aim(at, request.line) {
-        Aimed::At(top) => Some(top),
+        Aimed::At(top) => Some(top - covered),
         Aimed::Folded => {
             frame.push(Action::Review(ReviewAct::Reveal(
                 section.path.clone(),
@@ -182,7 +227,19 @@ fn scroll_offset(model: &Model, frame: &mut Frame<'_>, sheet: &Sheet<'_>) -> Px 
     target
 }
 
-fn file_header(model: &Model, frame: &mut Frame<'_>, section: &Section<'_>, height: Px) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Heading {
+    InFlow,
+    Pinned { top: Px },
+}
+
+fn file_header(
+    model: &Model,
+    frame: &mut Frame<'_>,
+    section: &Section<'_>,
+    height: Px,
+    heading: Heading,
+) {
     let Some(change) = section.change else {
         return;
     };
@@ -203,6 +260,9 @@ fn file_header(model: &Model, frame: &mut Frame<'_>, section: &Section<'_>, heig
         .clicked()
     {
         frame.push(Action::Review(ReviewAct::ToggleCollapsed(path.clone())));
+        if let Heading::Pinned { top } = heading {
+            frame.push(Action::Scroll(ids::source(), top));
+        }
     }
     frame.attach_tip(collapse);
     let commit = model.review.diffs.commit();
@@ -378,7 +438,9 @@ impl<'draw> Drawing<'draw> {
         };
         let model = self.model;
         match placed.piece {
-            Piece::Header => file_header(model, frame, section, placed.height),
+            Piece::Header => {
+                file_header(model, frame, section, placed.height, Heading::InFlow);
+            }
             Piece::Lines { start, end } => {
                 let count =
                     Count::new(usize::try_from(end.value() - start.value() + 1).unwrap_or(0));
@@ -673,6 +735,7 @@ fn column<'body>(model: &'body Model, frame: &mut Frame<'_>, sheet: &'body Sheet
     let view = rect.map_or(SOURCE_GUESS, |rect| rect.height);
     let width = rect.map(|rect| rect.width);
     let band = center::band(frame, scrolled.offset, view);
+    let pin = sheet.pinned(scrolled.offset);
     let drawing = Drawing {
         model,
         sheet,
@@ -682,17 +745,22 @@ fn column<'body>(model: &'body Model, frame: &mut Frame<'_>, sheet: &'body Sheet
     let mut drawn = Px::ZERO;
     let mut painted: Option<Painting<'body>> = None;
     for placed in sheet.reaching(band.offset, band.bottom) {
-        gap(frame, placed.top - drawn);
         if painted
             .as_ref()
             .is_none_or(|painting| painting.section != placed.section)
         {
             painted = painting(model, frame, sheet, placed.section, width);
         }
-        if let Some(painting) = &painted {
+        let under_pin = placed.piece == Piece::Header
+            && pin.is_some_and(|pinned| pinned.section == placed.section);
+        if let Some(painting) = painted.as_ref().filter(|_| !under_pin) {
+            gap(frame, placed.top - drawn);
             drawing.piece(frame, placed, painting);
+            drawn = placed.bottom();
         }
-        drawn = placed.bottom();
+    }
+    if let (Some(pinned), Some(rect)) = (pin, rect) {
+        pinned_header(model, frame, sheet, pinned, rect);
     }
     select(model, frame, sheet);
     gap(frame, sheet.extent(view) - drawn);
