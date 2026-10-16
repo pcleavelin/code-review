@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use domain::{
     Commit, CommitId, Content, Conversation, Decision, Draft, DraftText, FileChange, FileText,
-    Forge, Host, Mark, PrNumber, Progress, Provenance, PullRequest, RelativePath, Review, Rights,
-    Root, Seen, Standing,
+    Forge, Host, Mark, PrNumber, Progress, Provenance, PullRequest, PullStatus, RelativePath,
+    Review, Rights, Root, Seen,
 };
 use io_forge::{ForgeClient, ForgeError, Submitted, TokenSource};
 use io_review::ReviewStore;
@@ -127,7 +127,7 @@ pub struct Entry {
     pub pull: PullRequest,
     pub progress: Option<Progress>,
     pub drafts: Vec<Draft>,
-    pub standing: Standing,
+    pub status: PullStatus,
 }
 
 #[derive(Clone, Debug)]
@@ -240,7 +240,7 @@ impl Repo {
                 .map(|opened| opened.review.progress(&opened.changes));
             entries.push(Entry {
                 repo: self.name.clone(),
-                standing: review.standing(&pull.head_commit, progress),
+                status: review.status(&pull.head_commit, progress),
                 drafts: review.drafts().to_vec(),
                 progress,
                 pull,

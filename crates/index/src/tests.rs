@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use domain::{
     Backend, Call, Depth, HighlightClass, Imports, Index, Line, Location, Qualifier, Readiness,
-    RelativePath, Root, Scope, SymbolId, SymbolName, SymbolQuery, TextHash,
+    RelativePath, Root, Scope, SymbolId, SymbolName, SymbolQuery, TextHash, TypeName,
 };
 use io_lsp::{Character, DocumentPosition, Outline, OutlineKind, Position, RangeEnd, Reply};
 
@@ -1044,5 +1044,139 @@ fn sql_symbols_are_the_objects_its_statements_create() {
             ("adults", "create_view", 5, 5),
             ("users_name", "create_index", 6, 6),
         ]
+    );
+}
+
+const SHAPES_TS: &str = "export interface Shape {
+  sides: number;
+}
+
+// The square of one side.
+export function area(side: number): number {
+  return side * side;
+}
+
+export class Square implements Shape {
+  sides = 4;
+
+  size(): number {
+    return area(this.sides);
+  }
+}
+
+export const total = (sides: number[]): number => sides.reduce((sum, side) => sum + area(side), 0);
+";
+
+const VIEW_TSX: &str = "import { area } from \"./shapes\";
+
+export function Tile({ side }: { side: number }) {
+  return <div className=\"tile\">{area(side)}</div>;
+}
+";
+
+fn class_at(
+    file: &domain::SourceFile,
+    text: &str,
+    line: usize,
+    word: &str,
+) -> Option<HighlightClass> {
+    let source = text.lines().nth(line).unwrap_or_default();
+    file.highlights()[line]
+        .iter()
+        .find(|span| {
+            source.get(span.start.value() as usize..span.end.value() as usize) == Some(word)
+        })
+        .map(|span| span.class)
+}
+
+#[test]
+fn typescript_is_highlighted_with_the_javascript_patterns_under_its_own() {
+    for path in ["src/shapes.ts", "src/shapes.mts", "src/shapes.cts"] {
+        let file = Parsers::default().parse(RelativePath::new(path), &Contents::new(SHAPES_TS));
+        let class_of = |line: usize, word: &str| class_at(&file, SHAPES_TS, line, word);
+        assert_eq!(
+            class_of(0, "export"),
+            Some(HighlightClass::Keyword),
+            "{path}"
+        );
+        assert_eq!(class_of(0, "Shape"), Some(HighlightClass::Type), "{path}");
+        assert_eq!(class_of(1, "number"), Some(HighlightClass::Type), "{path}");
+        assert_eq!(
+            class_of(4, "// The square of one side."),
+            Some(HighlightClass::Comment),
+            "{path}"
+        );
+        assert_eq!(
+            class_of(5, "function"),
+            Some(HighlightClass::Keyword),
+            "{path}"
+        );
+        assert_eq!(
+            class_of(5, "area"),
+            Some(HighlightClass::Function),
+            "{path}"
+        );
+        assert_eq!(
+            class_of(6, "return"),
+            Some(HighlightClass::Keyword),
+            "{path}"
+        );
+        assert_eq!(
+            class_of(9, "implements"),
+            Some(HighlightClass::Keyword),
+            "{path}"
+        );
+        assert_eq!(class_of(10, "4"), Some(HighlightClass::Constant), "{path}");
+    }
+    let view =
+        Parsers::default().parse(RelativePath::new("src/view.tsx"), &Contents::new(VIEW_TSX));
+    let class_of = |line: usize, word: &str| class_at(&view, VIEW_TSX, line, word);
+    assert_eq!(class_of(0, "import"), Some(HighlightClass::Keyword));
+    assert_eq!(class_of(0, "\"./shapes\""), Some(HighlightClass::String));
+    assert_eq!(class_of(3, "div"), Some(HighlightClass::Property));
+    assert_eq!(class_of(3, "\"tile\""), Some(HighlightClass::String));
+    assert_eq!(class_of(3, "area"), Some(HighlightClass::Function));
+}
+
+#[test]
+fn an_exported_declaration_is_named_by_what_it_declares() {
+    let index = parsed(&[("src/shapes.ts", SHAPES_TS), ("src/view.tsx", VIEW_TSX)]);
+    let file = index
+        .file(
+            index
+                .find_file(&RelativePath::new("src/shapes.ts"))
+                .unwrap(),
+        )
+        .unwrap();
+    let symbols: Vec<(&str, &str, u32, u32, Option<&str>)> = file
+        .symbols()
+        .map(|symbol| {
+            (
+                symbol.name().as_str(),
+                symbol.kind().as_str(),
+                symbol.span().start().number(),
+                symbol.span().end().number(),
+                symbol.owner().map(TypeName::as_str),
+            )
+        })
+        .collect();
+    assert_eq!(
+        symbols,
+        [
+            ("Shape", "interface_declaration", 1, 3, None),
+            ("area", "function_declaration", 6, 8, None),
+            ("Square", "class_declaration", 10, 16, Some("Square")),
+            ("sides", "public_field_definition", 11, 11, Some("Square")),
+            ("size", "method_definition", 13, 15, Some("Square")),
+            ("total", "lexical_declaration", 18, 18, None),
+        ]
+    );
+    assert_eq!(
+        callee_names(&index, "Tile", "src/view.tsx"),
+        ["src/shapes.ts:area"]
+    );
+    assert_eq!(
+        callee_names(&index, "total", "src/shapes.ts"),
+        ["src/shapes.ts:area"]
     );
 }

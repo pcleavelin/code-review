@@ -13,10 +13,11 @@ use platform::{
     Visibility,
 };
 use strum::VariantArray;
-use ui::{Button, Capture, Count, Id, Input, Label, Measure, Px, Ui};
+use ui::{Button, Capture, Count, Id, Ink, Input, Label, Measure, Px, Ui};
 
 use crate::action::Action;
-use crate::columns::{InboxColumn, InboxGrid};
+use crate::columns::{InboxGrid, WordColumn};
+use crate::dropdown::DropdownAct;
 use crate::dump::{self, Context, Dump, DumpLines};
 use crate::field::Which;
 use crate::grid::Grids;
@@ -28,7 +29,7 @@ use crate::panels::{self, View};
 use crate::review::{ReviewAct, ReviewJobs, Reviewing};
 use crate::settings::{KeptSettings, SettingsAct};
 use crate::status::Status;
-use crate::theme::{self, BACKGROUND, CONSOLE_ROWS, PANEL_PADDING, TEXT};
+use crate::theme::{self, BACKGROUND, CONSOLE_ROWS, PANEL_PADDING, SELECTED, TEXT};
 use crate::views;
 use crate::widgets::{Frame, Overlay};
 use crate::work::Services;
@@ -207,6 +208,12 @@ impl App {
             }
             return;
         }
+        if self.model.dropdown.is_some() {
+            if keys::escaped(input) {
+                self.apply(Action::Dropdown(DropdownAct::Close));
+            }
+            return;
+        }
         if keys::palette_toggled(input) {
             self.apply(Action::Palette(PaletteAction::Toggle));
             return;
@@ -250,7 +257,7 @@ impl App {
             Which::JiraEmail,
         ]
         .into_iter()
-        .chain(InboxColumn::VARIANTS.iter().copied().map(Which::Column))
+        .chain(WordColumn::VARIANTS.iter().copied().map(Which::Column))
         {
             actions.push(Action::Type(which, edits.clone(), typed.clone()));
         }
@@ -272,7 +279,7 @@ impl App {
             ui: &self.ui,
             services: &self.services,
         };
-        let parts: [&dyn Dump; 12] = [
+        let parts: [&dyn Dump; 13] = [
             &model.nav,
             &model.review,
             &model.review.logins,
@@ -285,6 +292,7 @@ impl App {
             &model.palette,
             &model.settings_menu,
             &model.viewer,
+            &self.ui,
         ];
         for part in parts {
             part.dump(&context, &mut lines);
@@ -316,7 +324,10 @@ impl platform::App for App {
         self.keys(input);
         self.model.refresh_palette();
         self.ui.capture(
-            if self.model.settings_menu.is_some() || self.model.viewer.is_some() {
+            if self.model.settings_menu.is_some()
+                || self.model.viewer.is_some()
+                || self.model.dropdown.is_some()
+            {
                 Capture::Floating
             } else {
                 Capture::Everything
@@ -331,6 +342,7 @@ impl platform::App for App {
             self.apply(action);
         }
         let laid_out = self.ui.interaction(ids::body()).rect().is_some();
+        let over_text = self.ui.over_text();
         let mut queue = Vec::new();
         let mut frame = Frame {
             ui: &mut self.ui,
@@ -340,7 +352,11 @@ impl platform::App for App {
             overlay: Overlay::default(),
             tooltip: None,
             attached_tip: None,
-            cursor: Cursor::Default,
+            cursor: if over_text {
+                Cursor::Text
+            } else {
+                Cursor::Default
+            },
         };
         views::build(&self.model, &mut frame);
         let cursor = frame.cursor;
@@ -351,7 +367,13 @@ impl platform::App for App {
         if laid_out {
             self.fit_console();
         }
-        let drawing = self.ui.draw(renderer, TEXT);
+        let drawing = self.ui.draw(
+            renderer,
+            Ink {
+                text: TEXT,
+                selected: SELECTED,
+            },
+        );
         for action in queue {
             self.apply(action);
         }

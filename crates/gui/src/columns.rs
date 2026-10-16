@@ -4,11 +4,12 @@ use domain::{ColumnCells, ColumnKey, ColumnWidth};
 use strum::VariantArray;
 use ui::{Label, Px};
 
+use crate::dropdown::Dropdown;
 use crate::theme::PIXEL;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, VariantArray)]
 pub(crate) enum InboxColumn {
-    Standing,
+    Status,
     Pull,
     Title,
     Author,
@@ -17,13 +18,42 @@ pub(crate) enum InboxColumn {
     Updated,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, VariantArray)]
+pub(crate) enum WordColumn {
+    Pull,
+    Title,
+    Author,
+    Branch,
+    Seen,
+    Updated,
+}
+
+impl WordColumn {
+    pub(crate) const fn column(self) -> InboxColumn {
+        match self {
+            Self::Pull => InboxColumn::Pull,
+            Self::Title => InboxColumn::Title,
+            Self::Author => InboxColumn::Author,
+            Self::Branch => InboxColumn::Branch,
+            Self::Seen => InboxColumn::Seen,
+            Self::Updated => InboxColumn::Updated,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ColumnFilter {
+    Words(WordColumn),
+    Choices(Dropdown),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Literal(&'static str);
 
 impl InboxColumn {
     const fn key(self) -> Literal {
         Literal(match self {
-            Self::Standing => "standing",
+            Self::Status => "status",
             Self::Pull => "pull",
             Self::Title => "title",
             Self::Author => "author",
@@ -31,6 +61,18 @@ impl InboxColumn {
             Self::Seen => "seen",
             Self::Updated => "updated",
         })
+    }
+
+    pub(crate) const fn filter(self) -> ColumnFilter {
+        match self {
+            Self::Status => ColumnFilter::Choices(Dropdown::InboxStatus),
+            Self::Pull => ColumnFilter::Words(WordColumn::Pull),
+            Self::Title => ColumnFilter::Words(WordColumn::Title),
+            Self::Author => ColumnFilter::Words(WordColumn::Author),
+            Self::Branch => ColumnFilter::Words(WordColumn::Branch),
+            Self::Seen => ColumnFilter::Words(WordColumn::Seen),
+            Self::Updated => ColumnFilter::Words(WordColumn::Updated),
+        }
     }
 
     pub(crate) fn name(self) -> Label {
@@ -46,7 +88,7 @@ impl InboxColumn {
 
     fn default_cells(self) -> ColumnCells {
         let cells = match self {
-            Self::Standing => 11,
+            Self::Status => 11,
             Self::Pull | Self::Seen => 16,
             Self::Title => 48,
             Self::Author => 12,

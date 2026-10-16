@@ -31,9 +31,11 @@ message; caught after the change, it costs the change.
 3. How it is meant to work. The spec is, in this order: the owner's words, CLAUDE.md, the
    command's `about` in `crates/cli/src/wire.rs` or control's words in `crates/gui/src/ids.rs`, the scenarios in
    `crates/review/tests/cli.rs` that drive it. Then see the current behaviour yourself: run the
-   CLI command, or a GUI script with `dump` and `shot` (CLAUDE.md, "Testing the GUI"), and read
-   the PNG. A bug is reproduced here, with the exact command or script that shows it; one that
-   does not reproduce goes back to the owner with what you ran. Reading a forge is fine on any
+   CLI command, or a unit test of the code that draws or answers it. The GUI runs only at the
+   very end of a change (`finish` step 6), never here. A bug is reproduced here, with the exact
+   command or test that shows it; a bug only a GUI run shows is pinned by a scenario that runs
+   at the end (`fix-bug` step 2). One that does not reproduce goes back to the owner with what
+   you ran. Reading a forge is fine on any
    public repository; writing to one (submitting a review) only on a pull request the owner
    named for it.
 4. Restate again with what steps 2 and 3 taught: the need in one sentence, the behaviour as

@@ -242,6 +242,7 @@ const DEPENDENCIES: [Allowed; 23] = [
             Literal::new("strum"),
             Literal::new("domain"),
             Literal::new("io-process"),
+            Literal::new("io-source"),
             Literal::new("serde_json"),
         ],
     },

@@ -11,8 +11,10 @@ session's first stop with nothing in flight is. This is the order that gets it g
 
 1. The quick checks, which fail in seconds where the gate takes minutes: `cargo fmt`,
    `cargo clippy -p <each crate touched> --all-targets`, `cargo xtask lint`, `cargo xtask api`
-   when a library crate's public items changed, and the tests and scenarios the change touches
-   (`cargo test -p <crate>`, `cargo test -p review --test gui <scenario>`). Fix until they pass.
+   when a library crate's public items changed, and the unit tests and CLI scenarios the change
+   touches (`cargo test -p <crate>`, `cargo test -p review --test cli <scenario>`). Fix until
+   they pass. Nothing that opens a window (a GUI scenario, a script, a screenshot, `gate --full`)
+   runs before step 6.
    Each lint message states the rule and the one way to satisfy it; do not look for a way
    around a message, do what it says. If a rule itself looks wrong for the case, stop and use
    the `tripped` skill instead of working around it. Run `cargo xtask gate --full` once, in
@@ -48,8 +50,11 @@ session's first stop with nothing in flight is. This is the order that gets it g
    nothing. Rewrite the case until it does; a feature whose case cannot be made goes to the
    owner instead of into a commit.
 5. `cargo xtask api` if a library crate's public items changed, and include the `api/` diff.
-6. A GUI change: run the script that shows it (`add-gui-element` step 7) once more on the
-   release build and read the screenshots.
+6. A GUI change: the first and only GUI runs of the change. The pinning scenario on the parent
+   revision's build (it fails), then the change's GUI scenarios (`cargo test -p review --test
+   gui <scenario>`), then the script that shows it (`add-gui-element` steps 6 and 7) on the
+   release build, reading the screenshots. A fix found here goes back through steps 1 to 5
+   before the GUI runs again.
 7. `cargo xtask gate --full` once more, then commit (`jj commit -m ...`). The message says
    what changed and why, for someone who did not see the session; a new feature's message
    body is its case. A change to anything that runs per changed file, per pull request or

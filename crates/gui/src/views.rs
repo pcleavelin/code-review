@@ -9,6 +9,7 @@ mod panel_tree;
 mod references;
 mod review;
 mod settings;
+mod sheet;
 mod stack;
 mod table;
 mod tooltip;
@@ -29,6 +30,7 @@ pub(crate) fn build(model: &Model, frame: &mut Frame<'_>) {
     frame.finish();
     panel_tree::drag_band(model, frame);
     panel_tree::picker(model, frame);
+    inbox::choices(model, frame);
     palette::palette(model, frame);
     settings::settings(model, frame);
     viewer::viewer(model, frame);

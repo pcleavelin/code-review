@@ -1,7 +1,7 @@
 use domain::{Column, FileId, Language, Line, Span};
 use ui::{
     Button, Canvas, Color, Count, Draw, Extent, Id, Interaction, Kind, Layout, Point, Px, Rect,
-    ScrollAxes, Scrollbar, Style,
+    ScrollAxes, Style,
 };
 
 use crate::action::Action;
@@ -9,7 +9,7 @@ use crate::grid::GUTTER;
 use crate::keys::{self, CodeGesture};
 use crate::model::Model;
 use crate::peek::{Hovering, Intent, Probe};
-use crate::theme::{PIXEL, SELECTED_BAR};
+use crate::theme::SELECTED_BAR;
 use crate::widgets::{Frame, Scrolled, TipAt};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,42 +23,28 @@ pub(crate) struct Marks<'marks> {
     pub(crate) bar: &'marks dyn Fn(Line) -> Option<Color>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AcrossBar {
-    Drawn,
-    Omitted,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AcrossScroll {
-    Own,
-    Shared {
-        offset: Id,
-        columns: Count,
-        bar: AcrossBar,
-    },
-}
-
 pub(crate) struct CodeBlock<'marks> {
     pub(crate) file: FileId,
     pub(crate) start: Line,
     pub(crate) end: Line,
     pub(crate) id: Id,
     pub(crate) width: Width,
-    pub(crate) across: AcrossScroll,
     pub(crate) marks: Marks<'marks>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CodeSpot {
+pub(crate) struct CodeLine {
+    pub(crate) file: FileId,
     pub(crate) line: Line,
-    pub(crate) column: Option<Column>,
+    pub(crate) id: Id,
+    pub(crate) across: Px,
+    pub(crate) background: Option<Color>,
+    pub(crate) bar: Option<Color>,
 }
 
-pub(crate) struct Coded {
-    pub(crate) interaction: Interaction,
-    pub(crate) spot: Option<CodeSpot>,
-    pub(crate) dragged_to: Option<Line>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CodeSpot {
+    line: Line,
+    column: Option<Column>,
 }
 
 struct RowMarks {
@@ -66,67 +52,53 @@ struct RowMarks {
     bar: Option<Color>,
 }
 
+fn column_at(mouse: Px, left: Px, cell: Px, across: Px) -> Option<Column> {
+    let column = (mouse - left + across).ratio(cell).max(0);
+    usize::try_from(column)
+        .unwrap_or(0)
+        .checked_sub(GUTTER.get())
+        .map(|column| Column::new(u32::try_from(column).unwrap_or(0)))
+}
+
 fn spot_at(mouse: ui::Point, rect: Rect, span: Span, cell: ui::Extent, across: Px) -> CodeSpot {
     let last_row = i32::try_from(span.count().value()).unwrap_or(1) - 1;
     let row = (mouse.vertical - rect.top)
         .ratio(cell.height)
         .clamp(0, last_row);
-    let column = (mouse.horizontal - rect.left + across)
-        .ratio(cell.width)
-        .max(0);
-    let column = usize::try_from(column)
-        .unwrap_or(0)
-        .checked_sub(GUTTER.get())
-        .map(|column| Column::new(u32::try_from(column).unwrap_or(0)));
     CodeSpot {
         line: Line::new(span.start().value() + u32::try_from(row).unwrap_or(0)),
-        column,
+        column: column_at(mouse.horizontal, rect.left, cell.width, across),
+    }
+}
+
+fn paint_marks(canvas: &mut Canvas<'_>, rect: Rect, cell: Extent, marks: &RowMarks, top: Px) {
+    if let Some(color) = marks.background {
+        canvas.rect(Rect::new(rect.left, top, rect.width, cell.height), color);
+    }
+    if let Some(color) = marks.bar {
+        canvas.rect(
+            Rect::new(rect.left, top, cell.width - SELECTED_BAR, cell.height),
+            color,
+        );
     }
 }
 
 impl Frame<'_> {
-    fn line_dragged_to(
-        &self,
-        interaction: Interaction,
-        id: Id,
-        span: Span,
-        across: Px,
-    ) -> Option<Line> {
-        interaction.drag()?;
-        let placement = self.ui.placement(id)?;
-        let shown = placement.rect.intersect(placement.clip);
-        let mouse = self.ui.pointer().mouse;
-        (!shown.is_empty()).then(|| {
-            let vertical = mouse.vertical.clamp(shown.top, shown.bottom() - PIXEL);
-            let inside = ui::Point::new(mouse.horizontal, vertical);
-            spot_at(inside, placement.rect, span, self.metrics.cell, across).line
-        })
-    }
-
-    pub(crate) fn code_block(&mut self, model: &Model, block: &CodeBlock<'_>) -> Coded {
-        let nothing = Coded {
-            interaction: Interaction::default(),
-            spot: None,
-            dragged_to: None,
-        };
+    pub(crate) fn code_block(&mut self, model: &Model, block: &CodeBlock<'_>) {
         let Some(source) = model.index.file(block.file) else {
-            return nothing;
+            return;
         };
         let Some(last) = source.text().count().last() else {
-            return nothing;
+            return;
         };
         let end = block.end.min(last);
         let Some(span) = Span::new(block.start, end) else {
-            return nothing;
+            return;
         };
         let grid = self.grids.get(block.file, source, span);
         let size = self.metrics.font;
         let cell = self.metrics.cell;
-        let columns = match block.across {
-            AcrossScroll::Own => grid.columns(),
-            AcrossScroll::Shared { columns, .. } => grid.columns().max(columns),
-        };
-        let extent = Extent::new(cell.width * columns, cell.height * grid.rows());
+        let extent = Extent::new(cell.width * grid.columns(), cell.height * grid.rows());
         let pointer = self.ui.pointer();
         let rows: Vec<RowMarks> = span
             .lines()
@@ -138,15 +110,7 @@ impl Frame<'_> {
         let marks = move |canvas: &mut Canvas<'_>, rect: Rect| {
             let mut top = rect.top;
             for marks in &rows {
-                if let Some(color) = marks.background {
-                    canvas.rect(Rect::new(rect.left, top, rect.width, cell.height), color);
-                }
-                if let Some(color) = marks.bar {
-                    canvas.rect(
-                        Rect::new(rect.left, top, cell.width - SELECTED_BAR, cell.height),
-                        color,
-                    );
-                }
+                paint_marks(canvas, rect, cell, marks, top);
                 top += cell.height;
             }
         };
@@ -166,24 +130,57 @@ impl Frame<'_> {
             column: Some(column),
         }) = spot
         {
-            match keys::code_gesture(interaction, pointer) {
-                Some(CodeGesture::Peek) => {
-                    self.push(Action::Definition(block.file, line, column, Intent::Peek));
-                }
-                Some(CodeGesture::Jump) => {
-                    self.push(Action::Definition(block.file, line, column, Intent::Jump));
-                }
-                None if !pointer.down.contains(Button::Left) => {
-                    self.hover(model, block.file, line, column);
-                }
-                None => {}
-            }
+            self.point_at_code(model, interaction, block.file, line, column);
         }
-        let dragged_to = self.line_dragged_to(interaction, block.id, span, across);
-        Coded {
-            interaction,
-            spot,
-            dragged_to,
+    }
+
+    pub(crate) fn code_line(&mut self, model: &Model, shown: &CodeLine) -> Interaction {
+        let row = self.row_height();
+        let Some(source) = model.index.file(shown.file) else {
+            return self.line_row(Box::new(|_: &mut Canvas<'_>, _: Rect| {}), shown.id);
+        };
+        let grid = self.grids.get(shown.file, source, Span::line(shown.line));
+        let font = self.metrics.font;
+        let cell = Extent::new(self.cell_width(), row);
+        let across = shown.across;
+        let marks = RowMarks {
+            background: shown.background,
+            bar: shown.bar,
+        };
+        let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
+            paint_marks(canvas, rect, cell, &marks, rect.top);
+            canvas.grid(Point::new(rect.left - across, rect.top), font, &grid);
+        };
+        let interaction = self.line_row(Box::new(draw), shown.id);
+        let mouse = self.ui.pointer().mouse.horizontal;
+        if let Some(rect) = interaction.rect().filter(|_| interaction.hovered())
+            && let Some(column) = column_at(mouse, rect.left, cell.width, across)
+        {
+            self.point_at_code(model, interaction, shown.file, shown.line, column);
+        }
+        interaction
+    }
+
+    fn point_at_code(
+        &mut self,
+        model: &Model,
+        interaction: Interaction,
+        file: FileId,
+        line: Line,
+        column: Column,
+    ) {
+        let pointer = self.ui.pointer();
+        match keys::code_gesture(interaction, pointer) {
+            Some(CodeGesture::Peek) => {
+                self.push(Action::Definition(file, line, column, Intent::Peek));
+            }
+            Some(CodeGesture::Jump) => {
+                self.push(Action::Definition(file, line, column, Intent::Jump));
+            }
+            None if !pointer.down.contains(Button::Left) => {
+                self.hover(model, file, line, column);
+            }
+            None => {}
         }
     }
 
@@ -195,45 +192,21 @@ impl Frame<'_> {
         marks: Box<dyn Draw>,
         code: Box<dyn Draw>,
     ) -> Scrolled {
-        let (key, bar) = match block.across {
-            AcrossScroll::Own => (block.id, AcrossBar::Drawn),
-            AcrossScroll::Shared { offset, bar, .. } => (offset, bar),
-        };
-        let kept = model.across.get(key);
-        let across = match bar {
-            AcrossBar::Drawn => {
-                let mut offset = Point::new(kept, Px::ZERO);
-                self.ui.scroll_by_wheel(block.id, &mut offset).horizontal
-            }
-            AcrossBar::Omitted => self.wheel_across(block.id, kept, extent.width),
-        };
-        let asked = match block.across {
-            AcrossScroll::Own => true,
-            AcrossScroll::Shared { .. } => self.scrolled_across(block.id),
-        };
-        if across != kept && asked {
-            self.push(Action::ScrollAcross(key, across));
+        let kept = model.across.get(block.id);
+        let mut offset = Point::new(kept, Px::ZERO);
+        let across = self.ui.scroll_by_wheel(block.id, &mut offset).horizontal;
+        if across != kept {
+            self.push(Action::ScrollAcross(block.id, across));
         }
         let layout = match block.width {
             Width::Wide => Layout::row().grow_width(),
             Width::Fit => Layout::row().width(extent.width),
         };
-        let layout = match block.across {
-            AcrossScroll::Shared {
-                bar: AcrossBar::Drawn,
-                ..
-            } => layout.height(extent.height + Scrollbar::WIDTH),
-            AcrossScroll::Shared { .. } | AcrossScroll::Own => layout,
-        };
-        let axes = match bar {
-            AcrossBar::Drawn => ScrollAxes::HORIZONTAL,
-            AcrossBar::Omitted => ScrollAxes::VERTICAL,
-        };
         let interaction = self.ui.open(
             Kind::Custom(marks),
             layout
                 .scroll(Point::new(across, Px::ZERO))
-                .scroll_axes(axes),
+                .scroll_axes(ScrollAxes::HORIZONTAL),
             Style::NONE,
             Some(block.id),
         );
@@ -268,6 +241,29 @@ impl Frame<'_> {
 
     pub(crate) fn scrolled_across(&self, id: Id) -> bool {
         self.ui.interaction(id).wheel().horizontal.get() != 0.0 || self.ui.dragging()
+    }
+
+    pub(crate) fn across_scrollbar(&mut self, id: Id, kept: Px, content: Px) -> Px {
+        let mut offset = Point::new(kept, Px::ZERO);
+        let across = self.ui.scroll_by_wheel(id, &mut offset).horizontal;
+        self.ui.open(
+            Kind::None,
+            Layout::row()
+                .grow_width()
+                .slot(ui::Scrollbar::WIDTH)
+                .scroll(Point::new(across, Px::ZERO))
+                .scroll_axes(ScrollAxes::HORIZONTAL),
+            Style::NONE,
+            Some(id),
+        );
+        self.ui.leaf(
+            Kind::None,
+            Layout::row().width(content).height(ui::Scrollbar::WIDTH),
+            Style::NONE,
+            None,
+        );
+        self.ui.close();
+        across
     }
 
     pub(crate) fn hover(&mut self, model: &Model, file: FileId, line: Line, column: Column) {

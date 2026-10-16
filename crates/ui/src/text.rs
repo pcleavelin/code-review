@@ -121,11 +121,20 @@ pub enum Wrap {
     Clip,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Select {
+    #[default]
+    Off,
+    On,
+    Wrapped,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Text {
     pub runs: Vec<Run>,
     pub size: FontSize,
     pub wrap: Wrap,
+    pub select: Select,
 }
 
 impl Text {

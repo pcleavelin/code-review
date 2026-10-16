@@ -21,7 +21,7 @@ answer::pub struct HoverText(Vec<HoverLine>);
 answer::pub fn lines(&self) -> &[HoverLine]
 answer::pub struct Definition { pub path: PathBuf, pub file: Option<RelativePath>, pub line: Line, pub character: Character, }
 answer::pub enum StartError { Missing(Program), Failed(Program), }
-session::pub struct LspSession { child: Child, input: ChildStdin, messages: Receiver<Value>, last_id: RequestId, progress: OpenProgress, last_progress: Instant, status: ServerStatus, root: PathBuf, }
+session::pub struct LspSession { child: Child, input: ChildStdin, messages: Receiver<Value>, last_id: RequestId, progress: OpenProgress, last_progress: Instant, status: ServerStatus, root: PathBuf, documents: OpenDocuments<Modified>, project: Project, }
 session::pub fn start(language: Language, root: &Path) -> Result<Self, StartError>
 session::pub fn root(&self) -> &Path
 session::pub fn wait_ready(&mut self, longest: Duration)

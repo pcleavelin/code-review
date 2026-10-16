@@ -206,6 +206,9 @@ fn languages_come_from_the_last_dotted_part() {
     let of = |path: &str| Language::of(&RelativePath::new(path));
     assert_eq!(of("src/main.rs"), Some(Language::Rust));
     assert_eq!(of("web/app.tsx"), Some(Language::Javascript));
+    assert_eq!(of("web/total.mts"), Some(Language::Javascript));
+    assert_eq!(of("web/legacy.cts"), Some(Language::Javascript));
+    assert_eq!(of("web/view.jsx"), Some(Language::Javascript));
     assert_eq!(of("inc/x.h"), Some(Language::Clang));
     assert_eq!(of("Makefile"), None);
     assert_eq!(Language::Python.program().as_str(), "pyright-langserver");
@@ -218,6 +221,19 @@ fn languages_come_from_the_last_dotted_part() {
         ["--stdio"]
     );
     assert_eq!(Language::Rust.arguments().len(), 0);
+}
+
+#[test]
+fn a_file_is_opened_in_its_server_under_the_language_id_of_its_extension() {
+    let id = |path: &str| Language::language_id(&RelativePath::new(path)).map(LanguageId::as_str);
+    assert_eq!(id("src/main.rs"), Some("rust"));
+    assert_eq!(id("web/app.js"), Some("javascript"));
+    assert_eq!(id("web/app.cjs"), Some("javascript"));
+    assert_eq!(id("web/view.jsx"), Some("javascriptreact"));
+    assert_eq!(id("web/app.ts"), Some("typescript"));
+    assert_eq!(id("web/total.mts"), Some("typescript"));
+    assert_eq!(id("web/view.tsx"), Some("typescriptreact"));
+    assert_eq!(id("Makefile"), None);
 }
 
 #[test]

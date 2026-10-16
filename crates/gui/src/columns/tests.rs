@@ -59,3 +59,18 @@ fn saved_widths_come_back_and_unknown_columns_are_dropped() {
     assert_eq!(grid.cells(InboxColumn::Title).get(), 80);
     assert_eq!(grid.saved(), [width("title", 80)]);
 }
+
+#[test]
+fn each_column_has_one_filter_and_it_names_that_column() {
+    for column in InboxColumn::VARIANTS.iter().copied() {
+        let named = match column.filter() {
+            ColumnFilter::Words(words) => words.column(),
+            ColumnFilter::Choices(dropdown) => dropdown.column(),
+        };
+        assert_eq!(named, column);
+    }
+    assert_eq!(
+        InboxColumn::Status.filter(),
+        ColumnFilter::Choices(Dropdown::InboxStatus)
+    );
+}

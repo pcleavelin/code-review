@@ -11,7 +11,8 @@ use crate::layout::{
     Align, Anchoring, Bound, Direction, Hold, Layout, Memory, ScrollAxes, Sides, Size, Stacking,
     Style,
 };
-use crate::text::{Label, Text, Wrap};
+use crate::select::{Gathering, Join, LeafKey, PressCount, Selection, Shown, ShownLine, Sight};
+use crate::text::{Label, Select, Text, Wrap};
 
 const LEAST_WRAP: Count = Count::new(12);
 const REMEMBERED_MOST: Count = Count::new(16_384);
@@ -89,6 +90,7 @@ pub struct Placement {
     pub scroll_axes: ScrollAxes,
     pub hold: Hold,
     layer: Layer,
+    depth: Count,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -100,7 +102,11 @@ pub enum Capture {
 
 impl Capture {
     fn reaches(self, placement: &Placement) -> bool {
-        self == Self::Everything || placement.layer == Layer::Floating
+        self.reaches_layer(placement.layer)
+    }
+
+    fn reaches_layer(self, layer: Layer) -> bool {
+        self == Self::Everything || layer == Layer::Floating
     }
 }
 
@@ -230,6 +236,8 @@ struct Element {
     clip: Rect,
     keep: Option<Extent>,
     overflow: Px,
+    marks: Vec<Rect>,
+    leaf: Option<LeafKey>,
 }
 
 enum Pull {
@@ -532,6 +540,7 @@ impl Element {
             scroll_axes: self.layout.scroll_axes,
             hold: self.layout.hold,
             layer,
+            depth: Count::ZERO,
         }
     }
 
@@ -717,10 +726,14 @@ impl Element {
         placements: &mut BTreeMap<Id, Placement>,
         duplicates: &mut Vec<DuplicateId>,
         inherited: Layer,
+        depth: Count,
     ) {
         let layer = self.layer(inherited);
         if let Some(id) = self.id {
-            let placement = self.placement(layer);
+            let placement = Placement {
+                depth,
+                ..self.placement(layer)
+            };
             if let Some(first) = placements.insert(id, placement) {
                 duplicates.push(DuplicateId {
                     id,
@@ -730,11 +743,11 @@ impl Element {
             }
         }
         for child in &self.children {
-            child.record(placements, duplicates, layer);
+            child.record(placements, duplicates, layer, depth + Count::new(1));
         }
     }
 
-    fn paint(&mut self, canvas: &mut Canvas<'_>, text_color: Color) {
+    fn paint(&mut self, canvas: &mut Canvas<'_>, ink: Ink) {
         canvas.push_clip(self.clip);
         if let Some(background) = self.style.background {
             canvas.rect(self.rect, background);
@@ -742,7 +755,7 @@ impl Element {
         let rect = self.rect;
         match mem::replace(&mut self.kind, Kind::None) {
             Kind::None => {}
-            Kind::Text(text) => self.paint_text(canvas, text, text_color),
+            Kind::Text(text) => self.paint_text(canvas, text, ink),
             Kind::Custom(draw) => {
                 canvas.push_clip(rect);
                 draw.draw(canvas, rect);
@@ -774,12 +787,15 @@ impl Element {
         canvas.pop_clip();
     }
 
-    fn paint_text(&mut self, canvas: &mut Canvas<'_>, text: Text, text_color: Color) {
+    fn paint_text(&mut self, canvas: &mut Canvas<'_>, text: Text, ink: Ink) {
         let row_height = canvas.cell(text.size).height;
         let at = self.rect.origin() + Point::new(self.layout.padding, self.layout.padding);
+        for mark in mem::take(&mut self.marks) {
+            canvas.rect(mark, ink.selected);
+        }
         match text.wrap {
             Wrap::Words => {
-                let color = text.runs.first().map_or(text_color, |run| run.color);
+                let color = text.runs.first().map_or(ink.text, |run| run.color);
                 let mut top = at.vertical;
                 for line in mem::take(&mut self.lines) {
                     canvas.text(Point::new(at.horizontal, top), text.size, line, color);
@@ -800,19 +816,133 @@ impl Element {
         }
     }
 
-    fn draw_layer(
-        &mut self,
-        canvas: &mut Canvas<'_>,
-        text_color: Color,
-        layer: Layer,
-        inherited: Layer,
-    ) {
+    fn draw_layer(&mut self, canvas: &mut Canvas<'_>, ink: Ink, layer: Layer, inherited: Layer) {
         let own = self.layer(inherited);
         if own == layer && !self.rect.intersect(self.clip).is_empty() {
-            self.paint(canvas, text_color);
+            self.paint(canvas, ink);
         }
         for child in &mut self.children {
-            child.draw_layer(canvas, text_color, layer, own);
+            child.draw_layer(canvas, ink, layer, own);
+        }
+    }
+
+    fn shown_lines(&self, text: &Text, cell: Extent) -> Vec<ShownLine> {
+        let first = match text.select {
+            Select::Wrapped => Join::Wrap,
+            Select::Off | Select::On => Join::Row,
+        };
+        let room = (self.rect.width - self.layout.padding * 2).ratio(cell.width.max(Px::new(1)));
+        match text.wrap {
+            Wrap::Words => {
+                let columns = usize::try_from(room.max(1)).unwrap_or(1);
+                let whole = text
+                    .runs
+                    .first()
+                    .map(|run| run.text.clone())
+                    .unwrap_or_default();
+                let mut shown = Vec::new();
+                for paragraph in whole.as_str().split('\n') {
+                    for (at, line) in Label::new(paragraph).wrap(columns).into_iter().enumerate() {
+                        let join = match (shown.is_empty(), at) {
+                            (true, _) => first,
+                            (false, 0) => Join::Row,
+                            (false, _) => Join::Wrap,
+                        };
+                        shown.push(ShownLine { text: line, join });
+                    }
+                }
+                shown
+            }
+            Wrap::None | Wrap::Clip => {
+                let clipped: String = Text::clipped(
+                    text.runs.clone(),
+                    Count::new(usize::try_from(room.max(0)).unwrap_or(0)),
+                )
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect();
+                vec![ShownLine {
+                    text: Label::new(clipped),
+                    join: first,
+                }]
+            }
+        }
+    }
+
+    fn gather(
+        &mut self,
+        under: Under,
+        ordinal: &mut Count,
+        measure: &mut dyn Measure,
+        gathering: &mut Gathering,
+        shown: &mut Vec<Shown>,
+    ) {
+        let layer = self.layer(under.layer);
+        let mut own = Count::ZERO;
+        let (owner, hold, ordinal) = match self.id {
+            Some(id) => (Some(id), self.layout.hold, &mut own),
+            None => (under.owner, under.hold, ordinal),
+        };
+        if let Kind::Text(text) = &self.kind
+            && text.select != Select::Off
+        {
+            let key = LeafKey {
+                owner,
+                ordinal: *ordinal,
+            };
+            self.leaf = Some(key);
+            *ordinal += Count::new(1);
+            let sight = if self.rect.intersect(self.clip).is_empty() {
+                Sight::OutOfView
+            } else {
+                Sight::InView
+            };
+            if gathering.keeps(key, sight) {
+                let cell = measure.cell(text.size);
+                shown.push(Shown {
+                    key,
+                    region: under.region,
+                    hold,
+                    layer,
+                    rect: self.rect,
+                    clip: self.clip,
+                    origin: self.rect.origin()
+                        + Point::new(self.layout.padding, self.layout.padding),
+                    cell,
+                    lines: self.shown_lines(text, cell),
+                });
+            }
+        }
+        let region = if self.layout.clips() && self.id.is_some() {
+            self.id
+        } else {
+            under.region
+        };
+        for child in &mut self.children {
+            child.gather(
+                Under {
+                    owner,
+                    hold,
+                    region,
+                    layer,
+                },
+                ordinal,
+                measure,
+                gathering,
+                shown,
+            );
+        }
+    }
+
+    fn mark(&mut self, marks: &mut BTreeMap<LeafKey, Vec<Rect>>) {
+        if let Some(found) = self.leaf.and_then(|key| marks.remove(&key)) {
+            self.marks = found;
+        }
+        for child in &mut self.children {
+            if marks.is_empty() {
+                return;
+            }
+            child.mark(marks);
         }
     }
 
@@ -836,12 +966,26 @@ impl Element {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Ink {
+    pub text: Color,
+    pub selected: Color,
+}
+
+#[derive(Clone, Copy)]
+struct Under {
+    owner: Option<Id>,
+    hold: Hold,
+    region: Option<Id>,
+    layer: Layer,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Level {
     Top,
     Nested,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Layer {
     Base,
     Overlay,
@@ -939,6 +1083,7 @@ pub struct Ui {
     held: Option<Held>,
     kept: Kept,
     duplicates: Vec<DuplicateId>,
+    selection: Selection,
 }
 
 impl Ui {
@@ -964,11 +1109,35 @@ impl Ui {
             })
             .max_by_key(|(id, placement)| {
                 let visible = placement.rect.intersect(placement.clip);
-                (Reverse(visible.width.wide() * visible.height.wide()), **id)
+                (
+                    placement.layer,
+                    Reverse(visible.width.wide() * visible.height.wide()),
+                    placement.depth,
+                    **id,
+                )
             })
             .map(|(id, _)| *id);
         self.hold(input, before);
         let pressed = input.pointer.pressed.contains(Button::Left);
+        if pressed {
+            let pressing = if input.pointer.clicks.is_double(Button::Left) {
+                PressCount::Double
+            } else {
+                PressCount::Single
+            };
+            let on_scrollbar = self.on_any_scrollbar(mouse);
+            let above = self.above_text();
+            let capture = self.capture;
+            self.selection.press(mouse, pressing, &|shown: &Shown| {
+                !on_scrollbar
+                    && capture.reaches_layer(shown.layer)
+                    && above.is_none_or(|layer| layer <= shown.layer)
+            });
+        } else if input.pointer.down.contains(Button::Left) {
+            self.selection.drag(mouse);
+        } else {
+            self.selection.release();
+        }
         if pressed {
             self.active = self.hot;
         }
@@ -1013,6 +1182,36 @@ impl Ui {
             None if pressed => self.held = self.hot.and_then(steady),
             None => {}
         }
+    }
+
+    fn on_any_scrollbar(&self, mouse: Point) -> bool {
+        self.previous.values().any(|placement| {
+            self.capture.reaches(placement)
+                && placement.clip.contains(mouse)
+                && Axis::BOTH.into_iter().any(|axis| {
+                    placement
+                        .scrollbar(axis, placement.scroll_offset.along(axis))
+                        .is_some_and(|bar| bar.track.contains(mouse))
+                })
+        })
+    }
+
+    fn above_text(&self) -> Option<Layer> {
+        self.hot
+            .and_then(|hot| self.previous.get(&hot))
+            .map(|placement| placement.layer)
+    }
+
+    pub fn over_text(&self) -> bool {
+        let above = self.above_text();
+        let capture = self.capture;
+        self.selection.over(self.pointer.mouse, &|shown: &Shown| {
+            capture.reaches_layer(shown.layer) && above.is_none_or(|layer| layer <= shown.layer)
+        })
+    }
+
+    pub fn selected_text(&self) -> Option<Label> {
+        self.selection.text()
     }
 
     pub const fn holding(&self) -> bool {
@@ -1088,6 +1287,8 @@ impl Ui {
                 .filter(|held| Some(held.id) == id)
                 .map(|held| held.rect.extent()),
             overflow: Px::ZERO,
+            marks: Vec::new(),
+            leaf: None,
         });
         id.map(|id| self.interaction(id)).unwrap_or_default()
     }
@@ -1290,7 +1491,12 @@ impl Ui {
             root.overflows(&mut self.overflows);
         }
         for root in &self.roots {
-            root.record(&mut self.previous, &mut self.duplicates, Layer::Base);
+            root.record(
+                &mut self.previous,
+                &mut self.duplicates,
+                Layer::Base,
+                Count::ZERO,
+            );
         }
         if Count::new(self.remembered.len()) > REMEMBERED_MOST {
             self.remembered.clear();
@@ -1298,15 +1504,40 @@ impl Ui {
         for root in &self.roots {
             root.remember(&mut self.remembered);
         }
+        let mut shown = Vec::new();
+        let mut ordinal = Count::ZERO;
+        let mut gathering = self.selection.gathering();
+        for root in &mut self.roots {
+            root.gather(
+                Under {
+                    owner: None,
+                    hold: Hold::Free,
+                    region: None,
+                    layer: Layer::Base,
+                },
+                &mut ordinal,
+                measure,
+                &mut gathering,
+                &mut shown,
+            );
+        }
+        self.selection.replace(shown);
+        let mut marks = self.selection.marks();
+        for root in &mut self.roots {
+            if marks.is_empty() {
+                break;
+            }
+            root.mark(&mut marks);
+        }
         self.last_mouse = self.pointer.mouse;
     }
 
-    pub fn draw(&mut self, measure: &mut dyn Measure, text_color: Color) -> DrawList {
+    pub fn draw(&mut self, measure: &mut dyn Measure, ink: Ink) -> DrawList {
         let mut roots = mem::take(&mut self.roots);
         let mut canvas = Canvas::new(self.size, measure);
         for layer in [Layer::Base, Layer::Overlay, Layer::Floating] {
             for root in &mut roots {
-                root.draw_layer(&mut canvas, text_color, layer, Layer::Base);
+                root.draw_layer(&mut canvas, ink, layer, Layer::Base);
             }
             for root in &roots {
                 root.draw_scrollbars(&mut canvas, layer, Layer::Base);

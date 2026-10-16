@@ -5,7 +5,7 @@ use domain::{
     Draft, DraftOn, DraftText, FileChange, Line, Login, Note, RelativePath, Rights, Seen, Side,
     Span, Submission, Thread, ThreadState,
 };
-use ui::{Canvas, Color, Count, Grid, Icon, Label, Point, Rect, Run};
+use ui::{Canvas, Color, Count, Grid, Icon, Label, Point, Rect, Run, Select};
 
 use domain::{CommitId, DiffLayout, Linked, Prose, WebLink};
 
@@ -15,6 +15,7 @@ use crate::action::Action;
 use crate::field::Which;
 use crate::grid::{self, Gutter};
 use crate::ids::{self, Control};
+use crate::keys;
 use crate::model::Model;
 use crate::nav::Kept;
 use crate::review::{CardCollapse, OpenReview, ReviewAct, Submitting, Talk};
@@ -28,7 +29,7 @@ use crate::widgets::{
     Chosen, CommentLook, Container, Enabled, Frame, Padding, RowAction, Scroller, TreeRow,
 };
 
-use super::inbox::{standing_color, standing_word};
+use super::inbox::{status_color, status_word};
 use super::markdown::markdown;
 
 pub(super) fn seen_mark(seen: Seen) -> Run {
@@ -836,11 +837,15 @@ pub(super) fn editing_box(
             TEXT,
         ),
         Run::new(
-            if model.review.editing.is_some() {
-                "  ctrl+enter saves it, escape cancels"
-            } else {
-                "  ctrl+enter adds it, escape cancels"
-            },
+            format!(
+                "  {}+enter {} it, escape cancels",
+                keys::PRIMARY_NAME.as_str(),
+                if model.review.editing.is_some() {
+                    "saves"
+                } else {
+                    "adds"
+                }
+            ),
             WEAK,
         ),
     ]);
@@ -897,7 +902,7 @@ fn no_review(model: &Model, frame: &mut Frame<'_>) {
 fn heading(frame: &mut Frame<'_>, text: &Label) {
     frame.spacer(SECTION_GAP);
     let size = theme::heading_font(frame.metrics.font, Count::new(2));
-    frame.sized_line(vec![Run::new(text.as_str(), STRONG_TEXT)], size);
+    frame.sized_line(vec![Run::new(text.as_str(), STRONG_TEXT)], size, Select::On);
     frame.rule(BORDER);
     frame.spacer(SMALL_GAP);
 }
@@ -1152,9 +1157,9 @@ pub(super) fn review_tab(model: &Model, frame: &mut Frame<'_>) {
         Run::new(format!("   updated {}", pull.updated), WEAK),
     ]);
     let progress = opened.review.progress(&opened.changes);
-    let standing = opened.review.standing(&pull.head_commit, Some(progress));
+    let status = opened.review.status(&pull.head_commit, Some(progress));
     frame.label_runs(vec![
-        Run::new(standing_word(standing), standing_color(standing)),
+        Run::new(status_word(status), status_color(status)),
         Run::new(
             format!("   {progress} changed files seen"),
             if progress.done() { GREEN } else { ORANGE },

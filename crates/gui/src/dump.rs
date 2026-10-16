@@ -163,6 +163,18 @@ fn dump_conversation(conversation: &Conversation, lines: &mut DumpLines) {
     }
 }
 
+fn dump_picked(review: &Reviewing, lines: &mut DumpLines) {
+    if let Some(picked) = &review.picked {
+        let shown = picked.lines();
+        lines.line(format_args!(
+            "picked {} {}-{}",
+            picked.file,
+            shown.start().number(),
+            shown.end().number()
+        ));
+    }
+}
+
 fn dump_listing(review: &Reviewing, lines: &mut DumpLines) {
     for (repo, waiting) in &review.waiting {
         lines.line(format_args!(
@@ -240,9 +252,9 @@ impl Dump for Reviewing {
             .map(|repo| repo.name().to_string())
             .collect();
         lines.line(format_args!(
-            "review inbox={inbox} repos=[{}] standing={:?} requested={:?} opening={} open={} draft={} submitting={:?}",
+            "review inbox={inbox} repos=[{}] statuses={:?} requested={:?} opening={} open={} draft={} submitting={:?}",
             pins.join(" "),
-            self.standing,
+            self.statuses.shown(),
             self.requested,
             Optional(self.opening),
             Optional(self.opened().map(|opened| opened.number)),
@@ -264,7 +276,7 @@ impl Dump for Reviewing {
                     "entry {}#{} {:?} drafts={} requested={} {}",
                     entry.repo,
                     entry.pull.number,
-                    entry.standing,
+                    entry.status,
                     entry.drafts.len(),
                     requests.of(entry),
                     Quoted(entry.pull.title.as_str())
@@ -292,6 +304,7 @@ impl Dump for Reviewing {
             self.diffs.layout,
             Optional(self.diffs.commit())
         ));
+        dump_picked(self, lines);
         if let Some(conversation) = open.conversation() {
             dump_conversation(conversation, lines);
         }
@@ -619,6 +632,16 @@ impl Dump for Option<Viewer> {
             viewer.pan.horizontal,
             viewer.pan.vertical,
             Optional(placed)
+        ));
+    }
+}
+
+impl Dump for Ui {
+    fn dump(&self, _: &Context<'_>, lines: &mut DumpLines) {
+        let selected = self.selected_text();
+        lines.line(format_args!(
+            "text-selection={}",
+            Optional(selected.as_ref().map(|text| Quoted(text.as_str())))
         ));
     }
 }

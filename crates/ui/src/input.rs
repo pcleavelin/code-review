@@ -11,40 +11,55 @@ impl Mods {
     pub const CTRL: Self = Self(1);
     pub const SHIFT: Self = Self(2);
     pub const ALT: Self = Self(4);
-
-    pub fn new(ctrl: bool, shift: bool, alt: bool) -> Self {
-        let mut mods = Self::NONE;
-        if ctrl {
-            mods = mods.with(Self::CTRL);
-        }
-        if shift {
-            mods = mods.with(Self::SHIFT);
-        }
-        if alt {
-            mods = mods.with(Self::ALT);
-        }
-        mods
-    }
+    pub const COMMAND: Self = Self(8);
+    pub const PRIMARY: Self = if cfg!(target_os = "macos") {
+        Self::COMMAND
+    } else {
+        Self::CTRL
+    };
 
     #[must_use]
     pub const fn with(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
+    #[must_use]
+    pub const fn with_held(self, held: bool, other: Self) -> Self {
+        if held { self.with(other) } else { self }
+    }
+
+    const fn holds(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
     pub const fn ctrl(self) -> bool {
-        self.0 & Self::CTRL.0 != 0
+        self.holds(Self::CTRL)
     }
 
     pub const fn shift(self) -> bool {
-        self.0 & Self::SHIFT.0 != 0
+        self.holds(Self::SHIFT)
     }
 
     pub const fn alt(self) -> bool {
-        self.0 & Self::ALT.0 != 0
+        self.holds(Self::ALT)
     }
 
-    pub const fn same_ctrl_alt(self, other: Self) -> bool {
-        self.ctrl() == other.ctrl() && self.alt() == other.alt()
+    pub const fn command(self) -> bool {
+        self.holds(Self::COMMAND)
+    }
+
+    pub const fn primary(self) -> bool {
+        self.holds(Self::PRIMARY)
+    }
+
+    pub const fn chorded(self) -> bool {
+        self.ctrl() || self.alt() || self.command()
+    }
+
+    pub const fn same_chord(self, other: Self) -> bool {
+        self.ctrl() == other.ctrl()
+            && self.alt() == other.alt()
+            && self.command() == other.command()
     }
 }
 
@@ -55,6 +70,7 @@ impl fmt::Debug for Mods {
             .field("ctrl", &self.ctrl())
             .field("shift", &self.shift())
             .field("alt", &self.alt())
+            .field("command", &self.command())
             .finish()
     }
 }
@@ -260,6 +276,6 @@ impl Input {
     pub fn pressed_key(&self, key: Key, mods: Mods) -> bool {
         self.keys
             .iter()
-            .any(|press| press.key == key && press.mods.same_ctrl_alt(mods))
+            .any(|press| press.key == key && press.mods.same_chord(mods))
     }
 }

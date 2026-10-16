@@ -4,6 +4,7 @@ use ui::{Count, Id, Label, Point, Px, Typed};
 
 use crate::app::App;
 use crate::columns::GridAct;
+use crate::dropdown::DropdownAct;
 use crate::element_tip::Pressing;
 use crate::field::{AfterSubmit, Edit, FieldAct, FieldText, Which};
 use crate::ids;
@@ -60,6 +61,7 @@ pub(crate) enum Action {
     Login(LoginAct),
     Grid(GridAct),
     Viewer(ViewerAct),
+    Dropdown(DropdownAct),
 }
 
 impl App {
@@ -139,6 +141,7 @@ impl App {
             Action::Review(act) => self.review(act),
             Action::Login(act) => self.login(act),
             Action::Viewer(act) => self.viewer(act),
+            Action::Dropdown(act) => self.dropdown(act),
         }
     }
 

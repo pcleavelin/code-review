@@ -1,11 +1,13 @@
 mod code;
+mod dropdown;
 
 use std::rc::Rc;
 
 use platform::Cursor;
 use ui::{
     Align, Button, Canvas, Color, Count, Draw, Extent, FontSize, Grid, Icon, Id, Interaction, Kind,
-    Label, Layout, Point, Px, Rect, Run, ScrollAxes, Scrollbar, Sides, Size, Style, Text, Ui, Wrap,
+    Label, Layout, Point, Px, Rect, Run, ScrollAxes, Scrollbar, Select, Sides, Size, Style, Text,
+    Ui, Wrap,
 };
 
 use crate::action::Action;
@@ -34,7 +36,8 @@ use crate::theme::{
 
 use crate::field::Fields;
 use crate::ids;
-pub(crate) use code::{AcrossBar, AcrossScroll, CodeBlock, Coded, Marks, Width};
+pub(crate) use code::{CodeBlock, CodeLine, Marks, Width};
+pub(crate) use dropdown::{Picked, Tally};
 
 #[derive(Clone, Copy, Debug)]
 struct Literal(&'static str);
@@ -134,25 +137,61 @@ pub(crate) enum Container {
     PanelColumn,
     ConsoleColumn,
     Stack,
-    StepRow { selected: Chosen },
+    StepRow {
+        selected: Chosen,
+    },
     FillRow,
     FitRow,
-    Tooltip { at: Point },
-    ElementTip { at: Point },
-    Picker { at: Point, width: Px },
-    Palette { at: Point, width: Px },
-    Settings { at: Point, width: Px },
+    Tooltip {
+        at: Point,
+    },
+    ElementTip {
+        at: Point,
+    },
+    Picker {
+        at: Point,
+        width: Px,
+    },
+    Palette {
+        at: Point,
+        width: Px,
+    },
+    Settings {
+        at: Point,
+        width: Px,
+    },
+    Choices {
+        at: Point,
+        width: Px,
+    },
     PanelHeader,
-    Comment { look: CommentLook, id: Id },
+    Comment {
+        look: CommentLook,
+        id: Id,
+    },
     Card(Id),
     CardBody,
-    Viewer { size: Extent },
-    Slot { id: Id, height: Px },
+    Viewer {
+        size: Extent,
+    },
+    Slot {
+        id: Id,
+        height: Px,
+    },
     CommentRow(Id),
-    Removed(Id),
     Folded,
-    FileHeader { id: Id, height: Px },
+    FileHeader {
+        id: Id,
+        height: Px,
+    },
+    Pinned {
+        at: Point,
+        width: Px,
+        height: Px,
+        push: Px,
+    },
     Markdown(Id),
+    CodeBlock(Id),
 }
 
 struct Shape {
@@ -217,6 +256,7 @@ impl Container {
         let (padding, id) = match self {
             Self::Picker { .. } => (TOOLTIP_PADDING, ids::picker()),
             Self::Palette { .. } => (TOOLTIP_PADDING, ids::palette_box()),
+            Self::Choices { .. } => (TOOLTIP_PADDING, ids::choices()),
             _ => (TOOLTIP_PADDING, ids::settings_box()),
         };
         floating(at, Some(width), padding, ACCENT, Some(id))
@@ -245,11 +285,47 @@ impl Container {
         }
     }
 
+    fn header_shape(self) -> Shape {
+        match self {
+            Self::Pinned {
+                at,
+                width,
+                height,
+                push,
+            } => Shape::new(
+                Layout::column()
+                    .overlay(at)
+                    .width(width)
+                    .height(height)
+                    .scroll(Point::new(Px::ZERO, push))
+                    .scroll_axes(ScrollAxes::HORIZONTAL),
+                Style::background(FIELD),
+                Some(ids::pinned_header()),
+            ),
+            Self::FileHeader { id, height } => Shape::new(
+                Layout::row()
+                    .grow_width()
+                    .slot(height)
+                    .padding(FILE_HEADER_PADDING)
+                    .gap(SMALL_GAP)
+                    .cross(Align::Center),
+                Style::background(PANEL).border(Sides::TOP.with(Sides::BOTTOM), BORDER),
+                Some(id),
+            ),
+            _ => self.block_shape(),
+        }
+    }
+
     fn block_shape(self) -> Shape {
         match self {
             Self::Card(id) => Shape::new(
                 Layout::row().grow_width(),
                 Style::background(CARD_FILL).border(Sides::ALL, CARD_EDGE),
+                Some(id),
+            ),
+            Self::CodeBlock(id) => Shape::new(
+                Layout::column().grow_width().padding(PANEL_PADDING),
+                Style::background(FIELD),
                 Some(id),
             ),
             Self::Slot { id, height } => Shape::new(
@@ -310,22 +386,10 @@ impl Container {
                 None,
             ),
             Self::CommentRow(_) | Self::Comment { .. } => self.comment_shape(),
-            Self::Removed(id) => Shape::new(
-                Layout::column().grow_width().remembered(),
-                Style::background(REMOVED_FILL),
-                Some(id),
-            ),
-            Self::FileHeader { id, height } => Shape::new(
-                Layout::row()
-                    .grow_width()
-                    .slot(height)
-                    .padding(FILE_HEADER_PADDING)
-                    .gap(SMALL_GAP)
-                    .cross(Align::Center),
-                Style::background(PANEL).border(Sides::TOP.with(Sides::BOTTOM), BORDER),
-                Some(id),
-            ),
-            Self::Card(_) | Self::CardBody | Self::Slot { .. } => self.block_shape(),
+            Self::FileHeader { .. } | Self::Pinned { .. } => self.header_shape(),
+            Self::Card(_) | Self::CardBody | Self::Slot { .. } | Self::CodeBlock(_) => {
+                self.block_shape()
+            }
             Self::Viewer { size } => Shape::new(
                 Layout::column()
                     .floating(Point::new(Px::ZERO, Px::ZERO))
@@ -358,7 +422,8 @@ impl Container {
             ),
             Self::Picker { at, width }
             | Self::Palette { at, width }
-            | Self::Settings { at, width } => self.box_shape(at, width),
+            | Self::Settings { at, width }
+            | Self::Choices { at, width } => self.box_shape(at, width),
             Self::PanelHeader => Shape::new(
                 Layout::row().grow_width().cross(Align::Center),
                 Style::background(TAB_STRIP).border(Sides::BOTTOM, BORDER),
@@ -384,8 +449,13 @@ pub(crate) struct Window {
     pub(crate) visible: Count,
 }
 
-fn text_kind(runs: Vec<Run>, size: FontSize, wrap: Wrap) -> Kind {
-    Kind::Text(Text { runs, size, wrap })
+fn text_kind(runs: Vec<Run>, size: FontSize, wrap: Wrap, select: Select) -> Kind {
+    Kind::Text(Text {
+        runs,
+        size,
+        wrap,
+        select,
+    })
 }
 
 impl Frame<'_> {
@@ -436,7 +506,7 @@ impl Frame<'_> {
     pub(crate) fn label(&mut self, text: impl Into<Label>, color: ui::Color) {
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            text_kind(vec![Run::new(text, color)], size, Wrap::None, Select::On),
             Layout::row().padding(LABEL_PADDING),
             Style::NONE,
             None,
@@ -446,7 +516,7 @@ impl Frame<'_> {
     pub(crate) fn label_runs(&mut self, runs: Vec<Run>) {
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(runs, size, Wrap::None),
+            text_kind(runs, size, Wrap::None, Select::On),
             Layout::row().padding(LABEL_PADDING),
             Style::NONE,
             None,
@@ -455,12 +525,12 @@ impl Frame<'_> {
 
     pub(crate) fn text_line(&mut self, runs: Vec<Run>) {
         let size = self.metrics.font;
-        self.sized_line(runs, size);
+        self.sized_line(runs, size, Select::On);
     }
 
-    pub(crate) fn sized_line(&mut self, runs: Vec<Run>, size: FontSize) {
+    pub(crate) fn sized_line(&mut self, runs: Vec<Run>, size: FontSize, select: Select) {
         self.ui.leaf(
-            text_kind(runs, size, Wrap::None),
+            text_kind(runs, size, Wrap::None, select),
             Layout::row(),
             Style::NONE,
             None,
@@ -470,7 +540,7 @@ impl Frame<'_> {
     pub(crate) fn caption(&mut self, runs: Vec<Run>) {
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(runs, size, Wrap::Clip),
+            text_kind(runs, size, Wrap::Clip, Select::On),
             Layout::row().grow_width().padding(LABEL_PADDING),
             Style::NONE,
             None,
@@ -480,7 +550,7 @@ impl Frame<'_> {
     pub(crate) fn row_text(&mut self, runs: Vec<Run>) {
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(runs, size, Wrap::Clip),
+            text_kind(runs, size, Wrap::Clip, Select::Off),
             Layout::row().grow_width().padding(ROW_PADDING),
             Style::NONE,
             None,
@@ -490,7 +560,7 @@ impl Frame<'_> {
     pub(crate) fn plain_line(&mut self, text: impl Into<Label>, color: ui::Color) {
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            text_kind(vec![Run::new(text, color)], size, Wrap::None, Select::On),
             Layout::row(),
             Style::NONE,
             None,
@@ -500,7 +570,7 @@ impl Frame<'_> {
     pub(crate) fn title(&mut self, text: impl Into<Label>) {
         let size = theme::title_font(self.metrics.font);
         self.ui.leaf(
-            text_kind(vec![Run::new(text, TEXT)], size, Wrap::Words),
+            text_kind(vec![Run::new(text, TEXT)], size, Wrap::Words, Select::On),
             Layout::row().grow_width(),
             Style::NONE,
             None,
@@ -513,7 +583,7 @@ impl Frame<'_> {
             Padding::Step => LABEL_PADDING,
         };
         self.ui.leaf(
-            text_kind(vec![Run::new(text, color)], size, Wrap::Words),
+            text_kind(vec![Run::new(text, color)], size, Wrap::Words, Select::On),
             Layout::row().grow_width().padding(padding),
             Style::NONE,
             None,
@@ -532,7 +602,7 @@ impl Frame<'_> {
     pub(crate) fn pill(&mut self, text: impl Into<Label>, color: Color) {
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            text_kind(vec![Run::new(text, color)], size, Wrap::None, Select::On),
             Layout::row().padding(BADGE_PADDING),
             Style::background(theme::pill_fill(color)).border(Sides::ALL, theme::pill_edge(color)),
             None,
@@ -548,6 +618,16 @@ impl Frame<'_> {
         self.ui.leaf(
             Kind::Custom(draw),
             Layout::row().grow_width().height(height),
+            Style::NONE,
+            Some(id),
+        )
+    }
+
+    pub(crate) fn line_row(&mut self, draw: Box<dyn Draw>, id: Id) -> Interaction {
+        let row = self.row_height();
+        self.ui.leaf(
+            Kind::Custom(draw),
+            Layout::row().grow_width().slot(row),
             Style::NONE,
             Some(id),
         )
@@ -604,7 +684,7 @@ impl Frame<'_> {
         let color = if selected || hovered { TEXT } else { WEAK };
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            text_kind(vec![Run::new(text, color)], size, Wrap::None, Select::Off),
             Layout::row().padding(BUTTON_PADDING).steady(),
             Style::background(background).border(Sides::ALL, BORDER),
             Some(id),
@@ -658,6 +738,7 @@ impl Frame<'_> {
                 vec![Run::new(text, if active || hovered { TEXT } else { WEAK })],
                 size,
                 Wrap::None,
+                Select::Off,
             ),
             Layout::row(),
             Style::NONE,
@@ -671,7 +752,12 @@ impl Frame<'_> {
             FAINT
         };
         let closed = self.ui.leaf(
-            text_kind(vec![Run::new(Icon::Close, close_color)], size, Wrap::None),
+            text_kind(
+                vec![Run::new(Icon::Close, close_color)],
+                size,
+                Wrap::None,
+                Select::Off,
+            ),
             Layout::row(),
             Style {
                 background: close_hovered.then_some(HOVER),
@@ -704,6 +790,7 @@ impl Frame<'_> {
                 vec![Run::new(text, if hovered { TEXT } else { WEAK })],
                 size,
                 Wrap::None,
+                Select::Off,
             ),
             layout,
             Style::background(if hovered { HOVER } else { FIELD }).border(Sides::ALL, BORDER),
@@ -728,7 +815,7 @@ impl Frame<'_> {
         };
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            text_kind(vec![Run::new(text, color)], size, Wrap::None, Select::Off),
             Layout::row().padding(SMALL_BUTTON_PADDING).steady(),
             Style::background(if hovered { HOVER } else { FIELD }).border(Sides::ALL, edge),
             Some(id),
@@ -753,7 +840,7 @@ impl Frame<'_> {
         };
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(vec![Run::new(text, color)], size, Wrap::None),
+            text_kind(vec![Run::new(text, color)], size, Wrap::None, Select::Off),
             Layout::row()
                 .padding(BUTTON_PADDING)
                 .width(NAV_BUTTON.of(self.cell_width()) + NAV_BUTTON_EXTRA)
@@ -769,7 +856,7 @@ impl Frame<'_> {
         let hovered = self.ui.interaction(id).hovered();
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(runs, size, Wrap::None),
+            text_kind(runs, size, Wrap::None, Select::Off),
             Layout::row().steady(),
             Style {
                 background: hovered.then_some(HOVER),
@@ -782,7 +869,7 @@ impl Frame<'_> {
     pub(crate) fn cell(&mut self, runs: Vec<Run>, width: Px) {
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(runs, size, Wrap::Clip),
+            text_kind(runs, size, Wrap::Clip, Select::Off),
             Layout::row().width(width).padding(LABEL_PADDING),
             Style::NONE,
             None,
@@ -794,7 +881,7 @@ impl Frame<'_> {
         let hovered = self.ui.interaction(id).hovered();
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(runs, size, Wrap::Clip),
+            text_kind(runs, size, Wrap::Clip, Select::Off),
             Layout::row().width(width).padding(LABEL_PADDING),
             Style {
                 background: hovered.then_some(HOVER),
@@ -857,7 +944,7 @@ impl Frame<'_> {
 
     pub(crate) fn link(&mut self, runs: Vec<Run>, target: Target) -> Interaction {
         let size = self.metrics.font;
-        self.sized_link(runs, target, size)
+        self.sized_link(runs, target, size, Select::On)
     }
 
     pub(crate) fn sized_link(
@@ -865,6 +952,7 @@ impl Frame<'_> {
         runs: Vec<Run>,
         target: Target,
         size: FontSize,
+        select: Select,
     ) -> Interaction {
         let id = target.id();
         let hovered = self.ui.interaction(id).hovered();
@@ -880,7 +968,7 @@ impl Frame<'_> {
             (runs, Style::NONE.border(Sides::BOTTOM, ACCENT))
         };
         self.ui.leaf(
-            text_kind(runs, size, Wrap::None),
+            text_kind(runs, size, Wrap::None, select),
             Layout::row().steady(),
             style,
             Some(id),
@@ -893,18 +981,18 @@ impl Frame<'_> {
         across: Px,
         target: Target,
         marked: Option<ui::Color>,
+        fill: ui::Color,
     ) -> Interaction {
         let id = target.id();
-        let background = marked.or(self.ui.interaction(id).hovered().then_some(HOVER));
+        let background = marked
+            .or(self.ui.interaction(id).hovered().then_some(HOVER))
+            .unwrap_or(fill);
         let font = self.metrics.font;
         let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
-            if let Some(color) = background {
-                canvas.rect(rect, color);
-            }
+            canvas.rect(rect, background);
             canvas.grid(Point::new(rect.left - across, rect.top), font, &grid);
         };
-        let row = self.row_height();
-        self.custom_block(Box::new(draw), row, id)
+        self.line_row(Box::new(draw), id)
     }
 
     pub(crate) fn row(&mut self, runs: Vec<Run>, target: Target, chosen: Chosen) -> Interaction {
@@ -922,7 +1010,7 @@ impl Frame<'_> {
         let background = marked.or(hovered.then_some(HOVER));
         let size = self.metrics.font;
         self.ui.leaf(
-            text_kind(runs, size, Wrap::Clip),
+            text_kind(runs, size, Wrap::Clip, Select::Off),
             Layout::row().grow_width().padding(ROW_PADDING),
             Style {
                 background,
@@ -988,7 +1076,7 @@ impl Frame<'_> {
             );
         }
         self.ui.leaf(
-            text_kind(tree.runs, size, Wrap::Clip),
+            text_kind(tree.runs, size, Wrap::Clip, Select::Off),
             Layout::row().grow_width().padding(ROW_PADDING),
             Style::NONE,
             None,
@@ -996,7 +1084,7 @@ impl Frame<'_> {
         let has_badges = !tree.badges.is_empty();
         for badge in tree.badges {
             self.ui.leaf(
-                text_kind(vec![badge], size, Wrap::None),
+                text_kind(vec![badge], size, Wrap::None, Select::Off),
                 Layout::row().padding(BADGE_PADDING),
                 Style::background(BADGE),
                 None,
@@ -1017,6 +1105,7 @@ impl Frame<'_> {
                     )],
                     size,
                     Wrap::None,
+                    Select::Off,
                 ),
                 Layout::row().padding(ROW_PADDING).steady(),
                 Style {
@@ -1064,7 +1153,7 @@ impl Frame<'_> {
             Some(id),
         );
         self.ui.leaf(
-            text_kind(vec![tag], size, Wrap::Clip),
+            text_kind(vec![tag], size, Wrap::Clip, Select::Off),
             Layout::row()
                 .width(PALETTE_TAG.of(self.cell_width()))
                 .padding(ROW_PADDING),
@@ -1072,14 +1161,14 @@ impl Frame<'_> {
             None,
         );
         self.ui.leaf(
-            text_kind(runs, size, Wrap::Clip),
+            text_kind(runs, size, Wrap::Clip, Select::Off),
             Layout::row().grow_width().padding(ROW_PADDING),
             Style::NONE,
             None,
         );
         if let Some(chord) = chord {
             self.ui.leaf(
-                text_kind(vec![Run::new(chord, ACCENT)], size, Wrap::None),
+                text_kind(vec![Run::new(chord, ACCENT)], size, Wrap::None, Select::Off),
                 Layout::row().padding(ROW_PADDING),
                 Style::NONE,
                 None,
@@ -1095,8 +1184,12 @@ impl Frame<'_> {
             Fill::Fit => Layout::row(),
             Fill::Grow => Layout::row().grow_width(),
         };
-        self.ui
-            .leaf(text_kind(runs, size, Wrap::None), layout, Style::NONE, None);
+        self.ui.leaf(
+            text_kind(runs, size, Wrap::None, Select::On),
+            layout,
+            Style::NONE,
+            None,
+        );
     }
 
     pub(crate) fn focused(&self, fields: &Fields, which: Which) -> Attention {
@@ -1132,7 +1225,7 @@ impl Frame<'_> {
         let size = self.metrics.font;
         if pieces.is_empty() {
             self.ui.leaf(
-                text_kind(vec![Run::new("", TEXT)], size, Wrap::None),
+                text_kind(vec![Run::new("", TEXT)], size, Wrap::None, Select::Off),
                 Layout::row(),
                 Style::NONE,
                 None,
@@ -1151,7 +1244,7 @@ impl Frame<'_> {
                 CaretAt::Elsewhere => (text, style),
             };
             self.ui.leaf(
-                text_kind(vec![Run::new(text, TEXT)], size, Wrap::None),
+                text_kind(vec![Run::new(text, TEXT)], size, Wrap::None, Select::Off),
                 Layout::row(),
                 style,
                 None,
@@ -1235,7 +1328,12 @@ impl Frame<'_> {
             Attention::Idle if field.text().is_empty() => {
                 let size = self.metrics.font;
                 self.ui.leaf(
-                    text_kind(vec![Run::new(hint.clone(), WEAK)], size, Wrap::None),
+                    text_kind(
+                        vec![Run::new(hint.clone(), WEAK)],
+                        size,
+                        Wrap::None,
+                        Select::Off,
+                    ),
                     Layout::row(),
                     Style::NONE,
                     None,
@@ -1307,7 +1405,12 @@ impl Frame<'_> {
         if field.text().is_empty() && attention == Attention::Idle {
             let size = self.metrics.font;
             self.ui.leaf(
-                text_kind(vec![Run::new(hint.clone(), WEAK)], size, Wrap::None),
+                text_kind(
+                    vec![Run::new(hint.clone(), WEAK)],
+                    size,
+                    Wrap::None,
+                    Select::Off,
+                ),
                 Layout::row(),
                 Style::NONE,
                 None,

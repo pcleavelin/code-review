@@ -5,7 +5,7 @@
 1. Submitting a review has not been run against a live forge: GitHub, GitLab and Forgejo
    listing were run against public repositories, and the request bodies are unit-tested, but
    no review has been posted. Try each on a pull request you own.
-6. The Inbox filters by words, standing and review requested from you; there is no "mine"
+6. The Inbox filters by words, status and review requested from you; there is no "mine"
    (the pull requests you opened). Trigger: an inbox too long to scan.
 11. Markdown: HTML other than `<img>` is drawn as its text with the tags dropped, footnotes and
     math as plain text. Trigger: a description or comment whose meaning is lost that way (a

@@ -1,8 +1,8 @@
 use crate::review::{
     Block, BranchName, CardKey, ChangeKind, CodePlace, CommitId, Content, Conversation, Decision,
     DiffLayout, DiffLine, DraftId, DraftOn, DraftText, FileChange, FileRow, Hunk, JiraSite,
-    LineKind, Login, Moment, Note, Pairing, PrNumber, Prose, Provenance, RefName, Refusal,
-    RepoSlug, Review, Revision, Rights, Seen, Side, Standing, Submission, SubmissionId, Thread,
+    LineKind, Login, Moment, Note, Pairing, PrNumber, Prose, Provenance, PullStatus, RefName,
+    Refusal, RepoSlug, Review, Revision, Rights, Seen, Side, Submission, SubmissionId, Thread,
     ThreadId, ThreadState,
 };
 use crate::text::{FileText, Line, RelativePath, SourceLine, Span};
@@ -325,22 +325,22 @@ fn a_pull_request_is_new_until_looked_at_and_updated_once_its_head_moves() {
     let files = vec![replace_b_with_x()];
     let mut review = Review::default();
     assert_eq!(
-        review.standing(&first, Some(review.progress(&files))),
-        Standing::New
+        review.status(&first, Some(review.progress(&files))),
+        PullStatus::New
     );
     review.look(first.clone());
     assert_eq!(
-        review.standing(&first, Some(review.progress(&files))),
-        Standing::Reviewing
+        review.status(&first, Some(review.progress(&files))),
+        PullStatus::Reviewing
     );
     review.mark(&files[0], first.clone());
     assert_eq!(
-        review.standing(&first, Some(review.progress(&files))),
-        Standing::Reviewed
+        review.status(&first, Some(review.progress(&files))),
+        PullStatus::Reviewed
     );
     assert_eq!(
-        review.standing(&moved, Some(review.progress(&files))),
-        Standing::Updated
+        review.status(&moved, Some(review.progress(&files))),
+        PullStatus::Updated
     );
 }
 
@@ -348,7 +348,7 @@ fn a_pull_request_is_new_until_looked_at_and_updated_once_its_head_moves() {
 fn a_looked_at_review_whose_changes_are_not_fetched_here_is_never_reviewed() {
     let mut review = Review::default();
     review.look(commit());
-    assert_eq!(review.standing(&commit(), None), Standing::Reviewing);
+    assert_eq!(review.status(&commit(), None), PullStatus::Reviewing);
 }
 
 #[test]
@@ -368,8 +368,8 @@ fn a_pending_draft_keeps_a_fully_seen_review_open() {
         DraftText::new("one more thing").unwrap(),
     );
     assert_eq!(
-        review.standing(&commit(), Some(review.progress(&files))),
-        Standing::Reviewing
+        review.status(&commit(), Some(review.progress(&files))),
+        PullStatus::Reviewing
     );
 }
 

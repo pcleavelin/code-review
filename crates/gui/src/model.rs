@@ -7,6 +7,7 @@ use strum::VariantArray;
 use ui::{Count, Extent, FontSize, Id, Label, Px};
 
 use crate::columns::InboxGrid;
+use crate::dropdown::Dropdown;
 use crate::element_tip::Resting;
 use crate::field::Fields;
 use crate::nav::Nav;
@@ -163,6 +164,7 @@ pub(crate) struct Model {
     pub(crate) fonts: Option<Fonts>,
     pub(crate) settings_menu: Option<SettingsMenu>,
     pub(crate) viewer: Option<Viewer>,
+    pub(crate) dropdown: Option<Dropdown>,
 }
 
 impl Model {
@@ -205,6 +207,7 @@ impl Model {
             fonts: None,
             settings_menu: None,
             viewer: None,
+            dropdown: None,
         }
     }
 }

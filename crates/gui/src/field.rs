@@ -6,7 +6,7 @@ use ui::{Count, Glyph, Id, Label, Typed};
 
 use strum::VariantArray;
 
-use crate::columns::InboxColumn;
+use crate::columns::WordColumn;
 use crate::ids::{self, Control};
 use crate::keys::{Extend, Walk};
 use crate::text::Clipped;
@@ -15,7 +15,7 @@ use crate::text::Clipped;
 pub(crate) enum EnterMods {
     Plain,
     Shift,
-    Control,
+    Primary,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,13 +79,13 @@ pub(crate) enum Which {
     Token,
     JiraSite,
     JiraEmail,
-    Column(InboxColumn),
+    Column(WordColumn),
 }
 
 impl Which {
     pub(crate) fn id(self) -> Id {
         match self {
-            Self::Column(column) => ids::COLUMN_FIELD.with(&column.name()).id(),
+            Self::Column(column) => ids::COLUMN_FIELD.with(&column.column().name()).id(),
             _ => self.control().id(),
         }
     }
@@ -789,13 +789,13 @@ pub(crate) struct Fields {
     token: Field,
     jira_site: Field,
     jira_email: Field,
-    columns: [Field; InboxColumn::VARIANTS.len()],
+    columns: [Field; WordColumn::VARIANTS.len()],
     focused: Option<Holding>,
 }
 
-fn column_at(column: InboxColumn) -> Count {
+fn column_at(column: WordColumn) -> Count {
     Count::new(
-        InboxColumn::VARIANTS
+        WordColumn::VARIANTS
             .iter()
             .position(|known| *known == column)
             .unwrap_or(0),

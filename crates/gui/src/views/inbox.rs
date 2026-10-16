@@ -1,13 +1,14 @@
 use std::cmp::Ordering;
 
-use domain::{Progress, Standing};
+use domain::{Progress, PullStatus};
 use platform::Cursor;
 use session::{Entry, Pinned, RequestedFrom};
 use strum::VariantArray;
 use ui::{Button, Count, Label, Px, Run};
 
 use crate::action::Action;
-use crate::columns::{GridAct, InboxColumn, Order, Resizing, Sorting};
+use crate::columns::{ColumnFilter, GridAct, InboxColumn, Order, Resizing, Sorting, WordColumn};
+use crate::dropdown::{Choice, Dropdown, DropdownAct};
 use crate::field::Which;
 use crate::ids;
 use crate::login::{Held, JiraForm, Login, LoginAct, Stage};
@@ -18,14 +19,7 @@ use crate::theme::{
     ACCENT, COLUMN_EDGE, Cells, FORGE_STATE, FORM_LABEL, GREEN, INBOX_FIELD, JIRA_FIELD, ORANGE,
     PIN_FIELD, RED, SELECTED, TEXT, TOKEN_FIELD, WEAK,
 };
-use crate::widgets::{Chosen, CommentLook, Container, Frame, Padding, Scroller};
-
-const STANDINGS: [Standing; 4] = [
-    Standing::New,
-    Standing::Updated,
-    Standing::Reviewing,
-    Standing::Reviewed,
-];
+use crate::widgets::{Chosen, CommentLook, Container, Frame, Padding, Picked, Scroller, Tally};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LoginFailed {
@@ -33,21 +27,21 @@ enum LoginFailed {
     No,
 }
 
-pub(super) fn standing_word(standing: Standing) -> Label {
-    Label::new(match standing {
-        Standing::New => "new",
-        Standing::Updated => "updated",
-        Standing::Reviewing => "reviewing",
-        Standing::Reviewed => "reviewed",
+pub(super) fn status_word(status: PullStatus) -> Label {
+    Label::new(match status {
+        PullStatus::New => "new",
+        PullStatus::Updated => "updated",
+        PullStatus::Reviewing => "reviewing",
+        PullStatus::Reviewed => "reviewed",
     })
 }
 
-pub(super) const fn standing_color(standing: Standing) -> ui::Color {
-    match standing {
-        Standing::New => ACCENT,
-        Standing::Updated => ORANGE,
-        Standing::Reviewing => TEXT,
-        Standing::Reviewed => GREEN,
+pub(super) const fn status_color(status: PullStatus) -> ui::Color {
+    match status {
+        PullStatus::New => ACCENT,
+        PullStatus::Updated => ORANGE,
+        PullStatus::Reviewing => TEXT,
+        PullStatus::Reviewed => GREEN,
     }
 }
 
@@ -61,7 +55,7 @@ fn haystack(entry: &Entry) -> Label {
         pull.author,
         pull.head,
         pull.base,
-        standing_word(entry.standing).as_str()
+        status_word(entry.status).as_str()
     ))
 }
 
@@ -84,38 +78,6 @@ fn toolbar(model: &Model, frame: &mut Frame<'_>, entries: &[Entry], requests: &R
         &Label::new("filter: words of the title, repository, author, branch, #number"),
         INBOX_FIELD,
     );
-    let chosen = model.review.standing;
-    let all = ids::INBOX_STATE.with(&Label::new("all"));
-    if frame
-        .button(
-            format!("all {}", entries.len()),
-            all,
-            Chosen::of(&chosen, &None),
-        )
-        .clicked()
-    {
-        frame.push(Action::Review(ReviewAct::ShowStanding(None)));
-    }
-    frame.attach_tip(all);
-    for standing in STANDINGS {
-        let word = standing_word(standing);
-        let count = entries
-            .iter()
-            .filter(|entry| entry.standing == standing)
-            .count();
-        let target = ids::INBOX_STATE.with(&word);
-        if frame
-            .button(
-                format!("{} {count}", word.as_str()),
-                target,
-                Chosen::of(&chosen, &Some(standing)),
-            )
-            .clicked()
-        {
-            frame.push(Action::Review(ReviewAct::ShowStanding(Some(standing))));
-        }
-        frame.attach_tip(target);
-    }
     requested(model, frame, entries, requests);
     frame.grow();
     let refresh = ids::PULLS_REFRESH.target();
@@ -429,12 +391,12 @@ fn open_page(frame: &mut Frame<'_>) {
 fn cell_runs(model: &Model, column: InboxColumn, entry: &Entry) -> Vec<Run> {
     let pull = &entry.pull;
     match column {
-        InboxColumn::Standing if model.review.opening == Some(pull.number) => {
+        InboxColumn::Status if model.review.opening == Some(pull.number) => {
             vec![Run::new("opening", ORANGE)]
         }
-        InboxColumn::Standing => vec![Run::new(
-            standing_word(entry.standing),
-            standing_color(entry.standing),
+        InboxColumn::Status => vec![Run::new(
+            status_word(entry.status),
+            status_color(entry.status),
         )],
         InboxColumn::Pull => vec![Run::new(format!("{}#{}", entry.repo, pull.number), ACCENT)],
         InboxColumn::Title => vec![Run::new(pull.title.as_str(), TEXT)],
@@ -466,18 +428,9 @@ fn cell_text(model: &Model, column: InboxColumn, entry: &Entry) -> Label {
     )
 }
 
-fn standing_rank(standing: Standing) -> Count {
-    Count::new(
-        STANDINGS
-            .iter()
-            .position(|known| *known == standing)
-            .unwrap_or(STANDINGS.len()),
-    )
-}
-
 fn ordered(model: &Model, column: InboxColumn, one: &Entry, other: &Entry) -> Ordering {
     match column {
-        InboxColumn::Standing => standing_rank(one.standing).cmp(&standing_rank(other.standing)),
+        InboxColumn::Status => one.status.cmp(&other.status),
         InboxColumn::Pull => (&one.repo, one.pull.number).cmp(&(&other.repo, other.pull.number)),
         InboxColumn::Seen => (one.progress.map(Progress::seen), one.drafts.len())
             .cmp(&(other.progress.map(Progress::seen), other.drafts.len())),
@@ -549,13 +502,23 @@ fn header(model: &Model, frame: &mut Frame<'_>) {
     frame.start(Container::FitRow);
     for column in InboxColumn::VARIANTS.iter().copied() {
         let cells = Cells::of_count(usize::from(model.inbox_grid.cells(column).get()));
-        frame.field_named(
-            &model.fields,
-            Which::Column(column),
-            Which::Column(column).id(),
-            &Label::new("filter"),
-            cells,
-        );
+        match column.filter() {
+            ColumnFilter::Choices(dropdown) => {
+                if frame
+                    .dropdown_trigger(dropdown.target(), &model.review.statuses, cells)
+                    .clicked()
+                {
+                    frame.push(Action::Dropdown(DropdownAct::Toggle(dropdown)));
+                }
+            }
+            ColumnFilter::Words(words) => frame.field_named(
+                &model.fields,
+                Which::Column(words),
+                Which::Column(words).id(),
+                &Label::new("filter"),
+                cells,
+            ),
+        }
         frame.column_edge(COLUMN_EDGE, None);
     }
     frame.finish();
@@ -583,9 +546,9 @@ fn row(model: &Model, frame: &mut Frame<'_>, position: Count, entry: &Entry) {
 }
 
 fn filtered(model: &Model, entry: &Entry) -> bool {
-    InboxColumn::VARIANTS.iter().copied().all(|column| {
-        let filter = model.fields.get(Which::Column(column)).text();
-        let cell = cell_text(model, column, entry);
+    WordColumn::VARIANTS.iter().copied().all(|words| {
+        let filter = model.fields.get(Which::Column(words)).text();
+        let cell = cell_text(model, words.column(), entry);
         filter
             .as_str()
             .split_whitespace()
@@ -659,10 +622,7 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
         .iter()
         .enumerate()
         .filter(|(_, entry)| {
-            model
-                .review
-                .standing
-                .is_none_or(|standing| entry.standing == standing)
+            model.review.statuses.shows(entry.status)
                 && (!only_requested || requests.of(entry))
                 && kept(model, entry)
                 && filtered(model, entry)
@@ -690,4 +650,52 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
     }
     frame.finish();
     frame.finish();
+}
+
+impl Choice for PullStatus {
+    fn word(self) -> Label {
+        status_word(self)
+    }
+
+    fn color(self) -> ui::Color {
+        status_color(self)
+    }
+}
+
+pub(super) fn choices(model: &Model, frame: &mut Frame<'_>) {
+    let Some(dropdown) = model.dropdown else {
+        return;
+    };
+    let Some(trigger) = frame.ui.interaction(dropdown.target().id()).rect() else {
+        frame.push(Action::Dropdown(DropdownAct::Close));
+        return;
+    };
+    let at = ui::Point::new(trigger.left, trigger.bottom());
+    match dropdown {
+        Dropdown::InboxStatus => {
+            let entries: &[Entry] = match &model.review.inbox {
+                Inbox::Listed { entries, .. } => entries,
+                Inbox::Asking => &[],
+            };
+            let tallies: Vec<Tally<PullStatus>> = PullStatus::VARIANTS
+                .iter()
+                .map(|status| Tally {
+                    value: *status,
+                    count: Count::new(
+                        entries
+                            .iter()
+                            .filter(|entry| entry.status == *status)
+                            .count(),
+                    ),
+                })
+                .collect();
+            match frame.dropdown_choices(at, &tallies, &model.review.statuses) {
+                Picked::Toggled(status) => {
+                    frame.push(Action::Review(ReviewAct::ToggleStatus(status)));
+                }
+                Picked::Outside => frame.push(Action::Dropdown(DropdownAct::Close)),
+                Picked::Kept => {}
+            }
+        }
+    }
 }

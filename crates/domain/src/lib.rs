@@ -8,8 +8,8 @@ mod text;
 
 pub use id::{Entry, IdList, Key, Position};
 pub use index::{
-    Argument, Backend, Call, Cut, Depth, Edge, Extension, FileId, Highlight, HighlightClass,
-    Imports, Index, Language, Location, PendingBatch, Planned, Program, PrunedTree, Qualifier,
+    Argument, Backend, Call, Cut, Depth, Edge, FileId, Highlight, HighlightClass, Imports, Index,
+    Language, LanguageId, Location, PendingBatch, Planned, Program, PrunedTree, Qualifier,
     Readiness, Root, Scope, SourceFile, Stop, Symbol, SymbolId, SymbolIndex, SymbolKey, SymbolKind,
     SymbolName, SymbolQuery, TreeEntry, TypeName, Verdict,
 };
@@ -26,8 +26,8 @@ pub use review::{
     DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount, FileRow, Forge, ForgeHost,
     ForgeKind, Grant, Host, Hunk, JiraSite, Lifetime, LineKind, Linked, LinkedFile, Login, Mark,
     Moment, Note, NumberedLine, OAuthApp, Paired, Pairing, PrNumber, PrTitle, Progress, Prose,
-    Provenance, PullRequest, RefName, RefreshToken, Refusal, Removal, RemovedLine, Renewal,
-    RepoSlug, Review, Revision, Rights, Seen, Side, Spelling, Standing, Submission, SubmissionId,
+    Provenance, PullRequest, PullStatus, RefName, RefreshToken, Refusal, Removal, RemovedLine,
+    Renewal, RepoSlug, Review, Revision, Rights, Seen, Side, Spelling, Submission, SubmissionId,
     Thread, ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
 };
 pub use settings::{BaseFontSize, FontFamily, Settings, Theme};

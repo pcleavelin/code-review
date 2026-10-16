@@ -23,14 +23,17 @@ The behaviour a change adds is stated by a test written before the code.
    lines (or parts of them) the run must print, so the scenario fails when the behaviour does.
    The fixture (`common/mod.rs`: `BASE`, `FIRST`, `SECOND`, the forge's JSON) is shared by
    every scenario; extend it when a scenario needs more. A gesture at an element out of view
-   is refused; to check that something is not shown, use `absent <id>`. Read the screenshots
-   (the failure message names the folder).
+   is refused; to check that something is not shown, use `absent <id>`. A GUI scenario is
+   written with the change and runs at its very end (`finish` step 6); read the screenshots
+   then (the failure message names the folder).
 4. Scale: behaviour that runs per changed file, per pull request or per line gets a step in
    the scale scenarios, which run on `common::large_fixture` (`common/large.rs`: a pull
    request of thousands of changed files): `scale_review` / `scale_inbox` in the `at_scale!`
    table of `cli.rs`, `scale` in `common/gui.rs`. Each step's bound is its deadline: measure
    the step (`-- --nocapture` prints its `SCALE` line), give it about three times that, and
-   say both numbers in the commit message.
+   say both numbers in the commit message. Without `REVIEW_BIN` the scenarios run the debug
+   build (`CARGO_BIN_EXE_review`), so a before-and-after comparison sets `REVIEW_BIN` to a
+   release build on both sides.
 5. Every run of the binary, and every program the harness starts, has a deadline
    (`common::COMMAND_DEADLINE`, `common::WINDOW_DEADLINE`, or the scale step's bound): on expiry
    the harness kills the run's process group and fails naming the scenario, the step and

@@ -51,7 +51,7 @@ repo::pub fn change(&self, path: &RelativePath) -> Option<&FileChange>
 repo::pub fn seen(&self, change: &FileChange) -> Seen
 repo::pub enum RequestedFrom { #[default] Any, You, }
 repo::pub enum Waiting { Keychain(Host), Forge(Host), Review(PrNumber), }
-repo::pub struct Entry { pub repo: RepoName, pub pull: PullRequest, pub progress: Option<Progress>, pub drafts: Vec<Draft>, pub standing: Standing, }
+repo::pub struct Entry { pub repo: RepoName, pub pull: PullRequest, pub progress: Option<Progress>, pub drafts: Vec<Draft>, pub status: PullStatus, }
 repo::pub struct Repo { root: Root, name: RepoName, vcs: Vcs, store: ReviewStore, remote: Remote, url: RemoteUrl, access: Access, }
 repo::pub fn find(root: &Root, access: &Access) -> Result<Self, SessionError>
 repo::pub const fn root(&self) -> &Root

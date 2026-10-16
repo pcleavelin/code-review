@@ -5,8 +5,11 @@ use std::time::Duration;
 use domain::{Language, Line, Location, RelativePath};
 use serde_json::json;
 
-use crate::answer::{Character, HoverLine, HoverText, Inline, RangeEnd, Reply};
+use crate::answer::{
+    Character, DocumentPosition, HoverLine, HoverReply, HoverText, Inline, RangeEnd, Reply,
+};
 use crate::convert::{self, Uri, relative};
+use crate::documents::{DocumentChange, OpenDocuments, OpenLimit};
 use crate::session::{LspSession, WhyUnanswered, read_reply};
 use crate::wire::{self, LocationShape};
 
@@ -315,4 +318,101 @@ fn hover_markdown_keeps_what_only_looks_like_markup() {
             "text {one} line",
         ]
     );
+}
+
+#[test]
+fn a_document_is_opened_once_reopened_when_it_changes_and_the_least_recent_closed_past_the_limit() {
+    let (first, second, third) = (
+        RelativePath::new("a.ts"),
+        RelativePath::new("b.ts"),
+        RelativePath::new("c.ts"),
+    );
+    let mut documents = OpenDocuments::new(OpenLimit::new(2));
+    assert_eq!(documents.touch(&first, 1), [DocumentChange::Open]);
+    assert_eq!(documents.touch(&first, 1), []);
+    assert_eq!(
+        documents.touch(&first, 2),
+        [DocumentChange::Close(first.clone()), DocumentChange::Open]
+    );
+    assert_eq!(documents.touch(&second, 1), [DocumentChange::Open]);
+    assert_eq!(documents.touch(&first, 2), []);
+    assert_eq!(
+        documents.touch(&third, 1),
+        [DocumentChange::Close(second.clone()), DocumentChange::Open]
+    );
+    assert_eq!(documents.touch(&first, 2), []);
+    assert_eq!(
+        documents.touch(&second, 1),
+        [DocumentChange::Close(third), DocumentChange::Open]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs typescript-language-server on PATH"]
+fn typescript_language_server_answers_on_files_it_was_not_shown_before() {
+    use std::env;
+    use std::fs;
+    use std::io::Write;
+    use std::process;
+    let root = env::temp_dir().join(format!("review-tsls-{}", process::id()));
+    drop(fs::remove_dir_all(&root));
+    fs::create_dir_all(root.join("src")).unwrap();
+    for (path, text) in [
+        (
+            "tsconfig.json",
+            "{\"compilerOptions\": {\"jsx\": \"react-jsx\"}}\n",
+        ),
+        (
+            "src/shapes.ts",
+            "export function area(side: number): number {\n  return side * side;\n}\n",
+        ),
+        (
+            "src/view.tsx",
+            "import { area } from \"./shapes\";\n\nexport function Tile({ side }: { side: number }) {\n  return <div>{area(side)}</div>;\n}\n",
+        ),
+    ] {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(root.join(path))
+            .unwrap();
+        file.write_all(text.as_bytes()).unwrap();
+    }
+    let mut session = LspSession::start(Language::Javascript, &root).expect("start");
+    session.wait_ready(Duration::from_mins(1));
+    let references = session.references(&DocumentPosition {
+        file: RelativePath::new("src/shapes.ts"),
+        line: Line::new(0),
+        character: Character::new(16),
+    });
+    assert!(
+        references.contains(&Location {
+            file: RelativePath::new("src/view.tsx"),
+            line: Line::new(3),
+        }),
+        "{references:?}"
+    );
+    let outlines = session.outlines(&[RelativePath::new("src/view.tsx")]);
+    let Some(Reply::Given(first)) = outlines.first() else {
+        panic!("no answer for src/view.tsx");
+    };
+    let names: Vec<&str> = first.iter().map(|outline| outline.name.as_str()).collect();
+    assert!(names.contains(&"Tile"), "{names:?}");
+    let call = DocumentPosition {
+        file: RelativePath::new("src/view.tsx"),
+        line: Line::new(3),
+        character: Character::new(16),
+    };
+    let definition = session.definition(&call).expect("a definition of area");
+    assert_eq!(definition.file, Some(RelativePath::new("src/shapes.ts")));
+    assert_eq!(definition.line, Line::new(0));
+    let hover = session.hover(&call, || false);
+    assert!(
+        matches!(hover, HoverReply::Given(Some(_))),
+        "no hover on area"
+    );
+    session.shutdown();
+    drop(fs::remove_dir_all(&root));
 }

@@ -7,7 +7,7 @@ use clap::{Args, CommandFactory, Parser};
 use domain::{
     Block, Card, CardField, ChangeKind, Conversation, Decision, Depth, Draft, FileChange,
     ForgeHost, Index, JiraSite, Line, LineKind, Location, Mark, PrNumber, Program, Progress,
-    Review, Seen, Side, SourceFile, SourceLine, Span, Standing, Symbol, SymbolId, Thread,
+    PullStatus, Review, Seen, Side, SourceFile, SourceLine, Span, Symbol, SymbolId, Thread,
     ThreadState, WebLink,
 };
 use session::{
@@ -336,16 +336,16 @@ pub(crate) fn entry_text(entry: &Entry) -> String {
         pull.author,
         pull.head,
         pull.base,
-        standing_word(entry.standing)
+        status_word(entry.status)
     )
 }
 
-pub(crate) const fn standing_word(standing: Standing) -> &'static str {
-    match standing {
-        Standing::New => "new",
-        Standing::Updated => "updated",
-        Standing::Reviewing => "reviewing",
-        Standing::Reviewed => "reviewed",
+pub(crate) const fn status_word(status: PullStatus) -> &'static str {
+    match status {
+        PullStatus::New => "new",
+        PullStatus::Updated => "updated",
+        PullStatus::Reviewing => "reviewing",
+        PullStatus::Reviewed => "reviewed",
     }
 }
 
@@ -360,7 +360,7 @@ fn local(entry: &Entry) -> String {
         1 => ", 1 draft".to_owned(),
         many => format!(", {many} drafts"),
     };
-    format!("{}{progress}{drafts}", standing_word(entry.standing))
+    format!("{}{progress}{drafts}", status_word(entry.status))
 }
 
 pub(crate) fn inbox(

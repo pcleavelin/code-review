@@ -8,12 +8,14 @@ use std::time::{Duration, Instant};
 
 use domain::{Language, Location, RelativePath};
 use io_process::{Argument, Process, ProcessError, Program};
+use io_source::Modified;
 use serde_json::Value;
 
 use crate::answer::{
     CallItem, Definition, DocumentPosition, HoverReply, HoverText, Outline, Reply, StartError,
 };
 use crate::convert::{self, Uri};
+use crate::documents::{DocumentChange, OpenDocuments, OpenLimit};
 use crate::wire::{self, LocationShape, Notice, Outgoing, ProgressKind};
 
 const ANSWER_WAIT: Duration = Duration::from_mins(2);
@@ -22,6 +24,8 @@ const READY_POLL: Duration = Duration::from_millis(200);
 const QUIET_AFTER: Duration = Duration::from_millis(500);
 const SILENT_START: Duration = Duration::from_secs(3);
 const IN_FLIGHT: InFlight = InFlight(64);
+const OPEN_AT_MOST: OpenLimit = OpenLimit::new(64);
+const PROJECT_WAIT: Duration = Duration::from_mins(2);
 
 #[derive(Clone, Copy, Debug)]
 struct InFlight(usize);
@@ -63,6 +67,12 @@ impl OpenProgress {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Project {
+    Unopened,
+    Opened,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ServerStatus {
     Unreported,
     Busy,
@@ -86,6 +96,8 @@ pub struct LspSession {
     last_progress: Instant,
     status: ServerStatus,
     root: PathBuf,
+    documents: OpenDocuments<Modified>,
+    project: Project,
 }
 
 pub(crate) fn read_reply<T>(
@@ -144,6 +156,8 @@ impl LspSession {
             last_progress: Instant::now(),
             status: ServerStatus::Unreported,
             root,
+            documents: OpenDocuments::new(OPEN_AT_MOST),
+            project: Project::Unopened,
         };
         let uri = Uri::of(&session.root);
         let name = session
@@ -296,14 +310,40 @@ impl LspSession {
         }
     }
 
-    fn uri(&self, file: &RelativePath) -> Uri {
-        Uri::of(&self.root.join(file.as_str()))
+    fn document(&mut self, file: &RelativePath) -> Uri {
+        let path = self.root.join(file.as_str());
+        let uri = Uri::of(&path);
+        let (Some(language), Some(modified)) = (Language::language_id(file), Modified::of(&path))
+        else {
+            return uri;
+        };
+        for change in self.documents.touch(file, modified) {
+            match change {
+                DocumentChange::Close(closed) => {
+                    let closed = Uri::of(&self.root.join(closed.as_str()));
+                    self.notify(Outgoing::did_close(closed.as_str()));
+                }
+                DocumentChange::Open => {
+                    let contents = io_source::read_outside(&path);
+                    self.notify(Outgoing::did_open(
+                        uri.as_str(),
+                        language,
+                        contents.as_str(),
+                    ));
+                    if self.project == Project::Unopened {
+                        self.project = Project::Opened;
+                        self.wait_ready(PROJECT_WAIT);
+                    }
+                }
+            }
+        }
+        uri
     }
 
     pub fn outlines(&mut self, files: &[RelativePath]) -> Vec<Reply<Vec<Outline>>> {
         let requests = files
             .iter()
-            .map(|file| Outgoing::document_symbol(self.uri(file).as_str()))
+            .map(|file| Outgoing::document_symbol(self.document(file).as_str()))
             .collect();
         self.request_all(requests)
             .into_iter()
@@ -323,7 +363,7 @@ impl LspSession {
             .iter()
             .map(|position| {
                 Outgoing::prepare_call_hierarchy(
-                    self.uri(&position.file).as_str(),
+                    self.document(&position.file).as_str(),
                     position.line.value(),
                     position.character.value(),
                 )
@@ -366,8 +406,9 @@ impl LspSession {
     }
 
     pub fn references(&mut self, position: &DocumentPosition) -> Vec<Location> {
+        let uri = self.document(&position.file);
         let answer = self.request(Outgoing::references(
-            self.uri(&position.file).as_str(),
+            uri.as_str(),
             position.line.value(),
             position.character.value(),
         ));
@@ -375,9 +416,10 @@ impl LspSession {
     }
 
     pub fn incoming_callers(&mut self, position: &DocumentPosition) -> Vec<Location> {
+        let uri = self.document(&position.file);
         let items = self
             .request(Outgoing::prepare_call_hierarchy(
-                self.uri(&position.file).as_str(),
+                uri.as_str(),
                 position.line.value(),
                 position.character.value(),
             ))
@@ -402,7 +444,7 @@ impl LspSession {
         cancelled: impl FnMut() -> bool,
     ) -> HoverReply {
         let outgoing = Outgoing::hover(
-            self.uri(&position.file).as_str(),
+            self.document(&position.file).as_str(),
             position.line.value(),
             position.character.value(),
         );
@@ -414,9 +456,10 @@ impl LspSession {
     }
 
     pub fn definition(&mut self, position: &DocumentPosition) -> Option<Definition> {
+        let uri = self.document(&position.file);
         let answer = self
             .request(Outgoing::definition(
-                self.uri(&position.file).as_str(),
+                uri.as_str(),
                 position.line.value(),
                 position.character.value(),
             ))

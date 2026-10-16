@@ -27,15 +27,17 @@ prototypes that differ in shape, and exactly one survives.
    `understand`, its design's sketch and its workspace directory, and asked to return the
    diff stat, what it had to change beyond the sketch, and the demonstration from step 4.
 4. Demonstrate each with the prototype's own binary
-   (`<dir>/proto-<name>/target/release/review`): the CLI command and its output, or a GUI
-   script with `shot` and `dump`, and read the PNG. A prototype that cannot show the
+   (`<dir>/proto-<name>/target/release/review`): the CLI command and its output, or for a GUI
+   design the unit tests of its element and model and a reading of the code. No prototype
+   runs the GUI: the GUI runs once, for the kept design, at the very end of the change
+   (`finish` step 6). A prototype that cannot show the
    restated behaviour is scrapped here. If every one is scrapped, go back to step 1 with
    what the failures taught, or to the owner if they say the request itself cannot work.
    A demonstration that would write to a forge (submitting a review) runs only against a pull
    request the owner named for it. A feature that works per changed file, per pull request
    or per line is also run at scale: `REVIEW_BIN=<dir>/proto-<name>/target/release/review
-   cargo test -p review --test cli scale_ -- --nocapture` (and `--test gui scale`), and its
-   time and slowest frame there are noted next to the demonstration.
+   cargo test -p review --test cli scale_ -- --nocapture`, and its time there is noted next
+   to the demonstration. The GUI scale run is the kept design's, at the end.
 5. Choose among the survivors, comparing in this order: the run removes the cost the case
    names; the behaviour matches the restatement; the cost at scale (time, slowest frame);
    the user's steps (fewer, and triggered the way existing features are); fit with CLAUDE.md

@@ -1,5 +1,6 @@
 mod answer;
 mod convert;
+mod documents;
 mod markdown;
 mod session;
 mod wire;

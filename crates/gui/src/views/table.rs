@@ -4,28 +4,29 @@ use domain::{
     Column, DiffLayout, FileChange, FileId, Line, LineCount, Paired, Pairing, RelativePath, Side,
     SourceFile, Span,
 };
-use ui::{Button, Canvas, Count, Grid, Point, Px, Rect};
+use ui::{Canvas, Count, Grid, Id, Point, Px, Rect};
 
 use crate::action::Action;
 use crate::diffs::{Loading, Sides, SidesKey};
 use crate::grid::{self, GUTTER, Gutter};
-use crate::ids::{self, SlotKind};
-use crate::keys::{self, CodeGesture, LineGesture};
+use crate::ids;
+use crate::keys::{self, CodeGesture};
 use crate::model::Model;
 use crate::peek::Intent;
-use crate::review::{Picking, RemovedPick, ReviewAct};
+use crate::review::{RemovedPick, ReviewAct};
 use crate::theme::{ADDED_FILL, BORDER, LINES_SELECTED, PIXEL, RED, REMOVED_FILL, WEAK};
-use crate::widgets::{Container, Frame, Padding};
+use crate::widgets::{Frame, Padding};
 
-use super::center::{self, Aimed, Band, Inset, Noted, Stretch, Viewed};
+use super::center::{self, Inset, Noted};
+use super::sheet::{Body, Laid, Measured, Piece};
 
 const CONTEXT: Count = Count::new(3);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct RowAt(usize);
+pub(super) struct RowAt(usize);
 
 impl RowAt {
-    fn of(pairs: &[Paired], side: Side, line: Line) -> Option<Self> {
+    pub(super) fn of(pairs: &[Paired], side: Side, line: Line) -> Option<Self> {
         pairs
             .iter()
             .position(|pair| match side {
@@ -35,7 +36,7 @@ impl RowAt {
             .map(Self)
     }
 
-    fn pair(self, pairs: &[Paired]) -> Option<&Paired> {
+    pub(super) fn pair(self, pairs: &[Paired]) -> Option<&Paired> {
         pairs.get(self.0)
     }
 
@@ -43,22 +44,26 @@ impl RowAt {
         Self(self.0 + 1)
     }
 
-    fn down(self, rows: usize) -> Self {
-        Self(self.0 + rows)
+    pub(super) fn down(self, rows: Count) -> Self {
+        Self(self.0 + rows.get())
     }
 
-    const fn count(self) -> Count {
-        Count::new(self.0)
-    }
-
-    fn rows_to(self, end: Self) -> Count {
+    pub(super) fn rows_to(self, end: Self) -> Count {
         Count::new(end.0.saturating_sub(self.0) + 1)
+    }
+
+    pub(super) fn through(self, end: Self) -> impl Iterator<Item = Self> {
+        (self.0..=end.0).map(Self)
     }
 
     fn near(self, pairs: &[Paired]) -> impl Iterator<Item = Self> {
         let last = pairs.len().saturating_sub(1);
         (self.0.saturating_sub(CONTEXT.get())..=(self.0 + CONTEXT.get()).min(last)).map(Self)
     }
+}
+
+pub(super) fn row_id(path: &RelativePath, at: RowAt) -> Id {
+    ids::TABLE.with(&ids::in_file(path, Count::new(at.0))).id()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,23 +75,6 @@ enum Showing {
 struct Anchored<'inset> {
     at: RowAt,
     inset: Inset<'inset>,
-}
-
-enum Piece {
-    Rows { from: RowAt, to: RowAt },
-    Fold { start: Line, end: Line },
-    Inset(Count),
-}
-
-struct Placed {
-    top: Px,
-    height: Px,
-    piece: Piece,
-}
-
-struct Sheet {
-    pieces: Vec<Placed>,
-    total: Px,
 }
 
 fn showing(
@@ -126,68 +114,55 @@ fn showing(
     shown
 }
 
-impl Sheet {
-    fn build(pairs: &[Paired], shown: &[Showing], anchored: &[Anchored<'_>], row: Px) -> Self {
-        let mut pieces = Vec::new();
-        let mut top = Px::ZERO;
-        let mut push = |piece: Piece, height: Px, into: &mut Vec<Placed>| {
-            into.push(Placed { top, height, piece });
-            top += height;
-        };
-        let state = |at: RowAt| shown.get(at.0).copied().unwrap_or(Showing::Shown);
-        let mut at = RowAt(0);
-        while at.0 < pairs.len() {
-            let here = state(at);
-            let mut end = at;
-            while end.next().0 < pairs.len()
-                && state(end.next()) == here
-                && (here == Showing::Folded || !anchored.iter().any(|anchor| anchor.at == end))
-            {
-                end = end.next();
-            }
-            match here {
-                Showing::Shown => {
-                    push(
-                        Piece::Rows { from: at, to: end },
-                        row * at.rows_to(end),
-                        &mut pieces,
-                    );
-                    for (number, anchor) in anchored
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, anchor)| anchor.at == end)
-                    {
-                        push(
-                            Piece::Inset(Count::new(number)),
-                            anchor.inset.height,
-                            &mut pieces,
-                        );
-                    }
-                }
-                Showing::Folded => {
-                    let start = at.pair(pairs).and_then(|pair| pair.new);
-                    let last = end.pair(pairs).and_then(|pair| pair.new);
-                    if let (Some(start), Some(last)) = (start, last) {
-                        push(Piece::Fold { start, end: last }, row, &mut pieces);
-                    }
-                }
-            }
-            at = end.next();
+fn pieces(
+    pairs: &[Paired],
+    shown: &[Showing],
+    anchored: &[Anchored<'_>],
+    row: Px,
+) -> Vec<Measured> {
+    let mut pieces = Vec::new();
+    let state = |at: RowAt| shown.get(at.0).copied().unwrap_or(Showing::Shown);
+    let mut at = RowAt(0);
+    while at.0 < pairs.len() {
+        let here = state(at);
+        let mut end = at;
+        while end.next().0 < pairs.len()
+            && state(end.next()) == here
+            && (here == Showing::Folded || !anchored.iter().any(|anchor| anchor.at == end))
+        {
+            end = end.next();
         }
-        Self { pieces, total: top }
-    }
-
-    fn row_top(&self, wanted: RowAt, row: Px) -> Option<Px> {
-        self.pieces.iter().find_map(|placed| match placed.piece {
-            Piece::Rows { from, to } if from <= wanted && wanted <= to => {
-                Some(placed.top + row * from.rows_to(wanted) - row)
+        match here {
+            Showing::Shown => {
+                pieces.push(Measured::new(
+                    Piece::Pairs { from: at, to: end },
+                    row * at.rows_to(end),
+                ));
+                for (number, anchor) in anchored
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, anchor)| anchor.at == end)
+                {
+                    pieces.push(Measured::new(
+                        Piece::Inset(Count::new(number)),
+                        anchor.inset.height,
+                    ));
+                }
             }
-            Piece::Rows { .. } | Piece::Fold { .. } | Piece::Inset(_) => None,
-        })
+            Showing::Folded => {
+                let start = at.pair(pairs).and_then(|pair| pair.new);
+                let last = end.pair(pairs).and_then(|pair| pair.new);
+                if let (Some(start), Some(last)) = (start, last) {
+                    pieces.push(Measured::new(Piece::Fold { start, end: last }, row));
+                }
+            }
+        }
+        at = end.next();
     }
+    pieces
 }
 
-struct Table<'table> {
+pub(super) struct Table<'table> {
     pairs: &'table [Paired],
     sides: &'table Sides,
     layout: DiffLayout,
@@ -240,25 +215,20 @@ impl Table<'_> {
         }
     }
 
-    fn rows(&self, model: &Model, frame: &mut Frame<'_>, from: RowAt, to: RowAt) {
+    pub(super) fn row(&self, model: &Model, frame: &mut Frame<'_>, at: RowAt) {
+        let Some(pair) = at.pair(self.pairs) else {
+            return;
+        };
         let row = frame.row_height();
         let font = frame.metrics.font;
         let layout = self.layout;
         let across = self.across;
-        let looks: Vec<RowLook> = self
-            .pairs
-            .get(from.0..=to.0)
-            .into_iter()
-            .flatten()
-            .map(|pair| self.look(pair))
-            .collect();
+        let look = self.look(pair);
         let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
-            paint(canvas, rect, &looks, layout, row, font, across);
+            paint(canvas, rect, &look, layout, row, font, across);
         };
-        let id = ids::TABLE
-            .with(&ids::in_file(self.path, Count::new(from.0)))
-            .id();
-        let interaction = frame.custom_block(Box::new(draw), row * from.rows_to(to), id);
+        let id = row_id(self.path, at);
+        let interaction = frame.line_row(Box::new(draw), id);
         if let Some(rect) = interaction.rect() {
             let content = self.content_width + rect.width - half_width(rect, layout);
             let moved = frame.wheel_across(id, across, content);
@@ -267,33 +237,22 @@ impl Table<'_> {
             }
         }
         if interaction.hovered() {
-            self.clicks(model, frame, interaction, from);
+            self.points(model, frame, interaction, pair);
         }
     }
 
-    fn clicks(
+    fn points(
         &self,
         model: &Model,
         frame: &mut Frame<'_>,
         interaction: ui::Interaction,
-        from: RowAt,
+        pair: &Paired,
     ) {
         let Some(rect) = interaction.rect() else {
             return;
         };
-        let row = frame.row_height();
         let pointer = frame.ui.pointer();
-        let down =
-            usize::try_from((pointer.mouse.vertical - rect.top).ratio(row).max(0)).unwrap_or(0);
-        let Some(pair) = from.down(down).pair(self.pairs) else {
-            return;
-        };
-        let left = pointer.mouse.horizontal < rect.left + rect.width / 2;
-        let half = match (self.layout, pair.old, pair.new) {
-            (DiffLayout::Split, Some(_), _) if left => Side::Old,
-            (_, Some(_), None) => Side::Old,
-            _ => Side::New,
-        };
+        let half = half_at(rect, self.layout, pair, pointer.mouse.horizontal);
         let start = match (self.layout, half) {
             (DiffLayout::Split, Side::New) => rect.left + half_width(rect, self.layout),
             _ => rect.left,
@@ -314,7 +273,7 @@ impl Table<'_> {
                     frame.push(Action::Definition(file, line, column, Intent::Jump));
                     return;
                 }
-                None if !pointer.down.contains(Button::Left) => {
+                None if !pointer.down.contains(ui::Button::Left) => {
                     frame.hover(model, file, line, column);
                 }
                 None => {}
@@ -322,57 +281,23 @@ impl Table<'_> {
         }
         if interaction.double_clicked() {
             frame.push(Action::Review(ReviewAct::StartDraftHere));
-            return;
         }
-        let dragging =
-            pointer.down.contains(Button::Left) && !interaction.clicked() && interaction.down();
-        match (half, pair.old, pair.new) {
-            (Side::Old, Some(old), _) => {
-                let picking = if interaction.clicked() && pointer.mods.shift() {
-                    Some(Picking::Extend)
-                } else if interaction.clicked() {
-                    Some(Picking::Press)
-                } else if dragging {
-                    Some(Picking::Drag)
-                } else {
-                    None
-                };
-                if let Some(picking) = picking {
-                    frame.push(Action::Review(ReviewAct::PickRemoved(
-                        self.path.clone(),
-                        old,
-                        picking,
-                    )));
-                }
-            }
-            (Side::New, _, Some(new)) => {
-                if interaction.clicked() {
-                    frame.push(Action::SelectLine(
-                        self.path.clone(),
-                        new,
-                        if pointer.mods.shift() {
-                            LineGesture::Extend
-                        } else {
-                            LineGesture::Press
-                        },
-                    ));
-                } else if dragging {
-                    frame.push(Action::SelectLine(
-                        self.path.clone(),
-                        new,
-                        LineGesture::Drag,
-                    ));
-                }
-            }
-            _ => {}
-        }
+    }
+}
+
+pub(super) fn half_at(rect: Rect, layout: DiffLayout, pair: &Paired, mouse: Px) -> Side {
+    let left = mouse < rect.left + rect.width / 2;
+    match (layout, pair.old, pair.new) {
+        (DiffLayout::Split, Some(_), _) if left => Side::Old,
+        (_, Some(_), None) => Side::Old,
+        _ => Side::New,
     }
 }
 
 fn paint(
     canvas: &mut Canvas<'_>,
     rect: Rect,
-    looks: &[RowLook],
+    look: &RowLook,
     layout: DiffLayout,
     row: Px,
     font: ui::FontSize,
@@ -383,21 +308,17 @@ fn paint(
         DiffLayout::Split => rect.left + half,
         DiffLayout::Unified => rect.left,
     };
-    let mut top = rect.top;
-    for look in looks {
-        for (shown, left) in [(look.old.as_ref(), rect.left), (look.new.as_ref(), right)] {
-            let Some(shown) = shown else {
-                continue;
-            };
-            let area = Rect::new(left, top, half, row);
-            if let Some(fill) = shown.fill {
-                canvas.rect(area, fill);
-            }
-            canvas.push_clip(area.intersect(canvas.clip()));
-            canvas.grid(Point::new(left - across, top), font, &shown.grid);
-            canvas.pop_clip();
+    for (shown, left) in [(look.old.as_ref(), rect.left), (look.new.as_ref(), right)] {
+        let Some(shown) = shown else {
+            continue;
+        };
+        let area = Rect::new(left, rect.top, half, row);
+        if let Some(fill) = shown.fill {
+            canvas.rect(area, fill);
         }
-        top += row;
+        canvas.push_clip(area.intersect(canvas.clip()));
+        canvas.grid(Point::new(left - across, rect.top), font, &shown.grid);
+        canvas.pop_clip();
     }
     if layout == DiffLayout::Split {
         canvas.rect(Rect::new(right, rect.top, PIXEL, rect.height), BORDER);
@@ -491,109 +412,61 @@ fn guessed_counts(model: &Model, change: &FileChange, head: Option<FileId>) -> C
 }
 
 pub(super) struct TableBody<'body> {
-    path: &'body RelativePath,
     key: SidesKey,
     head: Option<FileId>,
     sides: Option<&'body Sides>,
-    pairs: Vec<Paired>,
-    insets: Vec<Anchored<'body>>,
-    sheet: Sheet,
-    last: Line,
-    row: Px,
+    pub(super) pairs: Vec<Paired>,
+    pub(super) last: Line,
 }
 
-impl<'body> TableBody<'body> {
-    pub(super) fn build(
-        model: &'body Model,
-        frame: &Frame<'_>,
-        change: &'body FileChange,
-        head: Option<FileId>,
-    ) -> Self {
-        let path = change.path();
-        let key = SidesKey {
-            commit: model.review.diffs.commit().cloned(),
-            path: path.clone(),
-        };
-        let sides = match model.review.diffs.sides.get(&key) {
-            Some(Loading::Got(sides)) => Some(sides),
-            Some(Loading::Asking | Loading::Failed(_)) | None => None,
-        };
-        let Counts { old, new } = sides.map_or_else(
-            || guessed_counts(model, change, head),
-            |sides| Counts {
-                old: sides.old.text().count(),
-                new: sides.new.text().count(),
-            },
-        );
-        let pairs = change.paired(old, new, model.review.diffs.layout);
-        let insets = anchored(model, frame, path, &pairs);
-        let shown = showing(model, path, &pairs, &insets);
-        let row = frame.row_height();
-        let sheet = Sheet::build(&pairs, &shown, &insets, row);
-        Self {
-            path,
+pub(super) fn laid<'body>(
+    model: &'body Model,
+    frame: &Frame<'_>,
+    change: &'body FileChange,
+    head: Option<FileId>,
+) -> Laid<'body> {
+    let path = change.path();
+    let key = SidesKey {
+        commit: model.review.diffs.commit().cloned(),
+        path: path.clone(),
+    };
+    let sides = match model.review.diffs.sides.get(&key) {
+        Some(Loading::Got(sides)) => Some(sides),
+        Some(Loading::Asking | Loading::Failed(_)) | None => None,
+    };
+    let Counts { old, new } = sides.map_or_else(
+        || guessed_counts(model, change, head),
+        |sides| Counts {
+            old: sides.old.text().count(),
+            new: sides.new.text().count(),
+        },
+    );
+    let pairs = change.paired(old, new, model.review.diffs.layout);
+    let anchored = anchored(model, frame, path, &pairs);
+    let shown = showing(model, path, &pairs, &anchored);
+    let row = frame.row_height();
+    let mut laid_out = pieces(&pairs, &shown, &anchored, row);
+    if sides.is_none() {
+        let tall = laid_out
+            .iter()
+            .fold(Px::ZERO, |tall, measured| tall + measured.height);
+        laid_out = vec![Measured::new(Piece::Waiting, tall.max(row * Count::new(2)))];
+    }
+    Laid {
+        body: Body::Table(TableBody {
             key,
             head,
             sides,
             pairs,
-            insets,
-            sheet,
             last: new.last().unwrap_or(Line::new(0)),
-            row,
-        }
+        }),
+        insets: anchored.into_iter().map(|anchor| anchor.inset).collect(),
+        pieces: laid_out,
     }
+}
 
-    pub(super) const fn total(&self) -> Px {
-        self.sheet.total
-    }
-
-    pub(super) fn aim(&self, line: Line) -> Aimed {
-        let Some(at) = RowAt::of(&self.pairs, Side::New, line)
-            .or_else(|| RowAt::of(&self.pairs, Side::Old, line))
-        else {
-            return Aimed::Missing;
-        };
-        self.sheet
-            .row_top(at, self.row)
-            .map_or(Aimed::Folded, |top| {
-                Aimed::At((top - self.row * CONTEXT).max(Px::ZERO))
-            })
-    }
-
-    pub(super) fn line_at(&self, down: Px) -> Option<Line> {
-        self.sheet
-            .pieces
-            .iter()
-            .filter(|placed| placed.top + placed.height > down)
-            .find_map(|placed| match placed.piece {
-                Piece::Rows { from, to } => {
-                    let skipped = center::rows_into(placed.top, down, self.row);
-                    from.down(skipped.get())
-                        .min(to)
-                        .pair(&self.pairs)
-                        .and_then(|pair| pair.new.or(pair.old))
-                }
-                Piece::Fold { .. } | Piece::Inset(_) => None,
-            })
-    }
-
-    pub(super) fn editor(&self) -> Option<Stretch> {
-        self.sheet
-            .pieces
-            .iter()
-            .find(|placed| match placed.piece {
-                Piece::Inset(number) => self.insets.get(number.get()).is_some_and(|anchor| {
-                    matches!(anchor.inset.kind, center::InsetKind::Editing(_))
-                }),
-                Piece::Rows { .. } | Piece::Fold { .. } => false,
-            })
-            .map(|placed| Stretch {
-                top: placed.top,
-                height: placed.height,
-            })
-    }
-
-    fn waiting(&self, model: &Model, frame: &mut Frame<'_>) {
+impl TableBody<'_> {
+    pub(super) fn waiting(&self, model: &Model, frame: &mut Frame<'_>) {
         match model.review.diffs.sides.get(&self.key) {
             Some(Loading::Failed(why)) => frame.note(why.as_str(), RED, Padding::Step),
             Some(Loading::Got(_)) => {}
@@ -607,17 +480,14 @@ impl<'body> TableBody<'body> {
         }
     }
 
-    pub(super) fn draw(
-        &self,
-        model: &Model,
-        frame: &mut Frame<'_>,
+    pub(super) fn table<'table>(
+        &'table self,
+        model: &'table Model,
+        frame: &Frame<'_>,
+        path: &'table RelativePath,
         width: Option<Px>,
-        band: Band,
-    ) -> Px {
-        let Some(sides) = self.sides else {
-            self.waiting(model, frame);
-            return Px::ZERO;
-        };
+    ) -> Option<Table<'table>> {
+        let sides = self.sides?;
         let layout = model.review.diffs.layout;
         let content_width = content_width(sides, frame.cell_width());
         let half = width.map_or(Px::ZERO, |width| match layout {
@@ -630,12 +500,12 @@ impl<'body> TableBody<'body> {
                 .file(*file)
                 .is_some_and(|source| source.text().all() == sides.new.text().all())
         });
-        let shown_here = model.shown_path().as_ref() == Some(self.path);
-        let table = Table {
+        let shown_here = model.shown_path().as_ref() == Some(path);
+        Some(Table {
             pairs: &self.pairs,
             sides,
             layout,
-            path: self.path,
+            path,
             indexed,
             across: model
                 .across
@@ -651,90 +521,9 @@ impl<'body> TableBody<'body> {
                 .review
                 .picked
                 .as_ref()
-                .filter(|picked| &picked.file == self.path)
+                .filter(|picked| &picked.file == path)
                 .map(RemovedPick::lines),
-        };
-        self.pieces(model, frame, &table, width, band)
-    }
-
-    fn pieces(
-        &self,
-        model: &Model,
-        frame: &mut Frame<'_>,
-        table: &Table<'_>,
-        width: Option<Px>,
-        band: Band,
-    ) -> Px {
-        let row = self.row;
-        let rows_above = |placed: &Placed| {
-            if placed.top < band.offset {
-                usize::try_from((band.offset - placed.top).ratio(row)).unwrap_or(0)
-            } else {
-                0
-            }
-        };
-        let visible: Vec<&Placed> = self
-            .sheet
-            .pieces
-            .iter()
-            .filter(|placed| band.reaches(placed.top, placed.height))
-            .collect();
-        let first_top = visible.first().map_or(Px::ZERO, |placed| placed.top);
-        center::gap(frame, first_top);
-        let mut drawn_to = first_top;
-        for placed in visible {
-            match placed.piece {
-                Piece::Rows { from: start, to } => {
-                    let room =
-                        usize::try_from((band.bottom - placed.top.max(band.offset)).ratio(row))
-                            .unwrap_or(0)
-                            + 1;
-                    let skipped = rows_above(placed);
-                    let first = start.down(skipped).min(to);
-                    let end = first.down(room).min(to);
-                    frame.start(Container::Slot {
-                        id: ids::slot(self.path, SlotKind::Rows, start.count()),
-                        height: placed.height,
-                    });
-                    center::gap(frame, row * Count::new(skipped));
-                    table.rows(model, frame, first, end);
-                    frame.finish();
-                    drawn_to += placed.height;
-                }
-                Piece::Fold { start, end } => {
-                    frame.start(Container::Slot {
-                        id: ids::slot(
-                            self.path,
-                            SlotKind::Fold,
-                            Count::new(usize::try_from(start.value()).unwrap_or(0)),
-                        ),
-                        height: placed.height,
-                    });
-                    center::fold(frame, self.path, start, end, self.last);
-                    frame.finish();
-                    drawn_to += placed.height;
-                }
-                Piece::Inset(number) => {
-                    if let Some(anchor) = self.insets.get(number.get()) {
-                        center::inset(
-                            model,
-                            frame,
-                            &anchor.inset,
-                            self.path,
-                            width,
-                            Viewed {
-                                top: placed.top,
-                                band,
-                                across: table.across,
-                                columns: Count::ZERO,
-                            },
-                        );
-                    }
-                    drawn_to += placed.height;
-                }
-            }
-        }
-        drawn_to
+        })
     }
 }
 

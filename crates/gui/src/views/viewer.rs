@@ -68,7 +68,7 @@ fn stage_input(frame: &mut Frame<'_>, viewer: &Viewer) {
     if wheel == Point::new(Px::ZERO, Px::ZERO) {
         return;
     }
-    if pointer.mods.ctrl() {
+    if pointer.mods.primary() {
         let step = if wheel.vertical > Px::ZERO {
             Step::In
         } else {

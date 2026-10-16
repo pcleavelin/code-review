@@ -5,6 +5,7 @@ mod icon;
 mod id;
 mod input;
 mod layout;
+mod select;
 mod text;
 mod tree;
 
@@ -17,9 +18,9 @@ pub use input::{Button, Buttons, Clicks, Glyph, Input, Key, Mods, Pinch, Pointer
 pub use layout::{
     Align, Anchoring, Bound, Direction, Layout, Memory, ScrollAxes, Sides, Size, Style,
 };
-pub use text::{Cell, Grid, Label, Run, Text, Wrap};
+pub use text::{Cell, Grid, Label, Run, Select, Text, Wrap};
 pub use tree::{
-    Capture, Draw, DuplicateId, Interaction, Kind, Placement, Scrollbar, SlotOverflow, Ui,
+    Capture, Draw, DuplicateId, Ink, Interaction, Kind, Placement, Scrollbar, SlotOverflow, Ui,
 };
 
 #[cfg(test)]

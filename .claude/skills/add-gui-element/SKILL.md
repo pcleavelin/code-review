@@ -41,7 +41,8 @@ Two rules hold for every element, and both are checked:
    key chords through `keys.rs`. If the result shows in another view, the action shows it
    (rule two above).
 5. What a script sees: extend the component's `Dump` so its state shows in `dump`.
-6. Drive it: a `REVIEW_SCRIPT` run (CLAUDE.md, "Testing the GUI") that uses it, aimed by id,
+6. Drive it, once the code is done and `finish` steps 1 to 5 pass, never during development:
+   a `REVIEW_SCRIPT` run (CLAUDE.md, "Testing the GUI") that uses it, aimed by id,
    with `dump` after it, from every view the control appears in. For a button whose click
    changes the layout, `mouse` onto it and `click x y` the same coordinate twice: the second
    click must land on the same button (`rect <id>` before and after shows it held).

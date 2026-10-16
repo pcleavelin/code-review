@@ -12,9 +12,7 @@ use crate::theme::{
     CLOSE_BUTTON, FIELD, ORANGE, PEEK_EXTRA, PEEK_LEAST, PEEK_PLACE_ROOM, PEEK_TITLE, PENDING,
     PIXEL, ROW_EXTRA, SLICE, TEXT, WEAK,
 };
-use crate::widgets::{
-    AcrossScroll, Chosen, CodeBlock, Container, Frame, Marks, Padding, Scroller, Width,
-};
+use crate::widgets::{Chosen, CodeBlock, Container, Frame, Marks, Padding, Scroller, Width};
 
 enum Body {
     Inside {
@@ -175,7 +173,6 @@ fn peek_body(model: &Model, frame: &mut Frame<'_>, body: Body, area: Extent) {
                     end,
                     id: ids::peek_code(),
                     width: Width::Wide,
-                    across: AcrossScroll::Own,
                     marks: Marks {
                         background: &background,
                         bar: &bar,

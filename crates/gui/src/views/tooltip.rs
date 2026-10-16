@@ -5,6 +5,7 @@ use crate::action::Action;
 use crate::element_tip::{AttachedTip, Pressing, beside};
 use crate::grid::GUTTER;
 use crate::ids;
+use crate::keys;
 use crate::model::Model;
 use crate::peek::Tip;
 use crate::theme::{
@@ -12,7 +13,7 @@ use crate::theme::{
     TOOLTIP_MARGIN, TOOLTIP_OFFSET, TOOLTIP_ROW_GAP, TOOLTIP_RULE, TOOLTIP_SYMBOL_WIDTH,
     TOOLTIP_TEXT_WIDTH, WEAK,
 };
-use crate::widgets::{AcrossScroll, CodeBlock, Container, Fill, Frame, Marks, TipAt, Width};
+use crate::widgets::{CodeBlock, Container, Fill, Frame, Marks, TipAt, Width};
 use io_lsp::{HoverLine, HoverText, Inline};
 
 const TEXT_LINES: Count = Count::new(24);
@@ -149,7 +150,6 @@ fn symbol_tip(model: &Model, frame: &mut Frame<'_>, at: Point, symbol: SymbolId)
                     end: last,
                     id: ids::tooltip_code(),
                     width: Width::Fit,
-                    across: AcrossScroll::Own,
                     marks: Marks {
                         background: &none,
                         bar: &none,
@@ -166,7 +166,10 @@ fn symbol_tip(model: &Model, frame: &mut Frame<'_>, at: Point, symbol: SymbolId)
                 );
             }
             frame.label(
-                "alt-click: keep in the peek panel   ctrl-click or double-click: go there",
+                format!(
+                    "alt-click: keep in the peek panel   {}-click or double-click: go there",
+                    keys::PRIMARY_NAME.as_str()
+                ),
                 WEAK,
             );
             frame.finish();
@@ -199,7 +202,10 @@ fn text_tip(frame: &mut Frame<'_>, at: Point, text: &HoverText, room: Count) -> 
         );
     }
     frame.label(
-        "alt-click: keep the definition in the peek panel   ctrl-click or double-click: go to it",
+        format!(
+            "alt-click: keep the definition in the peek panel   {}-click or double-click: go to it",
+            keys::PRIMARY_NAME.as_str()
+        ),
         WEAK,
     );
     frame.finish();

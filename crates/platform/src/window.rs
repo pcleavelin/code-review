@@ -34,6 +34,7 @@ pub enum Cursor {
     Grab,
     Grabbing,
     Pointer,
+    Text,
 }
 
 impl Cursor {
@@ -45,6 +46,7 @@ impl Cursor {
             Self::Grab => CursorIcon::Grab,
             Self::Grabbing => CursorIcon::Grabbing,
             Self::Pointer => CursorIcon::Pointer,
+            Self::Text => CursorIcon::Text,
         }
     }
 }
@@ -288,8 +290,7 @@ impl<Application: App> Runner<Application> {
                 });
             }
             if let Some(text) = &event.text
-                && !self.mods.ctrl()
-                && !self.mods.alt()
+                && !self.mods.chorded()
             {
                 for character in text.chars().filter(|character| !character.is_control()) {
                     self.input.typed.push(character);
@@ -396,7 +397,11 @@ impl<Application: App> ApplicationHandler for Runner<Application> {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
-                self.mods = Mods::new(state.control_key(), state.shift_key(), state.alt_key());
+                self.mods = Mods::NONE
+                    .with_held(state.control_key(), Mods::CTRL)
+                    .with_held(state.shift_key(), Mods::SHIFT)
+                    .with_held(state.alt_key(), Mods::ALT)
+                    .with_held(state.super_key(), Mods::COMMAND);
                 self.input.pointer.mods = self.mods;
             }
             WindowEvent::CursorMoved { position, .. } => {

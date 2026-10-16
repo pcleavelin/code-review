@@ -24,10 +24,12 @@ impl Words {
         Self(text)
     }
 
-    pub(crate) const fn as_str(self) -> &'static str {
-        self.0
+    pub(crate) fn spelled(self) -> Label {
+        Label::new(self.0.replace(PRIMARY_MARK.0, keys::PRIMARY_NAME.as_str()))
     }
 }
+
+const PRIMARY_MARK: Words = Words::new("{primary}");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Tip {
@@ -179,7 +181,7 @@ pub(crate) const PEEK_CLOSE: Control = Control::new(
 pub(crate) const LINES: Control = Control::new(
     Element::new("lines"),
     Words::new(
-        "click a line to select it, drag to select several; double-click or ctrl+click a name to go to its definition, alt+click to peek it",
+        "click a line to select it, drag to select several; double-click or {primary}+click a name to go to its definition, alt+click to peek it",
     ),
 );
 pub(crate) const HIT_ROW: Control = Control::new(Element::new("hit"), Words::new("go to this hit"));
@@ -188,10 +190,6 @@ pub(crate) const HIT_FILE_ROW: Control =
 pub(crate) const INBOX_FIELD: Control = Control::new(
     Element::new("field@inbox"),
     Words::new("filter by any words of the title, repository, author, branch or #number"),
-);
-pub(crate) const INBOX_STATE: Control = Control::new(
-    Element::new("inbox-state"),
-    Words::new("show only the pull requests in this state"),
 );
 pub(crate) const INBOX_REQUESTED: Control = Control::new(
     Element::new("inbox-requested"),
@@ -269,7 +267,7 @@ pub(crate) const JIRA_TOKENS: Control = Control::new(
 );
 pub(crate) const VIEWER_OUT: Control = Control::new(
     Element::new("viewer-out"),
-    Words::new("zoom out (-); pinch or ctrl+wheel zoom where the pointer is"),
+    Words::new("zoom out (-); pinch or {primary}+wheel zoom where the pointer is"),
 );
 pub(crate) const VIEWER_FIT: Control = Control::new(
     Element::new("viewer-fit"),
@@ -403,7 +401,7 @@ pub(crate) const DRAFT_REMOVED: Control = Control::new(
 );
 pub(crate) const DRAFT_FIELD: Control = Control::new(
     Element::new("field@draft"),
-    Words::new("the comment; ctrl+enter adds it, escape cancels"),
+    Words::new("the comment; {primary}+enter adds it, escape cancels"),
 );
 pub(crate) const DRAFT_ADD: Control = Control::new(
     Element::new("draft-add"),
@@ -420,6 +418,14 @@ pub(crate) const DRAFT_REMOVE: Control = Control::new(
 pub(crate) const COLUMN_FIELD: Control = Control::new(
     Element::new("column-filter"),
     Words::new("keep the pull requests whose cell in this column has these words"),
+);
+pub(crate) const DROPDOWN: Control = Control::new(
+    Element::new("dropdown"),
+    Words::new("pick which values of this column are shown"),
+);
+pub(crate) const CHOICE: Control = Control::new(
+    Element::new("choice"),
+    Words::new("show or hide the rows with this value"),
 );
 pub(crate) const COLUMN_HEADER: Control = Control::new(
     Element::new("column-header"),
@@ -542,7 +548,6 @@ pub(crate) const CONTROLS: &[Control] = &[
     HIT_ROW,
     HIT_FILE_ROW,
     INBOX_FIELD,
-    INBOX_STATE,
     INBOX_REQUESTED,
     PULL_ROW,
     PULLS_REFRESH,
@@ -599,6 +604,8 @@ pub(crate) const CONTROLS: &[Control] = &[
     CARD_LINK,
     CARD_COLLAPSE,
     COLUMN_FIELD,
+    DROPDOWN,
+    CHOICE,
     COLUMN_HEADER,
     COLUMN_EDGE,
     REPLY,
@@ -630,6 +637,10 @@ pub(crate) fn file_header() -> Id {
     Id::new("file-header")
 }
 
+pub(crate) fn pinned_header() -> Id {
+    Id::new("pinned-header")
+}
+
 pub(crate) fn inbox() -> Id {
     Id::new("inbox")
 }
@@ -656,19 +667,17 @@ pub(crate) fn card_box() -> Id {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SlotKind {
-    Code,
     Fold,
-    Removed,
-    Rows,
+    Scrollbar,
+    Waiting,
 }
 
 impl SlotKind {
     const fn name(self) -> Element {
         Element::new(match self {
-            Self::Code => "code",
             Self::Fold => "fold",
-            Self::Removed => "removed",
-            Self::Rows => "rows",
+            Self::Scrollbar => "scrollbar",
+            Self::Waiting => "waiting",
         })
     }
 }
@@ -747,6 +756,10 @@ pub(crate) fn tooltip_code() -> Id {
     Id::new("tip-code")
 }
 
+pub(crate) fn choices() -> Id {
+    Id::new("choices")
+}
+
 pub(crate) fn picker() -> Id {
     Id::new("picker")
 }
@@ -761,8 +774,4 @@ pub(crate) fn settings_box() -> Id {
 
 pub(crate) fn draft_box() -> Id {
     Id::new("draft-box")
-}
-
-pub(crate) fn removed() -> Id {
-    Id::new("removed")
 }

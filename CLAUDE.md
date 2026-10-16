@@ -9,7 +9,7 @@ Source view shows the head of the pull request with go to definition, hover and 
 answered by the language's server on that head.
 
 - **The human** reviews in the GUI: `review` with no arguments opens the Inbox (every open
-  pull request of every pinned repository, filtered by words and by standing), then Changes,
+  pull request of every pinned repository, filtered by words and by status), then Changes,
   the Source view with the diff and the forge's threads on it, the Review tab with the
   description, the conversation and the submit.
 - **The agent** (and anyone in a terminal) uses the CLI: the same review, the same state, the
@@ -48,7 +48,9 @@ Work happens in a jj workspace of its own outside the repo directory
 uses the default working copy to try branches and moves its `@` at any time. Every file in
 the repo is the agent's to change when a task needs it, CLAUDE.md, the skills, xtask, the
 crate graph and the settings included; change it and say so in the reply rather than
-proposing and waiting.
+proposing and waiting. Once every bookmark of a request is done, they go into master in one
+merge commit (`jj new <bookmarks> -m "Merge ..."`, conflicts resolved, `gate --full` green,
+master moved onto it) without asking.
 
 ## Axioms
 
@@ -96,7 +98,7 @@ rule applies.
 | **Symbol** | A top-level declaration, plus one level of members of impl / mod / trait / class bodies, in the tree. Name, kind, inclusive line range, depth 0 or 1. |
 | **Pin** | A repository the Inbox lists: a local clone named by path, or a URL cloned (blobless) into the clones folder. Kept in the pins file: `REVIEW_PINS`, else `<config>/code-review/pins`; clones in `REVIEW_CLONES`, else `<data>/code-review/clones`. Named `owner/name` from its remote; the short `name` works when it is unique. |
 | **Address** | A pull request on the command line: `owner/name#12`, `name#12`, `name!12` (GitLab), or `12` / `#12` inside a pinned clone or when one pinned repository has it. |
-| **Standing** | Where a pull request is for this reviewer: new (never opened), updated (its head moved since it was last opened), reviewing, reviewed (every change seen, no drafts). |
+| **Status** | Where a pull request is for this reviewer: new (never opened), updated (its head moved since it was last opened), reviewing, reviewed (every change seen, no drafts). |
 | **Thread** | A conversation on the forge: on a line of the code (open, resolved, outdated) or on the pull request itself. An outdated one, written on a line the pull request has changed since, is listed in the Review tab only and not drawn in the code. Read on open and on refresh, never stored; a reply is a draft that names its thread. Every note, the description and every draft is drawn as markdown: links, `#12`, `!12`, `@user` and commit hashes link to the forge, pictures are fetched once into a temporary cache and drawn in place; a click opens one over the window, fitted, to zoom (pinch, ctrl+wheel, + and -, 0 to fit, 1 for its own size) and move around (drag, scroll). |
 | **Submission** | A review someone submitted on the forge: its author, decision (comment, approve, request changes), summary, and the threads started in it. The Review tab and `discussion` show each as one block, in time order with the threads on the pull request itself; a later reply stays in its thread. A submission that says nothing (no summary, no decision, no thread of its own) shows no block. GitLab groups no notes into reviews, so its threads all stand alone. |
 | **Commit** | One commit of the pull request (`git log base..head`). The Commits view lists them; picking one shows its own changes against its parent, unified or split; comments stay on the whole pull request's changes. |
@@ -124,13 +126,17 @@ rule applies.
   commit: it lasts as long as git keeps the object, and `--since-seen` says so once it is gone.
 - **The diff is drawn on the head file, folded to the change.** The Source view shows every
   changed file in one column, in the order of Changes, each under a header that marks it seen,
-  collapses it and links it; picking a file in Changes scrolls to its header, and scrolling makes
+  collapses it and links it; the header of the file at the top stays pinned there, in unified
+  and split layouts, until the next file's header pushes it off; picking a file in Changes scrolls to its header, and scrolling makes
   the file in sight the selection. A file the pull request does not change is shown alone. Each
   file is the head file with added lines tinted and removed lines, threads that are not outdated and drafts
   inserted where they belong; lines more than three away from a change fold
   into a row that opens twenty lines at a time toward either change, or all at once, and
   "whole file" drops the folds. Every identifier on a changed line navigates like any other
-  code, and a jump into a fold reveals it. A deleted file is shown from its diff alone.
+  code, and a jump into a fold reveals it. A deleted file is shown from its diff alone. The
+  column is one list of rows (headers, lines, removed lines, split rows, folds, comment boxes),
+  each line a row of its own keyed by the line it shows; drawing, a click, a drag and a jump
+  all read that list, so the line a click hits is the line drawn under it.
 - **One backend per language.** The language's server when on PATH, else a tree-sitter
   resolver written for that language. No language-agnostic resolver: its rules would be
   nobody's. The servers run on the tree of the open pull request; opening another one starts
@@ -151,6 +157,13 @@ rule applies.
 - **An action shows its result.** A control whose result is drawn in another view switches to
   it and scrolls the result into sight; a field that holds the keyboard off screen fails a
   script run.
+- **Every displayed text takes one selection.** `crates/ui` holds one text selection for the
+  window: a drag over text a view marks selectable (labels, notes, titles, every markdown block,
+  the links and code blocks in it) selects across the scroll column it starts in, a double-click
+  takes a word, and primary+c copies it ahead of the Source view's selected lines. A press on a
+  steady element (a button, a link) or on text not marked selectable (rows, tabs, fields, the
+  Source view's code lines) only clicks it; every press clears the last selection. A soft-wrapped
+  line copies as a space, a row end as a newline.
 - **The UI is its own library** (`crates/ui`, in the shape of odin_editor's): elements opened
   and closed each frame, layout once at frame end, input answered from the previous frame's
   rectangles, one monospace font at whole-pixel sizes in one atlas, icons as Codicons glyphs.
@@ -231,14 +244,16 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
 - `REVIEW_SCRIPT=<file> target/release/review` plays a script, one command per
   line, as real input, on a clock of its own (8 ms a frame, plus each pause): `wait n`
   (frames), `pause ms` (waits that long in wall time, for the forge and the servers),
-  `mouse x y`, `down`, `up`, `click x y [ctrl|alt|shift]`, `dblclick x y`,
+  `mouse x y`, `down`, `up`, `click x y [ctrl|alt|shift|primary]`, `dblclick x y`,
   `drag x0 y0 x1 y1`, `wheel dy [ctrl|shift]`, `swipe dx dy`, `pinch n`,
-  `key <name> [ctrl] [alt]`, `text ...`, `quit`; app commands `tab <name>`,
+  `key <name> [ctrl] [alt] [primary]`, `text ...`, `quit` (`primary` is the platform's primary
+  modifier: cmd on macOS, ctrl elsewhere); app commands `tab <name>`,
   `open <file> [line]`, `scroll <panel> <n>`, `idle` (waits until the forge, the servers and
   every background job have answered), `rect <id>`, `click-id <id> [ctrl|alt|shift]`,
   `dblclick-id <id>`, `hover-id <id>`, `absent <id>`, `shot <file.png>`, `dump`. A `script:`
   line on stderr fails the run. Id names are the ones in `crates/gui/src/ids.rs`: `name`,
-  `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, changed files `change/<n>`,
+  `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, an Inbox column's dropdown
+  `dropdown@<column>` and its entries `choice@<word>`, changed files `change/<n>`,
   commits `commit/<n>`, `all-changes` (in the Changes and Source toolbars `all-changes@changes`, `@source`), the split toggle `layout`, thread rows `thread/<n>`,
   a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up@<path>:<first line>`,
   `fold-down@<path>:<last line>` and `fold@<path>:<first line>` (lines from 0), a file's header
@@ -249,7 +264,7 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
   that changes the layout. `dump` prints the selection, the review (pulls, the open pull
   request, the inbox entries, the open pull request, the diff layout and the commit shown, every
   change with its seen state, the threads,
-  every draft), scroll offsets, the panel tree,
+  every draft), the text selection, scroll offsets, the panel tree,
   fields, the backend and the servers to stderr as `DUMP` lines (grep `^DUMP`).
   A script or screenshot run opens a fixed 1600x1000 window at scale 1 and ignores the real
   mouse and keyboard. It starts from the default panel layout and saves none, unless

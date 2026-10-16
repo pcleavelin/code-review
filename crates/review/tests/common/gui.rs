@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, inbox_status, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer, select_text, select_lines, pinned_header }
     };
 }
 
@@ -43,7 +43,7 @@ const JIRA_PICTURE: [u8; 70] = [
     0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 248, 207, 80, 15, 0, 3,
     134, 1, 128, 90, 52, 125, 107, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
-const JIRA_CARD: &str = r#"{"key":"PROJ-7","fields":{"summary":"Square every input before the sum","issuetype":{"name":"Story"},"assignee":{"displayName":"Ann Smith"},"status":{"name":"In Review","statusCategory":{"key":"indeterminate"}},"description":"h3. Overview\r\nThe sum takes *squares* of {{inputs}}.\r\n\r\n# Square each one\r\n## Keep the sign\r\n# Add them\r\n\r\n!shot.png|width=300!","attachment":[{"filename":"shot.png","content":"https://jira.test/rest/api/2/attachment/content/7"}]}}"#;
+const JIRA_CARD: &str = r#"{"key":"PROJ-7","fields":{"summary":"Square every input before the sum","issuetype":{"name":"Story"},"assignee":{"displayName":"Ann Smith"},"status":{"name":"In Review","statusCategory":{"key":"indeterminate"}},"description":"h3. Overview\r\nThe sum takes *squares* of {{inputs}}.\r\n\r\n# Square each one\r\n## Keep the sign\r\n# Add them\r\n\r\n!shot.png|width=300!\r\n\r\n{code:rust}fn square(value: i32) -> i32 {\r\n    value * value\r\n}{code}","attachment":[{"filename":"shot.png","content":"https://jira.test/rest/api/2/attachment/content/7"}]}}"#;
 
 pub(crate) fn open() -> Scenario {
     Scenario {
@@ -340,7 +340,7 @@ shot {shots}/sideways.png
 swipe 4000 0
 wait 3
 rect table@src/lib.rs:6
-click <<DUMP rect table@src/lib.rs:6|569,56>> ctrl
+click <<DUMP rect table@src/lib.rs:6|569,56>> primary
 wait 3
 idle
 dump
@@ -378,25 +378,25 @@ wait 3
 click-id copy-lines
 wait 2
 click-id cmd
-key v ctrl
+key v primary
 wait 2
 dump
 shot {shots}/head.png
-key u ctrl
+key u primary
 click-id draft-removed@src/lib.rs:10
 wait 2
-key c ctrl
+key c primary
 wait 2
 click-id cmd
-key v ctrl
+key v primary
 wait 2
 dump
-key u ctrl
+key u primary
 text kept
-key a ctrl
-key c ctrl
-key u ctrl
-key v ctrl
+key a primary
+key c primary
+key u primary
+key v primary
 wait 2
 dump
 click-id layout
@@ -639,7 +639,7 @@ idle
 wait 2
 dump
 mouse 800 400
-wheel 70
+wheel 20
 wait 3
 shot {shots}/head.png
 click-id link-open@src/lib.rs
@@ -927,7 +927,7 @@ idle
 wait 2
 dump
 shot {shots}/refused.png
-key a ctrl
+key a primary
 text jtoken
 key enter
 idle
@@ -1106,7 +1106,7 @@ click-id draft-edit@1
 wait 2
 dump
 shot {shots}/editing.png
-key a ctrl
+key a primary
 text rewritten
 wait 2
 click-id draft-add
@@ -1156,6 +1156,57 @@ quit
             "DUMP rect column-header@author = Some(Rect { x: 973, y: 154,",
             "DUMP rect column-header@author = Some(Rect { x: 1053, y: 154,",
             "DUMP field Column(Author) caret=3 first=0 rows=1 text=\"ann\"",
+        ],
+    }
+}
+
+pub(crate) fn inbox_status() -> Scenario {
+    Scenario {
+        script: "OPEN
+tab inbox
+wait 2
+absent column-filter@status
+absent choice@new
+click-id dropdown@status
+wait 2
+shot {shots}/open.png
+rect choice@new
+mouse <<DUMP rect choice@new|12,8>>
+click <<DUMP rect choice@new|12,8>>
+wait 2
+rect choice@new
+rect pull/0
+absent pull/1
+dump
+shot {shots}/filtered.png
+click <<DUMP rect choice@new|12,8>>
+wait 2
+rect choice@new
+rect pull/1
+key escape
+wait 2
+absent choice@new
+dump
+shot {shots}/closed.png
+click-id dropdown@status
+wait 2
+rect choice@reviewing
+click-id dropdown@status
+wait 2
+absent choice@reviewing
+click-id dropdown@status
+wait 2
+click <<DUMP rect pull/1|400,8>>
+wait 2
+absent choice@reviewing
+quit
+",
+        shows: &[
+            "statuses=[Updated, Reviewing, Reviewed]",
+            "statuses=[New, Updated, Reviewing, Reviewed]",
+            "DUMP rect pull/0 = Some(",
+            "DUMP rect pull/1 = Some(",
+            "DUMP rect choice@reviewing = Some(",
         ],
     }
 }
@@ -1221,4 +1272,191 @@ pub(crate) fn assert_frames(name: &str, scale: &ScaleScenario, output: &str) {
         scale.slowest_frame_ms,
         screenshots(name).display()
     );
+}
+
+pub(crate) fn select_text() -> Scenario {
+    Scenario {
+        script: "CARD
+OPEN
+tab review
+idle
+wait 3
+idle
+wait 3
+rect markdown@description
+drag <<DUMP rect markdown@description|2,10>> <<DUMP rect markdown@description|162,131>>
+wait 2
+dump
+shot {shots}/description.png
+key c primary
+wait 2
+click-id cmd
+key v primary
+wait 2
+dump
+key u primary
+rect markdown@card
+dblclick <<DUMP rect markdown@card|134,39>>
+wait 2
+dump
+shot {shots}/word.png
+drag <<DUMP rect markdown@card|7,146>> <<DUMP rect markdown@card|145,181>>
+wait 2
+dump
+shot {shots}/code.png
+click-id md-source@description/0/7
+wait 2
+idle
+wait 3
+dump
+tab review
+wait 3
+drag <<DUMP rect markdown@description|2,10>> <<DUMP rect markdown@description|146,10>>
+wait 2
+key c primary
+wait 2
+dump
+click-id card-collapse
+wait 2
+dump
+rect change/2
+drag <<DUMP rect change/2|40,10>> <<DUMP rect change/2|200,10>>
+wait 2
+idle
+wait 3
+dump
+shot {shots}/row.png
+quit
+",
+        shows: &[
+            "DUMP cursor=Text",
+            "DUMP text-selection=Some(\"Squares the inputs before adding them.\\ninput │ squared │ notes\\n",
+            "src/lib.rs#L5-L7, the side in https://forgejo.test\")",
+            "status=\"copied 489 characters\"",
+            "DUMP field Command caret=489 first=0 rows=1 text=\"Squares the inputs before adding them. input",
+            "DUMP text-selection=Some(\"squares\")",
+            "DUMP text-selection=Some(\"fn square(value: i32) -> i32 {\\n    value * value\\n}\")",
+            "DUMP tab=Source focus=None file=Some(\"src/lib.rs\") gone=None sel=Some((4, 6))",
+            "status=\"copied 18 characters\"",
+            "collapse=Collapsed",
+            "DUMP tab=Source focus=None file=Some(\"notes.md\")",
+            "DUMP text-selection=None",
+        ],
+    }
+}
+
+pub(crate) fn select_lines() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/1
+idle
+wait 3
+rect lines@src/lib.rs:10
+click <<DUMP rect lines@src/lib.rs:10|200,8>>
+wait 2
+dump
+rect lines@src/lib.rs:3
+click <<DUMP rect lines@src/lib.rs:3|200,8>> shift
+wait 2
+dump
+rect lines@src/lib.rs:9
+rect lines@src/lib.rs:10
+drag <<DUMP rect lines@src/lib.rs:9|200,8>> <<DUMP rect lines@src/lib.rs:10|200,8>>
+wait 2
+dump
+shot {shots}/unified.png
+click-id change/0
+idle
+wait 3
+rect draft-removed@old.txt:3
+click <<DUMP rect draft-removed@old.txt:3|200,8>>
+wait 2
+rect draft-removed@old.txt:5
+click <<DUMP rect draft-removed@old.txt:5|200,8>> shift
+wait 2
+dump
+click-id layout
+idle
+wait 3
+click-id change/1
+idle
+wait 3
+rect table@src/lib.rs:6
+click <<DUMP rect table@src/lib.rs:6|600,24>>
+wait 2
+dump
+rect table@src/lib.rs:6
+click <<DUMP rect table@src/lib.rs:6|100,56>>
+wait 2
+dump
+shot {shots}/split.png
+quit
+",
+        shows: &[
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((10, 10))",
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((10, 3))",
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((9, 10))",
+            "DUMP picked old.txt 3-5",
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((7, 7))",
+            "DUMP picked src/lib.rs 10-10",
+        ],
+    }
+}
+
+pub(crate) fn pinned_header() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/0
+idle
+wait 3
+mouse 800 400
+wheel -500
+wait 3
+rect file-header@old.txt
+rect pinned-header
+shot {shots}/pinned.png
+scroll source 6410
+wait 3
+rect file-header@old.txt
+rect file-header@src/lib.rs
+shot {shots}/pushed.png
+click-id seen@old.txt
+wait 2
+dump
+scroll source 3000
+wait 3
+click-id collapse@old.txt
+wait 1
+rect file-header@old.txt
+rect file-header@src/lib.rs
+rect pinned-header
+wait 1
+rect file-header@old.txt
+rect file-header@src/lib.rs
+rect pinned-header
+wait 3
+rect file-header@old.txt
+rect file-header@src/lib.rs
+rect pinned-header
+dump
+shot {shots}/collapsed.png
+click-id collapse@old.txt
+wait 3
+click-id layout
+idle
+wait 3
+scroll source 3000
+wait 3
+rect file-header@old.txt
+shot {shots}/split.png
+quit
+",
+        shows: &[
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 96,",
+            "DUMP rect file-header@old.txt = Some(Rect { x: 361, y: 86,",
+            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 116,",
+            "DUMP change old.txt Deleted +0 -400 Seen",
+            "DUMP rect file-header@src/lib.rs = Some(Rect { x: 361, y: 126,",
+        ],
+    }
 }
