@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use strum::VariantArray;
 
-use domain::{Prose, RelativePath, WebLink};
+use domain::{Prose, RelativePath, SourceFile, WebLink};
 use index::{Contents, Parsers};
 use ui::{Canvas, Count, Label, Px, Rect, Run};
 
@@ -72,7 +72,8 @@ impl Fence {
             Self::Rust | Self::Rs => "rs",
             Self::Python | Self::Py => "py",
             Self::JavaScript | Self::Js | Self::Jsx => "js",
-            Self::TypeScript | Self::Ts | Self::Tsx => "ts",
+            Self::TypeScript | Self::Ts => "ts",
+            Self::Tsx => "tsx",
             Self::Clang | Self::Header | Self::Cpp => "c",
             Self::Odin => "odin",
             Self::Sql => "sql",
@@ -545,14 +546,7 @@ impl Writer<'_> {
     }
 
     fn code(&self, frame: &mut Frame<'_>, language: &Label, text: &Label, number: Count) {
-        let extension = Fence::VARIANTS
-            .iter()
-            .find(|fence| fence.name().0.eq_ignore_ascii_case(language.as_str()))
-            .map_or(PLAIN.0, |fence| fence.extension().0);
-        let source = Parsers::default().parse(
-            RelativePath::new(&format!("snippet.{extension}")),
-            &Contents::new(text.as_str()),
-        );
+        let source = snippet(language, text);
         let Some(span) = source.text().span() else {
             return;
         };
@@ -687,9 +681,35 @@ pub(super) fn markdown(model: &Model, frame: &mut Frame<'_>, written: &Prose, ke
     frame.finish();
 }
 
+fn snippet(language: &Label, text: &Label) -> SourceFile {
+    let extension = Fence::VARIANTS
+        .iter()
+        .find(|fence| fence.name().0.eq_ignore_ascii_case(language.as_str()))
+        .map_or(PLAIN.0, |fence| fence.extension().0);
+    Parsers::default().parse(
+        RelativePath::new(&format!("snippet.{extension}")),
+        &Contents::new(text.as_str()),
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use domain::HighlightClass;
+
     use super::*;
+
+    #[test]
+    fn a_tsx_fence_reads_its_markup() {
+        let text = "const tile = <div className=\"tile\">{area}</div>;";
+        let source = snippet(&Label::new("tsx"), &Label::new(text));
+        let tag = source.highlights()[0]
+            .iter()
+            .find(|span| {
+                text.get(span.start.value() as usize..span.end.value() as usize) == Some("div")
+            })
+            .map(|span| span.class);
+        assert_eq!(tag, Some(HighlightClass::Property));
+    }
 
     fn counts(widths: &[usize]) -> Vec<Count> {
         widths.iter().copied().map(Count::new).collect()

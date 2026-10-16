@@ -1,5 +1,6 @@
 use std::io::BufRead;
 
+use domain::LanguageId;
 use serde_json::{Value, json};
 use strum::VariantArray;
 
@@ -35,6 +36,8 @@ enum Method {
     Initialized,
     Shutdown,
     Exit,
+    DidOpen,
+    DidClose,
     DocumentSymbol,
     PrepareCallHierarchy,
     OutgoingCalls,
@@ -55,6 +58,8 @@ impl Method {
             Self::Initialized => "initialized",
             Self::Shutdown => "shutdown",
             Self::Exit => "exit",
+            Self::DidOpen => "textDocument/didOpen",
+            Self::DidClose => "textDocument/didClose",
             Self::DocumentSymbol => "textDocument/documentSymbol",
             Self::PrepareCallHierarchy => "textDocument/prepareCallHierarchy",
             Self::OutgoingCalls => "callHierarchy/outgoingCalls",
@@ -151,6 +156,20 @@ impl Outgoing {
         Self {
             method: Method::Exit,
             params: Value::Null,
+        }
+    }
+
+    pub(crate) fn did_open(uri: &str, language: LanguageId, text: &str) -> Self {
+        Self {
+            method: Method::DidOpen,
+            params: json!({"textDocument": {"uri": uri, "languageId": language.as_str(), "version": 1, "text": text}}),
+        }
+    }
+
+    pub(crate) fn did_close(uri: &str) -> Self {
+        Self {
+            method: Method::DidClose,
+            params: json!({"textDocument": {"uri": uri}}),
         }
     }
 

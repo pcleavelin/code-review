@@ -31,8 +31,8 @@ impl Grammar {
             Self::Odin => &[Word("odin")],
             Self::Clang => &[Word("c"), Word("h")],
             Self::Python => &[Word("py")],
-            Self::Javascript => &[Word("js"), Word("mjs"), Word("cjs")],
-            Self::Typescript => &[Word("ts")],
+            Self::Javascript => &[Word("js"), Word("mjs"), Word("cjs"), Word("jsx")],
+            Self::Typescript => &[Word("ts"), Word("mts"), Word("cts")],
             Self::Tsx => &[Word("tsx")],
             Self::Sql => &[Word("sql")],
         }
@@ -74,43 +74,39 @@ impl Grammar {
         })
     }
 
+    fn language(self) -> tree_sitter::Language {
+        match self {
+            Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Self::Odin => tree_sitter_odin::LANGUAGE.into(),
+            Self::Clang => tree_sitter_c::LANGUAGE.into(),
+            Self::Python => tree_sitter_python::LANGUAGE.into(),
+            Self::Javascript => tree_sitter_javascript::LANGUAGE.into(),
+            Self::Typescript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Self::Sql => tree_sitter_sequel::LANGUAGE.into(),
+        }
+    }
+
+    const fn highlights(self) -> &'static [HighlightQuery] {
+        const SCRIPT: HighlightQuery = HighlightQuery(tree_sitter_javascript::HIGHLIGHT_QUERY);
+        const MARKUP: HighlightQuery = HighlightQuery(tree_sitter_javascript::JSX_HIGHLIGHT_QUERY);
+        const TYPED: HighlightQuery = HighlightQuery(tree_sitter_typescript::HIGHLIGHTS_QUERY);
+        match self {
+            Self::Rust => &[HighlightQuery(tree_sitter_rust::HIGHLIGHTS_QUERY)],
+            Self::Odin => &[HighlightQuery(tree_sitter_odin::HIGHLIGHTS_QUERY)],
+            Self::Clang => &[HighlightQuery(tree_sitter_c::HIGHLIGHT_QUERY)],
+            Self::Python => &[HighlightQuery(tree_sitter_python::HIGHLIGHTS_QUERY)],
+            Self::Javascript => &[SCRIPT, MARKUP],
+            Self::Typescript => &[TYPED, SCRIPT],
+            Self::Tsx => &[TYPED, MARKUP, SCRIPT],
+            Self::Sql => &[HighlightQuery(tree_sitter_sequel::HIGHLIGHTS_QUERY)],
+        }
+    }
+
     fn compile(self) -> Option<Compiled> {
-        let (language, highlights): (tree_sitter::Language, &str) = match self {
-            Self::Rust => (
-                tree_sitter_rust::LANGUAGE.into(),
-                tree_sitter_rust::HIGHLIGHTS_QUERY,
-            ),
-            Self::Odin => (
-                tree_sitter_odin::LANGUAGE.into(),
-                tree_sitter_odin::HIGHLIGHTS_QUERY,
-            ),
-            Self::Clang => (
-                tree_sitter_c::LANGUAGE.into(),
-                tree_sitter_c::HIGHLIGHT_QUERY,
-            ),
-            Self::Python => (
-                tree_sitter_python::LANGUAGE.into(),
-                tree_sitter_python::HIGHLIGHTS_QUERY,
-            ),
-            Self::Javascript => (
-                tree_sitter_javascript::LANGUAGE.into(),
-                tree_sitter_javascript::HIGHLIGHT_QUERY,
-            ),
-            Self::Typescript => (
-                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-                tree_sitter_typescript::HIGHLIGHTS_QUERY,
-            ),
-            Self::Tsx => (
-                tree_sitter_typescript::LANGUAGE_TSX.into(),
-                tree_sitter_typescript::HIGHLIGHTS_QUERY,
-            ),
-            Self::Sql => (
-                tree_sitter_sequel::LANGUAGE.into(),
-                tree_sitter_sequel::HIGHLIGHTS_QUERY,
-            ),
-        };
+        let language = self.language();
         let dialect = self.dialect();
-        let query = Query::new(&language, &dialect.query(HighlightQuery(highlights)).0).ok()?;
+        let query = Query::new(&language, &dialect.query(self.highlights()).0).ok()?;
         Some(Compiled {
             language,
             query,
@@ -127,14 +123,17 @@ enum Dialect {
 }
 
 impl Dialect {
-    fn query(self, highlights: HighlightQuery) -> QueryText {
+    fn query(self, highlights: &[HighlightQuery]) -> QueryText {
+        let layered = highlights
+            .iter()
+            .map(|layer| layer.0)
+            .collect::<Vec<_>>()
+            .join("\n");
         QueryText(match self {
-            Self::TreeSitter => highlights.0.to_owned(),
-            Self::Neovim => LuaClass::VARIANTS
-                .iter()
-                .fold(highlights.0.to_owned(), |query, class| {
-                    query.replace(class.lua().as_str(), class.regex().as_str())
-                }),
+            Self::TreeSitter => layered,
+            Self::Neovim => LuaClass::VARIANTS.iter().fold(layered, |query, class| {
+                query.replace(class.lua().as_str(), class.regex().as_str())
+            }),
         })
     }
 
@@ -812,6 +811,7 @@ enum NodeKindWord {
     Impl,
     ObjectReference,
     Identifier,
+    Declarator,
     CreatePrefix,
 }
 
@@ -823,6 +823,7 @@ impl NodeKindWord {
             Self::Impl => "impl_item",
             Self::ObjectReference => "object_reference",
             Self::Identifier => "identifier",
+            Self::Declarator => "variable_declarator",
             Self::CreatePrefix => "create_",
         })
     }
@@ -886,6 +887,14 @@ pub(crate) fn call_order(one: &Call, other: &Call) -> Ordering {
         .then_with(|| spelled(&one.qualifier).cmp(&spelled(&other.qualifier)))
 }
 
+fn declared_name(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find(|child| NodeKind(child.kind()).named(NodeKindWord::Declarator))?
+        .child_by_field_name("name")
+        .filter(|name| NodeKind(name.kind()).named(NodeKindWord::Identifier))
+}
+
 struct Collector<'text> {
     source: Source<'text>,
     text: &'text FileText,
@@ -915,7 +924,10 @@ impl Collector<'_> {
 
     fn collect(&mut self, parent: Node<'_>, depth: Depth, owner: Option<&TypeName>) {
         let mut cursor = parent.walk();
-        for node in parent.named_children(&mut cursor) {
+        for statement in parent.named_children(&mut cursor) {
+            let node = statement
+                .child_by_field_name("declaration")
+                .unwrap_or(statement);
             let kind = NodeKind(node.kind());
             if kind.imports() {
                 if let Some(text) = self.source.of(node) {
@@ -929,9 +941,9 @@ impl Collector<'_> {
             if kind.named(NodeKindWord::Module) && node.child_by_field_name("body").is_none() {
                 continue;
             }
-            let start = Row(node.start_position().row);
-            let mut end = Row(node.end_position().row);
-            if node.end_position().column == 0 && end > start {
+            let start = Row(statement.start_position().row);
+            let mut end = Row(statement.end_position().row);
+            if statement.end_position().column == 0 && end > start {
                 end = Row(end.0 - 1);
             }
             let mut name_row = start;
@@ -946,7 +958,10 @@ impl Collector<'_> {
                 .line(name_row)
                 .map(SourceLine::trimmed)
                 .unwrap_or_default();
-            let named = match node.child_by_field_name("name") {
+            let named = match node
+                .child_by_field_name("name")
+                .or_else(|| declared_name(node))
+            {
                 Some(name) => Some(SymbolName::new(self.source.of(name).unwrap_or_default())),
                 None if kind.named(NodeKindWord::Impl) => self.impl_name(node),
                 None => {

@@ -8,8 +8,8 @@ mod text;
 
 pub use id::{Entry, IdList, Key, Position};
 pub use index::{
-    Argument, Backend, Call, Cut, Depth, Edge, Extension, FileId, Highlight, HighlightClass,
-    Imports, Index, Language, Location, PendingBatch, Planned, Program, PrunedTree, Qualifier,
+    Argument, Backend, Call, Cut, Depth, Edge, FileId, Highlight, HighlightClass, Imports, Index,
+    Language, LanguageId, Location, PendingBatch, Planned, Program, PrunedTree, Qualifier,
     Readiness, Root, Scope, SourceFile, Stop, Symbol, SymbolId, SymbolIndex, SymbolKey, SymbolKind,
     SymbolName, SymbolQuery, TreeEntry, TypeName, Verdict,
 };

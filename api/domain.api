@@ -84,17 +84,17 @@ index::file::pub fn innermost(&self, span: Span) -> Option<SymbolIndex>
 index::file::pub fn first_named(&self, name: &SymbolName) -> Option<SymbolIndex>
 index::file::pub fn name_class(&self, symbol: &Symbol) -> HighlightClass
 index::file::pub fn call_site(&self, line: Line, name: &SymbolName) -> bool
-index::language::pub struct Extension(&'static str);
+index::language::pub struct LanguageId(&'static str);
 index::language::pub const fn as_str(self) -> &'static str
 index::language::pub struct Program(&'static str);
 index::language::pub const fn as_str(self) -> &'static str
 index::language::pub struct Argument(&'static str);
 index::language::pub const fn as_str(self) -> &'static str
 index::language::pub enum Language { Rust, Odin, Clang, Python, Javascript, }
-index::language::pub const fn extensions(self) -> &'static [Extension]
 index::language::pub const fn program(self) -> Program
 index::language::pub const fn arguments(self) -> &'static [Argument]
 index::language::pub fn of(path: &RelativePath) -> Option<Self>
+index::language::pub fn language_id(path: &RelativePath) -> Option<LanguageId>
 index::prune::pub enum Cut { Test, Accessor, Trivial, }
 index::prune::pub enum Stop { Mapped, Shared, OtherPackage, }
 index::prune::pub enum Verdict { Kept, Cut(Cut), Stopped(Stop), Cycle, }

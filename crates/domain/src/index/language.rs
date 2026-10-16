@@ -5,11 +5,38 @@ use strum::VariantArray;
 use crate::text::RelativePath;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Extension(&'static str);
+pub struct LanguageId(&'static str);
 
-impl Extension {
+impl LanguageId {
     pub const fn as_str(self) -> &'static str {
         self.0
+    }
+}
+
+const RUST: LanguageId = LanguageId("rust");
+const ODIN: LanguageId = LanguageId("odin");
+const CLANG: LanguageId = LanguageId("c");
+const PYTHON: LanguageId = LanguageId("python");
+const JAVASCRIPT: LanguageId = LanguageId("javascript");
+const JAVASCRIPT_MARKUP: LanguageId = LanguageId("javascriptreact");
+const TYPESCRIPT: LanguageId = LanguageId("typescript");
+const TYPESCRIPT_MARKUP: LanguageId = LanguageId("typescriptreact");
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Extension(&'static str);
+
+impl Extension {
+    const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileType(Extension, LanguageId);
+
+impl FileType {
+    const fn language_id(self) -> LanguageId {
+        self.1
     }
 }
 
@@ -49,18 +76,24 @@ pub enum Language {
 const STANDARD_INPUT: [Argument; 1] = [Argument("--stdio")];
 
 impl Language {
-    pub const fn extensions(self) -> &'static [Extension] {
+    const fn file_types(self) -> &'static [FileType] {
         match self {
-            Self::Rust => &[Extension("rs")],
-            Self::Odin => &[Extension("odin")],
-            Self::Clang => &[Extension("c"), Extension("h")],
-            Self::Python => &[Extension("py")],
+            Self::Rust => &[FileType(Extension("rs"), RUST)],
+            Self::Odin => &[FileType(Extension("odin"), ODIN)],
+            Self::Clang => &[
+                FileType(Extension("c"), CLANG),
+                FileType(Extension("h"), CLANG),
+            ],
+            Self::Python => &[FileType(Extension("py"), PYTHON)],
             Self::Javascript => &[
-                Extension("js"),
-                Extension("mjs"),
-                Extension("cjs"),
-                Extension("ts"),
-                Extension("tsx"),
+                FileType(Extension("js"), JAVASCRIPT),
+                FileType(Extension("mjs"), JAVASCRIPT),
+                FileType(Extension("cjs"), JAVASCRIPT),
+                FileType(Extension("jsx"), JAVASCRIPT_MARKUP),
+                FileType(Extension("ts"), TYPESCRIPT),
+                FileType(Extension("mts"), TYPESCRIPT),
+                FileType(Extension("cts"), TYPESCRIPT),
+                FileType(Extension("tsx"), TYPESCRIPT_MARKUP),
             ],
         }
     }
@@ -83,12 +116,24 @@ impl Language {
     }
 
     pub fn of(path: &RelativePath) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|language| language.file_type(path).is_some())
+    }
+
+    pub fn language_id(path: &RelativePath) -> Option<LanguageId> {
+        Self::VARIANTS
+            .iter()
+            .find_map(|language| language.file_type(path))
+            .map(FileType::language_id)
+    }
+
+    fn file_type(self, path: &RelativePath) -> Option<FileType> {
         let last = path.last_dotted();
-        Self::VARIANTS.iter().copied().find(|language| {
-            language
-                .extensions()
-                .iter()
-                .any(|extension| extension.as_str() == last)
-        })
+        self.file_types()
+            .iter()
+            .copied()
+            .find(|file_type| file_type.0.as_str() == last)
     }
 }

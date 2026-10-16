@@ -8,6 +8,7 @@ publish = false
 strum = { version = "0.28", features = ["derive"] }
 domain = { path = "../domain" }
 io-process = { path = "../io-process" }
+io-source = { path = "../io-source" }
 serde_json = "1"
 
 [lints]

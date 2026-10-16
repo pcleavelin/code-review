@@ -12,7 +12,7 @@ use crate::id::{Entry, IdList};
 use crate::text::{Line, RelativePath, Span};
 
 pub use file::{Backend, Highlight, HighlightClass, Imports, Readiness, SourceFile};
-pub use language::{Argument, Extension, Language, Program};
+pub use language::{Argument, Language, LanguageId, Program};
 pub use prune::{Cut, Planned, PrunedTree, Stop, Verdict};
 pub use symbol::{
     Call, Depth, Edge, FileId, Location, Qualifier, Scope, Symbol, SymbolId, SymbolIndex,

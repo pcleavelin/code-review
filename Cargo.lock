@@ -1031,6 +1031,7 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "io-process",
+ "io-source",
  "serde_json",
  "strum",
 ]
