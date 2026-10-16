@@ -231,9 +231,10 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
 - `REVIEW_SCRIPT=<file> target/release/review` plays a script, one command per
   line, as real input, on a clock of its own (8 ms a frame, plus each pause): `wait n`
   (frames), `pause ms` (waits that long in wall time, for the forge and the servers),
-  `mouse x y`, `down`, `up`, `click x y [ctrl|alt|shift]`, `dblclick x y`,
+  `mouse x y`, `down`, `up`, `click x y [ctrl|alt|shift|primary]`, `dblclick x y`,
   `drag x0 y0 x1 y1`, `wheel dy [ctrl|shift]`, `swipe dx dy`, `pinch n`,
-  `key <name> [ctrl] [alt]`, `text ...`, `quit`; app commands `tab <name>`,
+  `key <name> [ctrl] [alt] [primary]`, `text ...`, `quit` (`primary` is the platform's primary
+  modifier: cmd on macOS, ctrl elsewhere); app commands `tab <name>`,
   `open <file> [line]`, `scroll <panel> <n>`, `idle` (waits until the forge, the servers and
   every background job have answered), `rect <id>`, `click-id <id> [ctrl|alt|shift]`,
   `dblclick-id <id>`, `hover-id <id>`, `absent <id>`, `shot <file.png>`, `dump`. A `script:`

@@ -11,10 +11,10 @@ pub(crate) struct Chord {
 }
 
 impl Chord {
-    const fn ctrl(key: Key) -> Self {
+    const fn primary(key: Key) -> Self {
         Self {
             key,
-            mods: Mods::CTRL,
+            mods: Mods::PRIMARY,
         }
     }
 
@@ -30,13 +30,14 @@ impl Chord {
     }
 
     pub(crate) fn label(self) -> Label {
-        let modifier = if self.mods.ctrl() {
-            "ctrl+"
-        } else if self.mods.alt() {
-            "alt+"
-        } else {
-            ""
-        };
+        let modifier = [
+            (self.mods.command(), COMMAND_NAME),
+            (self.mods.ctrl(), CTRL_NAME),
+            (self.mods.alt(), ALT_NAME),
+        ]
+        .into_iter()
+        .find(|(held, _)| *held)
+        .map_or_else(String::new, |(_, name)| format!("{}+", name.as_str()));
         let key = match self.key {
             Key::Left => "left".to_owned(),
             Key::Right => "right".to_owned(),
@@ -54,17 +55,35 @@ impl Chord {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct KeyName(&'static str);
+
+impl KeyName {
+    pub(crate) const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+const COMMAND_NAME: KeyName = KeyName("cmd");
+const CTRL_NAME: KeyName = KeyName("ctrl");
+const ALT_NAME: KeyName = KeyName("alt");
+pub(crate) const PRIMARY_NAME: KeyName = if Mods::PRIMARY.command() {
+    COMMAND_NAME
+} else {
+    CTRL_NAME
+};
+
 pub(crate) const GO_BACK: Chord = Chord::alt(Key::Left);
 pub(crate) const GO_FORWARD: Chord = Chord::alt(Key::Right);
-const GO_BACK_TOO: Chord = Chord::ctrl(Key::Left);
-const GO_FORWARD_TOO: Chord = Chord::ctrl(Key::Right);
-pub(crate) const PALETTE: Chord = Chord::ctrl(Key::Character(Glyph::new('p')));
-pub(crate) const SETTINGS: Chord = Chord::ctrl(Key::Character(Glyph::new(',')));
+const GO_BACK_TOO: Chord = Chord::primary(Key::Left);
+const GO_FORWARD_TOO: Chord = Chord::primary(Key::Right);
+pub(crate) const PALETTE: Chord = Chord::primary(Key::Character(Glyph::new('p')));
+pub(crate) const SETTINGS: Chord = Chord::primary(Key::Character(Glyph::new(',')));
 pub(crate) const TOGGLE_SEEN: Chord = Chord::alt(Key::Character(Glyph::new('s')));
 pub(crate) const NEXT_UNSEEN: Chord = Chord::alt(Key::Character(Glyph::new('n')));
 pub(crate) const NEXT_HUNK: Chord = Chord::alt(Key::Down);
 pub(crate) const PREVIOUS_HUNK: Chord = Chord::alt(Key::Up);
-pub(crate) const COPY_LINES: Chord = Chord::ctrl(Key::Character(Glyph::new('c')));
+pub(crate) const COPY_LINES: Chord = Chord::primary(Key::Character(Glyph::new('c')));
 pub(crate) const COMMENT: Chord = Chord::alt(Key::Character(Glyph::new('c')));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,8 +150,8 @@ pub(crate) fn going(input: &Input, going: Going, focused: Option<Which>) -> bool
 }
 
 pub(crate) const fn enter_mods(mods: Mods) -> EnterMods {
-    if mods.ctrl() {
-        EnterMods::Control
+    if mods.primary() {
+        EnterMods::Primary
     } else if mods.shift() {
         EnterMods::Shift
     } else {
@@ -141,7 +160,7 @@ pub(crate) const fn enter_mods(mods: Mods) -> EnterMods {
 }
 
 fn clipboard_edit(press: Press) -> Option<Edit> {
-    if !press.mods.same_ctrl_alt(Mods::CTRL) {
+    if !press.mods.same_chord(Mods::PRIMARY) {
         return None;
     }
     match press.key {
@@ -171,17 +190,21 @@ fn edit_of(press: Press) -> Option<Edit> {
         Key::Enter => Edit::Enter(enter_mods(mods)),
         Key::Backspace => Edit::Backspace(unit),
         Key::Remove => Edit::Remove(unit),
+        Key::Left if mods.command() => Edit::Move(Motion::RowStart, extend),
+        Key::Right if mods.command() => Edit::Move(Motion::RowEnd, extend),
         Key::Left => Edit::Move(Motion::Left(unit), extend),
         Key::Right => Edit::Move(Motion::Right(unit), extend),
-        Key::Home if mods.ctrl() => Edit::Move(Motion::Start, extend),
+        Key::Home if mods.primary() => Edit::Move(Motion::Start, extend),
         Key::Home => Edit::Move(Motion::RowStart, extend),
-        Key::End if mods.ctrl() => Edit::Move(Motion::End, extend),
+        Key::End if mods.primary() => Edit::Move(Motion::End, extend),
         Key::End => Edit::Move(Motion::RowEnd, extend),
+        Key::Up if mods.command() => Edit::Move(Motion::Start, extend),
         Key::Up => Edit::Move(Motion::Up, extend),
+        Key::Down if mods.command() => Edit::Move(Motion::End, extend),
         Key::Down => Edit::Move(Motion::Down, extend),
         Key::Escape => Edit::Escape,
-        Key::Character(glyph) if glyph.get() == 'a' && mods.ctrl() => Edit::SelectAll,
-        Key::Character(glyph) if glyph.get() == 'u' && mods.ctrl() => Edit::ClearLine,
+        Key::Character(glyph) if glyph.get() == 'a' && mods.primary() => Edit::SelectAll,
+        Key::Character(glyph) if glyph.get() == 'u' && mods.primary() => Edit::ClearLine,
         Key::Character(_) => return clipboard_edit(press),
     })
 }
@@ -198,7 +221,7 @@ pub(crate) fn code_gesture(interaction: Interaction, pointer: Pointer) -> Option
     let mods = pointer.mods;
     if interaction.clicked() && mods.alt() {
         Some(CodeGesture::Peek)
-    } else if (interaction.clicked() && mods.ctrl()) || interaction.double_clicked() {
+    } else if (interaction.clicked() && mods.primary()) || interaction.double_clicked() {
         Some(CodeGesture::Jump)
     } else {
         None
@@ -209,8 +232,7 @@ pub(crate) fn selects_line(interaction: Interaction, pointer: Pointer) -> Option
     let mods = pointer.mods;
     if interaction.drag().is_some() {
         Some(LineGesture::Drag)
-    } else if interaction.clicked() && !mods.ctrl() && !mods.alt() && !interaction.double_clicked()
-    {
+    } else if interaction.clicked() && !mods.chorded() && !interaction.double_clicked() {
         Some(if mods.shift() {
             LineGesture::Extend
         } else {
@@ -258,14 +280,14 @@ pub(crate) fn escaped(input: &Input) -> bool {
     input
         .keys
         .iter()
-        .any(|press| press.key == Key::Escape && !press.mods.ctrl() && !press.mods.alt())
+        .any(|press| press.key == Key::Escape && !press.mods.chorded())
 }
 
 pub(crate) fn palette_keys(input: &Input) -> Vec<PaletteKey> {
     input
         .keys
         .iter()
-        .filter(|press| !press.mods.ctrl() && !press.mods.alt())
+        .filter(|press| !press.mods.chorded())
         .filter_map(|press| match press.key {
             Key::Up => Some(PaletteKey::Move(Walk::Up)),
             Key::Down => Some(PaletteKey::Move(Walk::Down)),
@@ -292,7 +314,7 @@ pub(crate) fn viewer_keys(input: &Input) -> Vec<ViewerAct> {
     input
         .keys
         .iter()
-        .filter(|press| !press.mods.ctrl() && !press.mods.alt())
+        .filter(|press| !press.mods.chorded())
         .filter_map(|press| match press.key {
             Key::Escape => Some(ViewerAct::Close),
             Key::Character(glyph) => match glyph.get() {
@@ -321,13 +343,72 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_copies_lines_only_while_no_field_has_the_keyboard() {
+    fn primary_c_copies_lines_only_while_no_field_has_the_keyboard() {
         let input = pressed(COPY_LINES);
         assert_eq!(review_keys(&input, None), vec![ReviewAct::CopyLines]);
         assert_eq!(review_keys(&input, Some(Which::Command)), Vec::new());
         assert_eq!(
             review_keys(&pressed(COMMENT), Some(Which::Command)),
             vec![ReviewAct::StartDraftHere]
+        );
+    }
+
+    fn typed(glyph: char, mods: Mods) -> Input {
+        let mut input = Input::default();
+        input.keys.push(Press {
+            key: Key::Character(Glyph::new(glyph)),
+            mods,
+        });
+        input
+    }
+
+    #[test]
+    fn the_platform_primary_modifier_copies_cuts_pastes_and_selects_all_and_the_other_does_not() {
+        let other = if Mods::PRIMARY.command() {
+            Mods::CTRL
+        } else {
+            Mods::COMMAND
+        };
+        for (glyph, edit) in [
+            ('c', Edit::Copy),
+            ('x', Edit::Cut),
+            ('v', Edit::Paste),
+            ('a', Edit::SelectAll),
+        ] {
+            assert_eq!(edits(&typed(glyph, Mods::PRIMARY)), vec![edit]);
+            assert_eq!(edits(&typed(glyph, other)), Vec::new());
+        }
+        assert_eq!(
+            edits(&typed('v', Mods::PRIMARY.with(Mods::ALT))),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn command_arrows_move_to_the_ends_of_the_row_and_of_the_text() {
+        let moved = |key| {
+            let mut input = Input::default();
+            input.keys.push(Press {
+                key,
+                mods: Mods::COMMAND.with(Mods::SHIFT),
+            });
+            edits(&input)
+        };
+        assert_eq!(
+            moved(Key::Left),
+            vec![Edit::Move(Motion::RowStart, Extend::Extend)]
+        );
+        assert_eq!(
+            moved(Key::Right),
+            vec![Edit::Move(Motion::RowEnd, Extend::Extend)]
+        );
+        assert_eq!(
+            moved(Key::Up),
+            vec![Edit::Move(Motion::Start, Extend::Extend)]
+        );
+        assert_eq!(
+            moved(Key::Down),
+            vec![Edit::Move(Motion::End, Extend::Extend)]
         );
     }
 }

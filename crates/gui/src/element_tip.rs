@@ -15,7 +15,7 @@ pub(crate) struct ElementTip {
 impl ElementTip {
     pub(crate) fn of(tip: Tip) -> Self {
         Self {
-            text: Label::new(tip.words.as_str()),
+            text: tip.words.spelled(),
             chord: tip.chord.map(Chord::label),
         }
     }

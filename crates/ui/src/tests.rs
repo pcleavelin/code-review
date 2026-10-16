@@ -614,17 +614,32 @@ fn numbers_convert_like_casts() {
 }
 
 #[test]
-fn keys_match_ctrl_and_alt_but_not_shift() {
+fn keys_match_ctrl_alt_and_command_but_not_shift() {
     let mut frame = Input::default();
     frame.keys.push(Press {
         key: Key::Character(Glyph::new('s')),
         mods: Mods::CTRL.with(Mods::SHIFT),
     });
+    frame.keys.push(Press {
+        key: Key::Character(Glyph::new('c')),
+        mods: Mods::COMMAND.with(Mods::CTRL),
+    });
     assert!(frame.pressed_key(Key::Character(Glyph::new('s')), Mods::CTRL));
     assert!(!frame.pressed_key(Key::Character(Glyph::new('s')), Mods::NONE));
+    assert!(frame.pressed_key(
+        Key::Character(Glyph::new('c')),
+        Mods::CTRL.with(Mods::COMMAND)
+    ));
+    assert!(!frame.pressed_key(Key::Character(Glyph::new('c')), Mods::CTRL));
     assert_eq!(
-        format!("{:?}", Mods::new(true, false, true)),
-        "Mods { ctrl: true, shift: false, alt: true }"
+        format!(
+            "{:?}",
+            Mods::NONE
+                .with_held(true, Mods::CTRL)
+                .with_held(false, Mods::SHIFT)
+                .with_held(true, Mods::COMMAND)
+        ),
+        "Mods { ctrl: true, shift: false, alt: false, command: true }"
     );
     frame.pointer.pressed.insert(Button::Back);
     frame.end_frame();

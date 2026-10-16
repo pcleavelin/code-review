@@ -15,6 +15,7 @@ use crate::action::Action;
 use crate::field::Which;
 use crate::grid::{self, Gutter};
 use crate::ids::{self, Control};
+use crate::keys;
 use crate::model::Model;
 use crate::nav::Kept;
 use crate::review::{CardCollapse, OpenReview, ReviewAct, Submitting, Talk};
@@ -836,11 +837,15 @@ pub(super) fn editing_box(
             TEXT,
         ),
         Run::new(
-            if model.review.editing.is_some() {
-                "  ctrl+enter saves it, escape cancels"
-            } else {
-                "  ctrl+enter adds it, escape cancels"
-            },
+            format!(
+                "  {}+enter {} it, escape cancels",
+                keys::PRIMARY_NAME.as_str(),
+                if model.review.editing.is_some() {
+                    "saves"
+                } else {
+                    "adds"
+                }
+            ),
             WEAK,
         ),
     ]);

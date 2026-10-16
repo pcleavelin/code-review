@@ -4,7 +4,7 @@ use crate::atlas::{Atlas, Bitmap, Corner, Texel};
 use crate::gpu::bytes_of;
 use crate::present::Pixels;
 use crate::script::ScriptLine;
-use ui::{Point, Px};
+use ui::{Mods, Point, Px};
 
 fn texts(lines: &[ScriptLine]) -> Vec<&str> {
     lines.iter().map(ScriptLine::as_str).collect()
@@ -53,6 +53,7 @@ fn numbers_and_mods_parse_like_the_legacy_runner() {
     let mods = line.mods_from(2);
     assert!(mods.ctrl() && mods.shift() && !mods.alt());
     assert_eq!(line.rest(1), "-120 ctrl shift");
+    assert_eq!(ScriptLine::new("key v primary").mods_from(2), Mods::PRIMARY);
 }
 
 #[test]

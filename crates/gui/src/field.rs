@@ -15,7 +15,7 @@ use crate::text::Clipped;
 pub(crate) enum EnterMods {
     Plain,
     Shift,
-    Control,
+    Primary,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

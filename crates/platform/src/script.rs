@@ -52,11 +52,11 @@ impl ScriptLine {
     pub(crate) fn mods_from(&self, from: usize) -> Mods {
         let later: Vec<&str> = self.words().into_iter().skip(from).collect();
         let held = |key: HeldKey| later.contains(&key.name().as_str());
-        Mods::new(
-            held(HeldKey::Control),
-            held(HeldKey::Shift),
-            held(HeldKey::Alt),
-        )
+        Mods::NONE
+            .with_held(held(HeldKey::Control), Mods::CTRL)
+            .with_held(held(HeldKey::Shift), Mods::SHIFT)
+            .with_held(held(HeldKey::Alt), Mods::ALT)
+            .with_held(held(HeldKey::Primary), Mods::PRIMARY)
     }
 
     fn key(&self) -> Key {
@@ -512,6 +512,7 @@ enum HeldKey {
     Control,
     Shift,
     Alt,
+    Primary,
 }
 
 impl HeldKey {
@@ -520,6 +521,7 @@ impl HeldKey {
             Self::Control => "ctrl",
             Self::Shift => "shift",
             Self::Alt => "alt",
+            Self::Primary => "primary",
         })
     }
 }

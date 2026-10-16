@@ -24,10 +24,12 @@ impl Words {
         Self(text)
     }
 
-    pub(crate) const fn as_str(self) -> &'static str {
-        self.0
+    pub(crate) fn spelled(self) -> Label {
+        Label::new(self.0.replace(PRIMARY_MARK.0, keys::PRIMARY_NAME.as_str()))
     }
 }
+
+const PRIMARY_MARK: Words = Words::new("{primary}");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Tip {
@@ -179,7 +181,7 @@ pub(crate) const PEEK_CLOSE: Control = Control::new(
 pub(crate) const LINES: Control = Control::new(
     Element::new("lines"),
     Words::new(
-        "click a line to select it, drag to select several; double-click or ctrl+click a name to go to its definition, alt+click to peek it",
+        "click a line to select it, drag to select several; double-click or {primary}+click a name to go to its definition, alt+click to peek it",
     ),
 );
 pub(crate) const HIT_ROW: Control = Control::new(Element::new("hit"), Words::new("go to this hit"));
@@ -269,7 +271,7 @@ pub(crate) const JIRA_TOKENS: Control = Control::new(
 );
 pub(crate) const VIEWER_OUT: Control = Control::new(
     Element::new("viewer-out"),
-    Words::new("zoom out (-); pinch or ctrl+wheel zoom where the pointer is"),
+    Words::new("zoom out (-); pinch or {primary}+wheel zoom where the pointer is"),
 );
 pub(crate) const VIEWER_FIT: Control = Control::new(
     Element::new("viewer-fit"),
@@ -403,7 +405,7 @@ pub(crate) const DRAFT_REMOVED: Control = Control::new(
 );
 pub(crate) const DRAFT_FIELD: Control = Control::new(
     Element::new("field@draft"),
-    Words::new("the comment; ctrl+enter adds it, escape cancels"),
+    Words::new("the comment; {primary}+enter adds it, escape cancels"),
 );
 pub(crate) const DRAFT_ADD: Control = Control::new(
     Element::new("draft-add"),

@@ -5,6 +5,7 @@ use ui::{Button, Count, Label, Point, Px, Run};
 
 use crate::action::Action;
 use crate::ids;
+use crate::keys;
 use crate::model::Model;
 use crate::settings::{SettingsAct, ThemeName};
 use crate::theme::{
@@ -73,7 +74,10 @@ pub(super) fn settings(model: &Model, frame: &mut Frame<'_>) {
     fonts(model, frame);
     frame.finish();
 
-    frame.label("esc or ctrl+, to close", WEAK);
+    frame.label(
+        format!("esc or {} to close", keys::SETTINGS.label().as_str()),
+        WEAK,
+    );
     let shown = frame.ui.interaction(ids::settings_box()).rect();
     frame.finish();
 

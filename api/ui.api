@@ -118,12 +118,17 @@ input::pub const NONE: Self = Self(0);
 input::pub const CTRL: Self = Self(1);
 input::pub const SHIFT: Self = Self(2);
 input::pub const ALT: Self = Self(4);
-input::pub fn new(ctrl: bool, shift: bool, alt: bool) -> Self
+input::pub const COMMAND: Self = Self(8);
+input::pub const PRIMARY: Self = if cfg!(target_os = "macos") { Self::COMMAND } else { Self::CTRL };
 input::pub const fn with(self, other: Self) -> Self
+input::pub const fn with_held(self, held: bool, other: Self) -> Self
 input::pub const fn ctrl(self) -> bool
 input::pub const fn shift(self) -> bool
 input::pub const fn alt(self) -> bool
-input::pub const fn same_ctrl_alt(self, other: Self) -> bool
+input::pub const fn command(self) -> bool
+input::pub const fn primary(self) -> bool
+input::pub const fn chorded(self) -> bool
+input::pub const fn same_chord(self, other: Self) -> bool
 input::pub struct Glyph(char);
 input::pub const SPACE: Self = Self(' ');
 input::pub const fn new(value: char) -> Self

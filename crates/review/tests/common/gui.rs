@@ -340,7 +340,7 @@ shot {shots}/sideways.png
 swipe 4000 0
 wait 3
 rect table@src/lib.rs:6
-click <<DUMP rect table@src/lib.rs:6|569,56>> ctrl
+click <<DUMP rect table@src/lib.rs:6|569,56>> primary
 wait 3
 idle
 dump
@@ -378,25 +378,25 @@ wait 3
 click-id copy-lines
 wait 2
 click-id cmd
-key v ctrl
+key v primary
 wait 2
 dump
 shot {shots}/head.png
-key u ctrl
+key u primary
 click-id draft-removed@src/lib.rs:10
 wait 2
-key c ctrl
+key c primary
 wait 2
 click-id cmd
-key v ctrl
+key v primary
 wait 2
 dump
-key u ctrl
+key u primary
 text kept
-key a ctrl
-key c ctrl
-key u ctrl
-key v ctrl
+key a primary
+key c primary
+key u primary
+key v primary
 wait 2
 dump
 click-id layout
@@ -927,7 +927,7 @@ idle
 wait 2
 dump
 shot {shots}/refused.png
-key a ctrl
+key a primary
 text jtoken
 key enter
 idle
@@ -1106,7 +1106,7 @@ click-id draft-edit@1
 wait 2
 dump
 shot {shots}/editing.png
-key a ctrl
+key a primary
 text rewritten
 wait 2
 click-id draft-add

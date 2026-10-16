@@ -5,6 +5,7 @@ use crate::action::Action;
 use crate::element_tip::{AttachedTip, Pressing, beside};
 use crate::grid::GUTTER;
 use crate::ids;
+use crate::keys;
 use crate::model::Model;
 use crate::peek::Tip;
 use crate::theme::{
@@ -166,7 +167,10 @@ fn symbol_tip(model: &Model, frame: &mut Frame<'_>, at: Point, symbol: SymbolId)
                 );
             }
             frame.label(
-                "alt-click: keep in the peek panel   ctrl-click or double-click: go there",
+                format!(
+                    "alt-click: keep in the peek panel   {}-click or double-click: go there",
+                    keys::PRIMARY_NAME.as_str()
+                ),
                 WEAK,
             );
             frame.finish();
@@ -199,7 +203,10 @@ fn text_tip(frame: &mut Frame<'_>, at: Point, text: &HoverText, room: Count) -> 
         );
     }
     frame.label(
-        "alt-click: keep the definition in the peek panel   ctrl-click or double-click: go to it",
+        format!(
+            "alt-click: keep the definition in the peek panel   {}-click or double-click: go to it",
+            keys::PRIMARY_NAME.as_str()
+        ),
         WEAK,
     );
     frame.finish();
