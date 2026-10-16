@@ -31,7 +31,9 @@ The behaviour a change adds is stated by a test written before the code.
    request of thousands of changed files): `scale_review` / `scale_inbox` in the `at_scale!`
    table of `cli.rs`, `scale` in `common/gui.rs`. Each step's bound is its deadline: measure
    the step (`-- --nocapture` prints its `SCALE` line), give it about three times that, and
-   say both numbers in the commit message.
+   say both numbers in the commit message. Without `REVIEW_BIN` the scenarios run the debug
+   build (`CARGO_BIN_EXE_review`), so a before-and-after comparison sets `REVIEW_BIN` to a
+   release build on both sides.
 5. Every run of the binary, and every program the harness starts, has a deadline
    (`common::COMMAND_DEADLINE`, `common::WINDOW_DEADLINE`, or the scale step's bound): on expiry
    the harness kills the run's process group and fails naming the scenario, the step and
