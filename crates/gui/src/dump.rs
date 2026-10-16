@@ -622,3 +622,13 @@ impl Dump for Option<Viewer> {
         ));
     }
 }
+
+impl Dump for Ui {
+    fn dump(&self, _: &Context<'_>, lines: &mut DumpLines) {
+        let selected = self.selected_text();
+        lines.line(format_args!(
+            "text-selection={}",
+            Optional(selected.as_ref().map(|text| Quoted(text.as_str())))
+        ));
+    }
+}

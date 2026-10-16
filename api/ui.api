@@ -219,7 +219,8 @@ text::pub fn wrap(&self, columns: usize) -> Vec<Self>
 text::pub struct Run { pub text: Label, pub color: Color, }
 text::pub fn new(text: impl Into<Label>, color: Color) -> Self
 text::pub enum Wrap { None, Words, Clip, }
-text::pub struct Text { pub runs: Vec<Run>, pub size: FontSize, pub wrap: Wrap, }
+text::pub enum Select { #[default] Off, On, Wrapped, }
+text::pub struct Text { pub runs: Vec<Run>, pub size: FontSize, pub wrap: Wrap, pub select: Select, }
 text::pub struct Cell { pub glyph: Glyph, pub color: Color, }
 text::pub struct Grid { columns: Count, rows: Count, cells: Vec<Option<Cell>>, }
 text::pub fn new(columns: Count, rows: Count) -> Self
@@ -247,11 +248,14 @@ tree::pub const fn drag(self) -> Option<Point>
 tree::pub const fn wheel(self) -> Vector
 tree::pub const fn pinch(self) -> Pinch
 tree::pub const fn rect(self) -> Option<Rect>
+tree::pub struct Ink { pub text: Color, pub selected: Color, }
 tree::pub struct SlotOverflow { pub id: Id, pub height: Px, pub content: Px, }
 tree::pub struct DuplicateId { pub id: Id, pub first: Rect, pub second: Rect, }
-tree::pub struct Ui { roots: Vec<Element>, stack: Vec<Element>, previous: BTreeMap<Id, Placement>, remembered: BTreeMap<Id, Extent>, anchors: BTreeMap<Id, Anchor>, overflows: Vec<SlotOverflow>, hot: Option<Id>, active: Option<Id>, last_mouse: Point, aim: Aim, scroll_drag: Option<ScrollGrab>, pointer: Pointer, size: Extent, capture: Capture, held: Option<Held>, kept: Kept, duplicates: Vec<DuplicateId>, }
+tree::pub struct Ui { roots: Vec<Element>, stack: Vec<Element>, previous: BTreeMap<Id, Placement>, remembered: BTreeMap<Id, Extent>, anchors: BTreeMap<Id, Anchor>, overflows: Vec<SlotOverflow>, hot: Option<Id>, active: Option<Id>, last_mouse: Point, aim: Aim, scroll_drag: Option<ScrollGrab>, pointer: Pointer, size: Extent, capture: Capture, held: Option<Held>, kept: Kept, duplicates: Vec<DuplicateId>, selection: Selection, }
 tree::pub const fn capture(&mut self, capture: Capture)
 tree::pub fn begin(&mut self, input: &Input)
+tree::pub fn over_text(&self) -> bool
+tree::pub fn selected_text(&self) -> Option<Label>
 tree::pub const fn holding(&self) -> bool
 tree::pub fn settling(&self) -> bool
 tree::pub const fn hot(&self) -> Option<Id>
@@ -270,4 +274,4 @@ tree::pub fn slot_overflows(&self) -> &[SlotOverflow]
 tree::pub fn on_scrollbar(&self, id: Id) -> bool
 tree::pub fn scroll_by_wheel(&mut self, id: Id, offset: &mut Point) -> Point
 tree::pub fn end(&mut self, measure: &mut dyn Measure)
-tree::pub fn draw(&mut self, measure: &mut dyn Measure, text_color: Color) -> DrawList
+tree::pub fn draw(&mut self, measure: &mut dyn Measure, ink: Ink) -> DrawList

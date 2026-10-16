@@ -5,7 +5,7 @@ use domain::{
     Draft, DraftOn, DraftText, FileChange, Line, Login, Note, RelativePath, Rights, Seen, Side,
     Span, Submission, Thread, ThreadState,
 };
-use ui::{Canvas, Color, Count, Grid, Icon, Label, Point, Rect, Run};
+use ui::{Canvas, Color, Count, Grid, Icon, Label, Point, Rect, Run, Select};
 
 use domain::{CommitId, DiffLayout, Linked, Prose, WebLink};
 
@@ -902,7 +902,7 @@ fn no_review(model: &Model, frame: &mut Frame<'_>) {
 fn heading(frame: &mut Frame<'_>, text: &Label) {
     frame.spacer(SECTION_GAP);
     let size = theme::heading_font(frame.metrics.font, Count::new(2));
-    frame.sized_line(vec![Run::new(text.as_str(), STRONG_TEXT)], size);
+    frame.sized_line(vec![Run::new(text.as_str(), STRONG_TEXT)], size, Select::On);
     frame.rule(BORDER);
     frame.spacer(SMALL_GAP);
 }

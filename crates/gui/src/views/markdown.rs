@@ -1,11 +1,10 @@
 use std::mem;
-use std::rc::Rc;
 
 use strum::VariantArray;
 
 use domain::{Prose, RelativePath, WebLink};
 use index::{Contents, Parsers};
-use ui::{Canvas, Count, Label, Px, Rect, Run};
+use ui::{Canvas, Count, Label, Px, Rect, Run, Select};
 
 use crate::action::Action;
 use crate::diffs::Loading;
@@ -16,7 +15,7 @@ use crate::model::Model;
 use crate::review::{LinkTarget, ReviewAct};
 use crate::theme;
 use crate::theme::{
-    ACCENT, BLOCK_GAP, BORDER, CODE_TEXT, EMPHASIS_TEXT, FIELD, LABEL_PADDING, MARKDOWN_GUESS,
+    ACCENT, BLOCK_GAP, BORDER, CODE_TEXT, EMPHASIS_TEXT, LABEL_PADDING, MARKDOWN_GUESS,
     PICTURE_TALLEST, PIXEL, PROSE_COLUMNS, PROSE_LEADING, RED, STRONG_TEXT, TEXT, WEAK,
 };
 use crate::viewer::ViewerAct;
@@ -326,12 +325,32 @@ fn row_lines(row: &Row, widths: &[Count], aligns: &[Align], tone: Tone) -> Vec<V
         .collect()
 }
 
+fn grid_runs(grid: &ui::Grid, row: Count) -> Vec<Run> {
+    let cells: Vec<Option<ui::Cell>> = grid.row(row).collect();
+    let used = cells
+        .iter()
+        .rposition(Option::is_some)
+        .map_or(0, |last| last + 1);
+    let mut runs: Vec<Run> = Vec::new();
+    for cell in cells.into_iter().take(used) {
+        let (character, color) = cell.map_or((' ', TEXT), |cell| (cell.glyph.get(), cell.color));
+        match runs.last_mut() {
+            Some(last) if last.color == color || character == ' ' => {
+                last.text = Label::new(format!("{}{character}", last.text.as_str()));
+            }
+            _ => runs.push(Run::new(String::from(character), color)),
+        }
+    }
+    runs
+}
+
 const RULED_LEVELS: Count = Count::new(2);
 
 #[derive(Clone, Copy)]
 struct Look {
     color: ui::Color,
     size: ui::FontSize,
+    opening: Select,
 }
 
 struct Writer<'model> {
@@ -350,11 +369,20 @@ impl Writer<'_> {
         look: Look,
         number: Count,
     ) {
-        let Look { color: base, size } = look;
+        let Look {
+            color: base,
+            size,
+            opening,
+        } = look;
         frame.start(Container::FillRow);
         if !lead.is_empty() {
-            frame.sized_line(lead, size);
+            let shown = match opening {
+                Select::Wrapped => Select::Off,
+                Select::Off | Select::On => Select::On,
+            };
+            frame.sized_line(lead, size, shown);
         }
+        let mut select = opening;
         let mut at = 0;
         while let Some(first) = line.get(at) {
             let goal = first.goal;
@@ -381,14 +409,17 @@ impl Writer<'_> {
                         Some(LinkTarget::Source(..)) => ids::MD_SOURCE,
                         Some(LinkTarget::Browser(_)) | None => ids::MD_LINK,
                     };
-                    if frame.sized_link(runs, control.with(&key), size).clicked()
+                    if frame
+                        .sized_link(runs, control.with(&key), size, select)
+                        .clicked()
                         && let Some(target) = target
                     {
                         frame.push(Action::Review(target.act()));
                     }
                 }
-                None => frame.sized_line(runs, size),
+                None => frame.sized_line(runs, size, select),
             }
+            select = Select::On;
         }
         frame.finish();
     }
@@ -446,7 +477,15 @@ impl Writer<'_> {
                 runs,
                 line,
                 &found.goals,
-                Look { color: base, size },
+                Look {
+                    color: base,
+                    size,
+                    opening: if position == 0 {
+                        Select::On
+                    } else {
+                        Select::Wrapped
+                    },
+                },
                 *number,
             );
             *number += Count::new(1);
@@ -537,6 +576,7 @@ impl Writer<'_> {
                 Look {
                     color: TEXT,
                     size: frame.metrics.font,
+                    opening: Select::On,
                 },
                 *number,
             );
@@ -556,20 +596,14 @@ impl Writer<'_> {
         let Some(span) = source.text().span() else {
             return;
         };
-        let grid = Rc::new(grid::build(&source, span, Gutter::Bare));
-        let row = frame.row_height();
-        let font = frame.metrics.font;
-        let rows = Count::new(span.lines().count());
-        let pad = frame.cell_width() / 2;
-        let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
-            canvas.rect(rect, FIELD);
-            canvas.grid(ui::Point::new(rect.left + pad, rect.top + pad), font, &grid);
-        };
-        frame.custom_block(
-            Box::new(draw),
-            row * rows + pad * 2,
+        let grid = grid::build(&source, span, Gutter::Bare);
+        frame.start(Container::CodeBlock(
             ids::MD_CODE.id().with(self.key.as_str()).nth(number.get()),
-        );
+        ));
+        for row in 0..grid.rows().get() {
+            frame.text_line(grid_runs(&grid, Count::new(row)));
+        }
+        frame.finish();
     }
 
     fn picture(&self, frame: &mut Frame<'_>, link: &WebLink, alt: &Label, number: Count) {

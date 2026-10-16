@@ -151,6 +151,13 @@ rule applies.
 - **An action shows its result.** A control whose result is drawn in another view switches to
   it and scrolls the result into sight; a field that holds the keyboard off screen fails a
   script run.
+- **Every displayed text takes one selection.** `crates/ui` holds one text selection for the
+  window: a drag over text a view marks selectable (labels, notes, titles, every markdown block,
+  the links and code blocks in it) selects across the scroll column it starts in, a double-click
+  takes a word, and primary+c copies it ahead of the Source view's selected lines. A press on a
+  steady element (a button, a link) or on text not marked selectable (rows, tabs, fields, the
+  Source view's code lines) only clicks it; every press clears the last selection. A soft-wrapped
+  line copies as a space, a row end as a newline.
 - **The UI is its own library** (`crates/ui`, in the shape of odin_editor's): elements opened
   and closed each frame, layout once at frame end, input answered from the previous frame's
   rectangles, one monospace font at whole-pixel sizes in one atlas, icons as Codicons glyphs.
@@ -250,7 +257,7 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
   that changes the layout. `dump` prints the selection, the review (pulls, the open pull
   request, the inbox entries, the open pull request, the diff layout and the commit shown, every
   change with its seen state, the threads,
-  every draft), scroll offsets, the panel tree,
+  every draft), the text selection, scroll offsets, the panel tree,
   fields, the backend and the servers to stderr as `DUMP` lines (grep `^DUMP`).
   A script or screenshot run opens a fixed 1600x1000 window at scale 1 and ignores the real
   mouse and keyboard. It starts from the default panel layout and saves none, unless

@@ -4,9 +4,9 @@ use strum::VariantArray;
 
 use crate::{
     Axis, Button, Buttons, Canvas, Capture, Cell, Color, Command, Coordinate, Count, DuplicateId,
-    Extent, FontSize, Glyph, Grid, Icon, Id, Input, Key, Kind, Label, Layout, Measure, Mods, Pinch,
-    Point, Press, Px, Rect, Run, Scale, ScrollAxes, Scrollbar, Sides, SlotOverflow, Style, Text,
-    Ui, Vector, Wrap,
+    Extent, FontSize, Glyph, Grid, Icon, Id, Ink, Input, Key, Kind, Label, Layout, Measure, Mods,
+    Pinch, Point, Press, Px, Rect, Run, Scale, ScrollAxes, Scrollbar, Select, Sides, SlotOverflow,
+    Style, Text, Ui, Vector, Wrap,
 };
 
 struct Cells;
@@ -30,6 +30,7 @@ fn text(content: &str) -> Kind {
         runs: vec![Run::new(content, Color::rgba(255, 255, 255, 255))],
         size: FontSize::new(14),
         wrap: Wrap::None,
+        select: Select::Off,
     })
 }
 
@@ -110,6 +111,7 @@ fn wrapped_text_takes_lines() {
             )],
             size: FontSize::new(14),
             wrap: Wrap::Words,
+            select: Select::Off,
         }),
         Layout::row().grow_width(),
         Style::default(),
@@ -275,7 +277,13 @@ fn scrolled_column_clips_children_and_reports_content() {
     assert_eq!(scrolled_above.visible_center(), None);
     let below_the_fold = ui.placement(Id::new("row").nth(3)).unwrap();
     assert_eq!(below_the_fold.visible_center(), None);
-    let drawn = ui.draw(&mut Cells, Color::rgba(1, 2, 3, 255));
+    let drawn = ui.draw(
+        &mut Cells,
+        Ink {
+            text: Color::rgba(1, 2, 3, 255),
+            selected: Color::rgba(0, 0, 0, 0),
+        },
+    );
     let fills: Vec<Rect> = drawn
         .commands()
         .filter_map(|command| match command {
@@ -454,7 +462,13 @@ fn borders_and_text_become_commands() {
         None,
     );
     ui.end(&mut Cells);
-    let drawn = ui.draw(&mut Cells, Color::rgba(1, 1, 1, 255));
+    let drawn = ui.draw(
+        &mut Cells,
+        Ink {
+            text: Color::rgba(1, 1, 1, 255),
+            selected: Color::rgba(0, 0, 0, 0),
+        },
+    );
     let kinds: Vec<String> = drawn
         .commands()
         .map(|command| match command {
@@ -679,6 +693,7 @@ fn clipped_text_fits_its_rect_and_ends_in_an_ellipsis() {
             runs: vec![Run::new("name", white), Run::new(" src/lib.rs", grey)],
             size: FontSize::new(14),
             wrap: Wrap::Clip,
+            select: Select::Off,
         }),
         Layout::row().grow_width(),
         Style::NONE,
@@ -686,7 +701,13 @@ fn clipped_text_fits_its_rect_and_ends_in_an_ellipsis() {
     );
     ui.close();
     ui.end(&mut Cells);
-    let drawn = ui.draw(&mut Cells, white);
+    let drawn = ui.draw(
+        &mut Cells,
+        Ink {
+            text: white,
+            selected: Color::rgba(0, 0, 0, 0),
+        },
+    );
     let texts: Vec<String> = drawn
         .commands()
         .filter_map(|command| match command {
@@ -698,13 +719,19 @@ fn clipped_text_fits_its_rect_and_ends_in_an_ellipsis() {
 }
 
 fn texts_drawn(ui: &mut Ui) -> Vec<String> {
-    ui.draw(&mut Cells, Color::rgba(255, 255, 255, 255))
-        .commands()
-        .filter_map(|command| match command {
-            Command::Text { at, text, .. } => Some(format!("{at:?} {}", text.as_str())),
-            _ => None,
-        })
-        .collect()
+    ui.draw(
+        &mut Cells,
+        Ink {
+            text: Color::rgba(255, 255, 255, 255),
+            selected: Color::rgba(0, 0, 0, 0),
+        },
+    )
+    .commands()
+    .filter_map(|command| match command {
+        Command::Text { at, text, .. } => Some(format!("{at:?} {}", text.as_str())),
+        _ => None,
+    })
+    .collect()
 }
 
 #[test]
@@ -838,6 +865,7 @@ fn wrapped_text_beside_a_long_label_keeps_room_for_its_longest_word() {
             runs: vec![Run::new("one three", Color::rgba(255, 255, 255, 255))],
             size: FontSize::new(14),
             wrap: Wrap::Words,
+            select: Select::Off,
         }),
         Layout::row().grow_width(),
         Style::NONE,
@@ -1324,5 +1352,178 @@ fn an_anchored_scroller_follows_an_offset_the_app_sets() {
     assert_eq!(
         ui.placement(Id::new("kept")).unwrap().rect.top,
         ui.placement(Id::new("list")).unwrap().rect.top + px(50)
+    );
+}
+
+fn selectable(content: &str, wrap: Wrap, select: Select) -> Kind {
+    Kind::Text(Text {
+        runs: vec![Run::new(content, Color::rgba(255, 255, 255, 255))],
+        size: FontSize::new(14),
+        wrap,
+        select,
+    })
+}
+
+fn page(ui: &mut Ui, input: &Input, scroll: Px) {
+    ui.begin(input);
+    ui.open(
+        Kind::None,
+        Layout::column().grow().scroll(Point::new(Px::ZERO, scroll)),
+        Style::default(),
+        Some(Id::new("page")),
+    );
+    ui.leaf(
+        selectable("alpha beta", Wrap::None, Select::On),
+        Layout::row(),
+        Style::default(),
+        None,
+    );
+    ui.open(Kind::None, Layout::row(), Style::default(), None);
+    ui.leaf(
+        selectable("see ", Wrap::None, Select::On),
+        Layout::row(),
+        Style::default(),
+        None,
+    );
+    ui.leaf(
+        selectable("link", Wrap::None, Select::On),
+        Layout::row().steady(),
+        Style::default(),
+        Some(Id::new("link")),
+    );
+    ui.close();
+    ui.leaf(
+        selectable("one two three four", Wrap::Words, Select::On),
+        Layout::row().width(px(96)),
+        Style::default(),
+        None,
+    );
+    ui.leaf(
+        selectable("button", Wrap::None, Select::Off),
+        Layout::row(),
+        Style::default(),
+        None,
+    );
+    ui.close();
+    ui.end(&mut Cells);
+}
+
+struct Pointing {
+    ui: Ui,
+    input: Input,
+    scroll: Px,
+}
+
+impl Pointing {
+    fn new() -> Self {
+        let mut pointing = Self {
+            ui: Ui::default(),
+            input: input(200, 200),
+            scroll: Px::ZERO,
+        };
+        pointing.frame();
+        pointing
+    }
+
+    fn frame(&mut self) {
+        page(&mut self.ui, &self.input, self.scroll);
+        self.input.end_frame();
+    }
+
+    fn press(&mut self, across: i32, down: i32, clicks: u8) {
+        self.input.pointer.mouse = Point::new(px(across), px(down));
+        self.input.pointer.pressed.insert(Button::Left);
+        self.input.pointer.down.insert(Button::Left);
+        self.input.pointer.clicks.set(Button::Left, clicks);
+        self.frame();
+    }
+
+    fn drag_to(&mut self, across: i32, down: i32) {
+        self.input.pointer.mouse = Point::new(px(across), px(down));
+        self.frame();
+    }
+
+    fn release(&mut self) {
+        self.input.pointer.down.remove(Button::Left);
+        self.frame();
+    }
+
+    fn selected(&self) -> Option<String> {
+        self.ui.selected_text().map(|text| text.as_str().to_owned())
+    }
+}
+
+#[test]
+fn a_drag_selects_across_rows_and_joins_a_soft_wrap_with_a_space() {
+    let mut pointing = Pointing::new();
+    pointing.press(1, 8, 1);
+    pointing.drag_to(41, 56);
+    pointing.release();
+    assert_eq!(
+        pointing.selected().as_deref(),
+        Some("alpha beta\nsee link\none two three")
+    );
+    pointing.drag_to(100, 100);
+    assert_eq!(
+        pointing.selected().as_deref(),
+        Some("alpha beta\nsee link\none two three")
+    );
+}
+
+#[test]
+fn a_press_on_a_steady_element_or_unselectable_text_starts_no_selection() {
+    let mut pointing = Pointing::new();
+    pointing.press(40, 24, 1);
+    pointing.drag_to(1, 8);
+    assert_eq!(pointing.selected(), None);
+    pointing.release();
+    pointing.press(10, 72, 1);
+    pointing.drag_to(1, 8);
+    assert_eq!(pointing.selected(), None);
+}
+
+#[test]
+fn a_double_click_selects_the_word_and_draws_it_highlighted_until_the_next_press() {
+    let mut pointing = Pointing::new();
+    pointing.press(52, 8, 2);
+    pointing.release();
+    assert_eq!(pointing.selected().as_deref(), Some("beta"));
+    let selected = Color::rgba(9, 9, 9, 255);
+    pointing.frame();
+    let drawn = pointing.ui.draw(
+        &mut Cells,
+        Ink {
+            text: Color::rgba(255, 255, 255, 255),
+            selected,
+        },
+    );
+    let marked: Vec<Rect> = drawn
+        .commands()
+        .filter_map(|command| match command {
+            Command::Fill { rect, color } if *color == selected => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(marked, [rect(48, 0, 32, 16)]);
+    pointing.press(150, 150, 1);
+    assert_eq!(pointing.selected(), None);
+}
+
+#[test]
+fn a_selection_dragged_upwards_copies_the_same_text_and_keeps_it_while_scrolled_out_of_view() {
+    let mut pointing = Pointing::new();
+    pointing.press(41, 56, 1);
+    pointing.drag_to(1, 8);
+    pointing.release();
+    assert_eq!(
+        pointing.selected().as_deref(),
+        Some("alpha beta\nsee link\none two three")
+    );
+    pointing.input = input(200, 40);
+    pointing.scroll = px(40);
+    pointing.frame();
+    assert_eq!(
+        pointing.selected().as_deref(),
+        Some("alpha beta\nsee link\none two three")
     );
 }

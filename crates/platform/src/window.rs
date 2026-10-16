@@ -34,6 +34,7 @@ pub enum Cursor {
     Grab,
     Grabbing,
     Pointer,
+    Text,
 }
 
 impl Cursor {
@@ -45,6 +46,7 @@ impl Cursor {
             Self::Grab => CursorIcon::Grab,
             Self::Grabbing => CursorIcon::Grabbing,
             Self::Pointer => CursorIcon::Pointer,
+            Self::Text => CursorIcon::Text,
         }
     }
 }

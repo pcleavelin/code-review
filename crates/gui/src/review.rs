@@ -607,6 +607,7 @@ pub(crate) enum ReviewStatus {
     LinkFailed(Label),
     CommitComment,
     LinesCopied(Count),
+    TextCopied(Count),
     NothingToCopy,
 }
 
@@ -627,6 +628,7 @@ impl ReviewStatus {
             | Self::LinkedFileShown(_)
             | Self::LinkCopied(_)
             | Self::LinesCopied(_)
+            | Self::TextCopied(_)
             | Self::Reloaded => Tone::Done,
             Self::NotOpened
             | Self::NotAChange
@@ -710,6 +712,7 @@ impl fmt::Display for ReviewStatus {
                 "comments go on the whole pull request's changes: pick 'all changes' first",
             ),
             Self::LinesCopied(count) => write!(formatter, "copied {}", Counted::new(*count, Noun::Line)),
+            Self::TextCopied(count) => write!(formatter, "copied {count} characters"),
             Self::NothingToCopy => formatter.write_str("select lines to copy first"),
             Self::LinkCopied(link) => write!(formatter, "copied {link}"),
             Self::LinkFailed(why) => {
@@ -1068,6 +1071,22 @@ impl App {
         });
     }
 
+    fn copy_selected(&mut self) {
+        match (self.ui.selected_text(), self.model.copied_lines()) {
+            (Some(text), _) => {
+                self.model.say(ReviewStatus::TextCopied(Count::new(
+                    text.as_str().chars().count(),
+                )));
+                self.clipboard = ClipboardRequest::Copy(text);
+            }
+            (None, Some(copied)) => {
+                self.clipboard = ClipboardRequest::Copy(copied.text);
+                self.model.say(ReviewStatus::LinesCopied(copied.lines));
+            }
+            (None, None) => self.model.say(ReviewStatus::NothingToCopy),
+        }
+    }
+
     pub(crate) fn review(&mut self, act: ReviewAct) {
         match act {
             ReviewAct::RefreshPulls => self.list_pulls(),
@@ -1152,13 +1171,7 @@ impl App {
                     self.model.keep_place(&place);
                 }
             }
-            ReviewAct::CopyLines => match self.model.copied_lines() {
-                Some(copied) => {
-                    self.clipboard = ClipboardRequest::Copy(copied.text);
-                    self.model.say(ReviewStatus::LinesCopied(copied.lines));
-                }
-                None => self.model.say(ReviewStatus::NothingToCopy),
-            },
+            ReviewAct::CopyLines => self.copy_selected(),
             ReviewAct::CopyLink(link) => {
                 self.clipboard = ClipboardRequest::Copy(Label::new(link.as_str()));
                 self.model.say(ReviewStatus::LinkCopied(link));
