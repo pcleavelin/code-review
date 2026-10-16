@@ -163,6 +163,18 @@ fn dump_conversation(conversation: &Conversation, lines: &mut DumpLines) {
     }
 }
 
+fn dump_picked(review: &Reviewing, lines: &mut DumpLines) {
+    if let Some(picked) = &review.picked {
+        let shown = picked.lines();
+        lines.line(format_args!(
+            "picked {} {}-{}",
+            picked.file,
+            shown.start().number(),
+            shown.end().number()
+        ));
+    }
+}
+
 fn dump_listing(review: &Reviewing, lines: &mut DumpLines) {
     for (repo, waiting) in &review.waiting {
         lines.line(format_args!(
@@ -292,6 +304,7 @@ impl Dump for Reviewing {
             self.diffs.layout,
             Optional(self.diffs.commit())
         ));
+        dump_picked(self, lines);
         if let Some(conversation) = open.conversation() {
             dump_conversation(conversation, lines);
         }

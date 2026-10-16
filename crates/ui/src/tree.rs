@@ -89,6 +89,7 @@ pub struct Placement {
     pub scroll_axes: ScrollAxes,
     pub hold: Hold,
     layer: Layer,
+    depth: Count,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -532,6 +533,7 @@ impl Element {
             scroll_axes: self.layout.scroll_axes,
             hold: self.layout.hold,
             layer,
+            depth: Count::ZERO,
         }
     }
 
@@ -717,10 +719,14 @@ impl Element {
         placements: &mut BTreeMap<Id, Placement>,
         duplicates: &mut Vec<DuplicateId>,
         inherited: Layer,
+        depth: Count,
     ) {
         let layer = self.layer(inherited);
         if let Some(id) = self.id {
-            let placement = self.placement(layer);
+            let placement = Placement {
+                depth,
+                ..self.placement(layer)
+            };
             if let Some(first) = placements.insert(id, placement) {
                 duplicates.push(DuplicateId {
                     id,
@@ -730,7 +736,7 @@ impl Element {
             }
         }
         for child in &self.children {
-            child.record(placements, duplicates, layer);
+            child.record(placements, duplicates, layer, depth + Count::new(1));
         }
     }
 
@@ -964,7 +970,11 @@ impl Ui {
             })
             .max_by_key(|(id, placement)| {
                 let visible = placement.rect.intersect(placement.clip);
-                (Reverse(visible.width.wide() * visible.height.wide()), **id)
+                (
+                    Reverse(visible.width.wide() * visible.height.wide()),
+                    placement.depth,
+                    **id,
+                )
             })
             .map(|(id, _)| *id);
         self.hold(input, before);
@@ -1290,7 +1300,12 @@ impl Ui {
             root.overflows(&mut self.overflows);
         }
         for root in &self.roots {
-            root.record(&mut self.previous, &mut self.duplicates, Layer::Base);
+            root.record(
+                &mut self.previous,
+                &mut self.duplicates,
+                Layer::Base,
+                Count::ZERO,
+            );
         }
         if Count::new(self.remembered.len()) > REMEMBERED_MOST {
             self.remembered.clear();

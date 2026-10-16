@@ -130,7 +130,10 @@ rule applies.
   inserted where they belong; lines more than three away from a change fold
   into a row that opens twenty lines at a time toward either change, or all at once, and
   "whole file" drops the folds. Every identifier on a changed line navigates like any other
-  code, and a jump into a fold reveals it. A deleted file is shown from its diff alone.
+  code, and a jump into a fold reveals it. A deleted file is shown from its diff alone. The
+  column is one list of rows (headers, lines, removed lines, split rows, folds, comment boxes),
+  each line a row of its own keyed by the line it shows; drawing, a click, a drag and a jump
+  all read that list, so the line a click hits is the line drawn under it.
 - **One backend per language.** The language's server when on PATH, else a tree-sitter
   resolver written for that language. No language-agnostic resolver: its rules would be
   nobody's. The servers run on the tree of the open pull request; opening another one starts

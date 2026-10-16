@@ -656,19 +656,17 @@ pub(crate) fn card_box() -> Id {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SlotKind {
-    Code,
     Fold,
-    Removed,
-    Rows,
+    Scrollbar,
+    Waiting,
 }
 
 impl SlotKind {
     const fn name(self) -> Element {
         Element::new(match self {
-            Self::Code => "code",
             Self::Fold => "fold",
-            Self::Removed => "removed",
-            Self::Rows => "rows",
+            Self::Scrollbar => "scrollbar",
+            Self::Waiting => "waiting",
         })
     }
 }
@@ -761,8 +759,4 @@ pub(crate) fn settings_box() -> Id {
 
 pub(crate) fn draft_box() -> Id {
     Id::new("draft-box")
-}
-
-pub(crate) fn removed() -> Id {
-    Id::new("removed")
 }

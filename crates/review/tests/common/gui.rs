@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer, select_lines }
     };
 }
 
@@ -1221,4 +1221,62 @@ pub(crate) fn assert_frames(name: &str, scale: &ScaleScenario, output: &str) {
         scale.slowest_frame_ms,
         screenshots(name).display()
     );
+}
+
+pub(crate) fn select_lines() -> Scenario {
+    Scenario {
+        script: "OPEN
+click-id change/1
+idle
+wait 3
+rect lines@src/lib.rs:10
+click <<DUMP rect lines@src/lib.rs:10|200,8>>
+wait 2
+dump
+rect lines@src/lib.rs:3
+click <<DUMP rect lines@src/lib.rs:3|200,8>> shift
+wait 2
+dump
+rect lines@src/lib.rs:9
+rect lines@src/lib.rs:10
+drag <<DUMP rect lines@src/lib.rs:9|200,8>> <<DUMP rect lines@src/lib.rs:10|200,8>>
+wait 2
+dump
+shot {shots}/unified.png
+click-id change/0
+idle
+wait 3
+rect draft-removed@old.txt:3
+click <<DUMP rect draft-removed@old.txt:3|200,8>>
+wait 2
+rect draft-removed@old.txt:5
+click <<DUMP rect draft-removed@old.txt:5|200,8>> shift
+wait 2
+dump
+click-id layout
+idle
+wait 3
+click-id change/1
+idle
+wait 3
+rect table@src/lib.rs:6
+click <<DUMP rect table@src/lib.rs:6|600,24>>
+wait 2
+dump
+rect table@src/lib.rs:6
+click <<DUMP rect table@src/lib.rs:6|100,56>>
+wait 2
+dump
+shot {shots}/split.png
+quit
+",
+        shows: &[
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((10, 10))",
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((10, 3))",
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((9, 10))",
+            "DUMP picked old.txt 3-5",
+            "file=Some(\"src/lib.rs\") gone=None sel=Some((7, 7))",
+            "DUMP picked src/lib.rs 10-10",
+        ],
+    }
 }

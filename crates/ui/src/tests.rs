@@ -1311,3 +1311,33 @@ fn an_anchored_scroller_follows_an_offset_the_app_sets() {
         ui.placement(Id::new("list")).unwrap().rect.top + px(50)
     );
 }
+
+fn hot_of_nested(outer: &str, inner: &str) -> Option<Id> {
+    let mut ui = Ui::default();
+    let mut frame = input(100, 100);
+    frame.pointer.mouse = Point::new(px(5), px(5));
+    for _ in 0..2 {
+        ui.begin(&frame);
+        ui.open(
+            Kind::None,
+            Layout::column().width(px(40)).height(px(20)),
+            Style::default(),
+            Some(Id::new(outer)),
+        );
+        ui.leaf(
+            Kind::None,
+            Layout::row().grow_width().height(px(20)),
+            Style::default(),
+            Some(Id::new(inner)),
+        );
+        ui.close();
+        ui.end(&mut Cells);
+    }
+    ui.hot()
+}
+
+#[test]
+fn a_child_as_large_as_its_parent_takes_the_pointer_whatever_their_ids() {
+    assert_eq!(hot_of_nested("slot", "line"), Some(Id::new("line")));
+    assert_eq!(hot_of_nested("line", "slot"), Some(Id::new("slot")));
+}

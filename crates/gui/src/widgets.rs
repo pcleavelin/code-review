@@ -34,7 +34,7 @@ use crate::theme::{
 
 use crate::field::Fields;
 use crate::ids;
-pub(crate) use code::{AcrossBar, AcrossScroll, CodeBlock, Coded, Marks, Width};
+pub(crate) use code::{CodeBlock, CodeLine, Marks, Width};
 
 #[derive(Clone, Copy, Debug)]
 struct Literal(&'static str);
@@ -149,7 +149,6 @@ pub(crate) enum Container {
     Viewer { size: Extent },
     Slot { id: Id, height: Px },
     CommentRow(Id),
-    Removed(Id),
     Folded,
     FileHeader { id: Id, height: Px },
     Markdown(Id),
@@ -310,11 +309,6 @@ impl Container {
                 None,
             ),
             Self::CommentRow(_) | Self::Comment { .. } => self.comment_shape(),
-            Self::Removed(id) => Shape::new(
-                Layout::column().grow_width().remembered(),
-                Style::background(REMOVED_FILL),
-                Some(id),
-            ),
             Self::FileHeader { id, height } => Shape::new(
                 Layout::row()
                     .grow_width()
@@ -548,6 +542,16 @@ impl Frame<'_> {
         self.ui.leaf(
             Kind::Custom(draw),
             Layout::row().grow_width().height(height),
+            Style::NONE,
+            Some(id),
+        )
+    }
+
+    pub(crate) fn line_row(&mut self, draw: Box<dyn Draw>, id: Id) -> Interaction {
+        let row = self.row_height();
+        self.ui.leaf(
+            Kind::Custom(draw),
+            Layout::row().grow_width().slot(row),
             Style::NONE,
             Some(id),
         )
@@ -893,18 +897,18 @@ impl Frame<'_> {
         across: Px,
         target: Target,
         marked: Option<ui::Color>,
+        fill: ui::Color,
     ) -> Interaction {
         let id = target.id();
-        let background = marked.or(self.ui.interaction(id).hovered().then_some(HOVER));
+        let background = marked
+            .or(self.ui.interaction(id).hovered().then_some(HOVER))
+            .unwrap_or(fill);
         let font = self.metrics.font;
         let draw = move |canvas: &mut Canvas<'_>, rect: Rect| {
-            if let Some(color) = background {
-                canvas.rect(rect, color);
-            }
+            canvas.rect(rect, background);
             canvas.grid(Point::new(rect.left - across, rect.top), font, &grid);
         };
-        let row = self.row_height();
-        self.custom_block(Box::new(draw), row, id)
+        self.line_row(Box::new(draw), id)
     }
 
     pub(crate) fn row(&mut self, runs: Vec<Run>, target: Target, chosen: Chosen) -> Interaction {
