@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use domain::{
     Card, CodePlace, CommitId, Conversation, Decision, DiffLayout, Draft, DraftId, DraftOn,
     DraftText, FileChange, FileRow, FileText, Forge, Hunk, Index, Line, LineKind, Linked,
-    LinkedFile, PrNumber, PullRequest, RelativePath, Revision, Rights, Root, Seen, Side, Span,
-    Standing, WebLink,
+    LinkedFile, PrNumber, PullRequest, PullStatus, RelativePath, Revision, Rights, Root, Seen,
+    Side, Span, WebLink,
 };
 use index::Indexed;
 use io_process::{Argument, Opener};
@@ -277,7 +277,7 @@ pub(crate) struct Reviewing {
     pub(crate) desk: Desk,
     pub(crate) inbox: Inbox,
     pub(crate) waiting: BTreeMap<RepoName, Waiting>,
-    pub(crate) standing: Option<Standing>,
+    pub(crate) status_filter: Option<PullStatus>,
     pub(crate) requested: RequestedFrom,
     pub(crate) open: Option<OpenReview>,
     pub(crate) opening: Option<PrNumber>,
@@ -307,7 +307,7 @@ impl Reviewing {
             desk,
             inbox: Inbox::Asking,
             waiting: BTreeMap::new(),
-            standing: None,
+            status_filter: None,
             requested: RequestedFrom::Any,
             open: None,
             opening: None,
@@ -524,7 +524,7 @@ pub(crate) enum ReviewAct {
     OpenPull(RepoName, PrNumber),
     Pin,
     Unpin(RepoName),
-    ShowStanding(Option<Standing>),
+    ShowStatus(Option<PullStatus>),
     ShowRequested(RequestedFrom),
     OpenChange(RelativePath),
     OpenPlace(CodePlace),
@@ -1074,7 +1074,7 @@ impl App {
             ReviewAct::OpenPull(repo, number) => self.open_pull(&repo, number),
             ReviewAct::Pin => self.pin(),
             ReviewAct::Unpin(name) => self.unpin(&name),
-            ReviewAct::ShowStanding(standing) => self.model.review.standing = standing,
+            ReviewAct::ShowStatus(status) => self.model.review.status_filter = status,
             ReviewAct::ShowRequested(requested) => self.model.review.requested = requested,
             ReviewAct::OpenChange(path) => self.model.open_change(&path),
             ReviewAct::OpenPlace(place) => self.model.open_place(&place),

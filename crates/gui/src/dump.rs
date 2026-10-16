@@ -240,9 +240,9 @@ impl Dump for Reviewing {
             .map(|repo| repo.name().to_string())
             .collect();
         lines.line(format_args!(
-            "review inbox={inbox} repos=[{}] standing={:?} requested={:?} opening={} open={} draft={} submitting={:?}",
+            "review inbox={inbox} repos=[{}] status_filter={:?} requested={:?} opening={} open={} draft={} submitting={:?}",
             pins.join(" "),
-            self.standing,
+            self.status_filter,
             self.requested,
             Optional(self.opening),
             Optional(self.opened().map(|opened| opened.number)),
@@ -264,7 +264,7 @@ impl Dump for Reviewing {
                     "entry {}#{} {:?} drafts={} requested={} {}",
                     entry.repo,
                     entry.pull.number,
-                    entry.standing,
+                    entry.status,
                     entry.drafts.len(),
                     requests.of(entry),
                     Quoted(entry.pull.title.as_str())

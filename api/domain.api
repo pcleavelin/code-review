@@ -312,7 +312,7 @@ review::state::pub struct Draft { pub id: DraftId, pub file: RelativePath, pub s
 review::state::pub fn lines(&self) -> Span
 review::state::pub struct DraftOn { pub file: RelativePath, pub side: Side, pub start: Option<Line>, pub line: Line, pub reply: Option<ThreadId>, }
 review::state::pub fn lines(&self) -> Span
-review::state::pub enum Standing { New, Updated, Reviewing, Reviewed, }
+review::state::pub enum PullStatus { New, Updated, Reviewing, Reviewed, }
 review::state::pub struct Mark { pub hash: TextHash, pub commit: CommitId, }
 review::state::pub enum Seen { Unseen, Changed, Seen, }
 review::state::pub struct FileCount(usize);
@@ -327,7 +327,7 @@ review::state::pub struct Review { marks: BTreeMap<RelativePath, Mark>, drafts: 
 review::state::pub fn new( marks: BTreeMap<RelativePath, Mark>, drafts: Vec<Draft>, looked: Option<CommitId>, ) -> Self
 review::state::pub const fn looked(&self) -> Option<&CommitId>
 review::state::pub fn look(&mut self, head: CommitId)
-review::state::pub fn standing(&self, head: &CommitId, progress: Option<Progress>) -> Standing
+review::state::pub fn status(&self, head: &CommitId, progress: Option<Progress>) -> PullStatus
 review::state::pub const fn marks(&self) -> &BTreeMap<RelativePath, Mark>
 review::state::pub fn drafts(&self) -> &[Draft]
 review::state::pub fn seen(&self, change: &FileChange) -> Seen

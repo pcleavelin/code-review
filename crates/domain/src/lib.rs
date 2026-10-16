@@ -26,8 +26,8 @@ pub use review::{
     DraftError, DraftId, DraftOn, DraftText, FileChange, FileCount, FileRow, Forge, ForgeHost,
     ForgeKind, Grant, Host, Hunk, JiraSite, Lifetime, LineKind, Linked, LinkedFile, Login, Mark,
     Moment, Note, NumberedLine, OAuthApp, Paired, Pairing, PrNumber, PrTitle, Progress, Prose,
-    Provenance, PullRequest, RefName, RefreshToken, Refusal, Removal, RemovedLine, Renewal,
-    RepoSlug, Review, Revision, Rights, Seen, Side, Spelling, Standing, Submission, SubmissionId,
+    Provenance, PullRequest, PullStatus, RefName, RefreshToken, Refusal, Removal, RemovedLine,
+    Renewal, RepoSlug, Review, Revision, Rights, Seen, Side, Spelling, Submission, SubmissionId,
     Thread, ThreadId, ThreadState, Token, UnixTime, UserCode, WebLink,
 };
 pub use settings::{BaseFontSize, FontFamily, Settings, Theme};

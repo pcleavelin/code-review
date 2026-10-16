@@ -22,8 +22,8 @@ pub use diff::{
 pub use link::{Linked, LinkedFile, Revision, WebLink};
 pub use rights::{Content, Refusal, Rights};
 pub use state::{
-    Draft, DraftError, DraftId, DraftOn, DraftText, FileCount, Mark, Progress, Review, Seen, Side,
-    Standing,
+    Draft, DraftError, DraftId, DraftOn, DraftText, FileCount, Mark, Progress, PullStatus, Review,
+    Seen, Side,
 };
 pub use talk::{
     Block, CodePlace, Commit, Conversation, Moment, Note, Prose, Submission, SubmissionId, Thread,

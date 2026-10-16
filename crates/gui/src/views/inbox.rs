@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use domain::{Progress, Standing};
+use domain::{Progress, PullStatus};
 use platform::Cursor;
 use session::{Entry, Pinned, RequestedFrom};
 use strum::VariantArray;
@@ -20,11 +20,11 @@ use crate::theme::{
 };
 use crate::widgets::{Chosen, CommentLook, Container, Frame, Padding, Scroller};
 
-const STANDINGS: [Standing; 4] = [
-    Standing::New,
-    Standing::Updated,
-    Standing::Reviewing,
-    Standing::Reviewed,
+const STATUSES: [PullStatus; 4] = [
+    PullStatus::New,
+    PullStatus::Updated,
+    PullStatus::Reviewing,
+    PullStatus::Reviewed,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,21 +33,21 @@ enum LoginFailed {
     No,
 }
 
-pub(super) fn standing_word(standing: Standing) -> Label {
-    Label::new(match standing {
-        Standing::New => "new",
-        Standing::Updated => "updated",
-        Standing::Reviewing => "reviewing",
-        Standing::Reviewed => "reviewed",
+pub(super) fn status_word(status: PullStatus) -> Label {
+    Label::new(match status {
+        PullStatus::New => "new",
+        PullStatus::Updated => "updated",
+        PullStatus::Reviewing => "reviewing",
+        PullStatus::Reviewed => "reviewed",
     })
 }
 
-pub(super) const fn standing_color(standing: Standing) -> ui::Color {
-    match standing {
-        Standing::New => ACCENT,
-        Standing::Updated => ORANGE,
-        Standing::Reviewing => TEXT,
-        Standing::Reviewed => GREEN,
+pub(super) const fn status_color(status: PullStatus) -> ui::Color {
+    match status {
+        PullStatus::New => ACCENT,
+        PullStatus::Updated => ORANGE,
+        PullStatus::Reviewing => TEXT,
+        PullStatus::Reviewed => GREEN,
     }
 }
 
@@ -61,7 +61,7 @@ fn haystack(entry: &Entry) -> Label {
         pull.author,
         pull.head,
         pull.base,
-        standing_word(entry.standing).as_str()
+        status_word(entry.status).as_str()
     ))
 }
 
@@ -84,8 +84,8 @@ fn toolbar(model: &Model, frame: &mut Frame<'_>, entries: &[Entry], requests: &R
         &Label::new("filter: words of the title, repository, author, branch, #number"),
         INBOX_FIELD,
     );
-    let chosen = model.review.standing;
-    let all = ids::INBOX_STATE.with(&Label::new("all"));
+    let chosen = model.review.status_filter;
+    let all = ids::INBOX_STATUS.with(&Label::new("all"));
     if frame
         .button(
             format!("all {}", entries.len()),
@@ -94,25 +94,25 @@ fn toolbar(model: &Model, frame: &mut Frame<'_>, entries: &[Entry], requests: &R
         )
         .clicked()
     {
-        frame.push(Action::Review(ReviewAct::ShowStanding(None)));
+        frame.push(Action::Review(ReviewAct::ShowStatus(None)));
     }
     frame.attach_tip(all);
-    for standing in STANDINGS {
-        let word = standing_word(standing);
+    for status in STATUSES {
+        let word = status_word(status);
         let count = entries
             .iter()
-            .filter(|entry| entry.standing == standing)
+            .filter(|entry| entry.status == status)
             .count();
-        let target = ids::INBOX_STATE.with(&word);
+        let target = ids::INBOX_STATUS.with(&word);
         if frame
             .button(
                 format!("{} {count}", word.as_str()),
                 target,
-                Chosen::of(&chosen, &Some(standing)),
+                Chosen::of(&chosen, &Some(status)),
             )
             .clicked()
         {
-            frame.push(Action::Review(ReviewAct::ShowStanding(Some(standing))));
+            frame.push(Action::Review(ReviewAct::ShowStatus(Some(status))));
         }
         frame.attach_tip(target);
     }
@@ -429,12 +429,12 @@ fn open_page(frame: &mut Frame<'_>) {
 fn cell_runs(model: &Model, column: InboxColumn, entry: &Entry) -> Vec<Run> {
     let pull = &entry.pull;
     match column {
-        InboxColumn::Standing if model.review.opening == Some(pull.number) => {
+        InboxColumn::Status if model.review.opening == Some(pull.number) => {
             vec![Run::new("opening", ORANGE)]
         }
-        InboxColumn::Standing => vec![Run::new(
-            standing_word(entry.standing),
-            standing_color(entry.standing),
+        InboxColumn::Status => vec![Run::new(
+            status_word(entry.status),
+            status_color(entry.status),
         )],
         InboxColumn::Pull => vec![Run::new(format!("{}#{}", entry.repo, pull.number), ACCENT)],
         InboxColumn::Title => vec![Run::new(pull.title.as_str(), TEXT)],
@@ -466,18 +466,18 @@ fn cell_text(model: &Model, column: InboxColumn, entry: &Entry) -> Label {
     )
 }
 
-fn standing_rank(standing: Standing) -> Count {
+fn status_rank(status: PullStatus) -> Count {
     Count::new(
-        STANDINGS
+        STATUSES
             .iter()
-            .position(|known| *known == standing)
-            .unwrap_or(STANDINGS.len()),
+            .position(|known| *known == status)
+            .unwrap_or(STATUSES.len()),
     )
 }
 
 fn ordered(model: &Model, column: InboxColumn, one: &Entry, other: &Entry) -> Ordering {
     match column {
-        InboxColumn::Standing => standing_rank(one.standing).cmp(&standing_rank(other.standing)),
+        InboxColumn::Status => status_rank(one.status).cmp(&status_rank(other.status)),
         InboxColumn::Pull => (&one.repo, one.pull.number).cmp(&(&other.repo, other.pull.number)),
         InboxColumn::Seen => (one.progress.map(Progress::seen), one.drafts.len())
             .cmp(&(other.progress.map(Progress::seen), other.drafts.len())),
@@ -661,8 +661,8 @@ pub(super) fn inbox(model: &Model, frame: &mut Frame<'_>) {
         .filter(|(_, entry)| {
             model
                 .review
-                .standing
-                .is_none_or(|standing| entry.standing == standing)
+                .status_filter
+                .is_none_or(|status| entry.status == status)
                 && (!only_requested || requests.of(entry))
                 && kept(model, entry)
                 && filtered(model, entry)

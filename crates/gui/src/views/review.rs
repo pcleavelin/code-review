@@ -28,7 +28,7 @@ use crate::widgets::{
     Chosen, CommentLook, Container, Enabled, Frame, Padding, RowAction, Scroller, TreeRow,
 };
 
-use super::inbox::{standing_color, standing_word};
+use super::inbox::{status_color, status_word};
 use super::markdown::markdown;
 
 pub(super) fn seen_mark(seen: Seen) -> Run {
@@ -1152,9 +1152,9 @@ pub(super) fn review_tab(model: &Model, frame: &mut Frame<'_>) {
         Run::new(format!("   updated {}", pull.updated), WEAK),
     ]);
     let progress = opened.review.progress(&opened.changes);
-    let standing = opened.review.standing(&pull.head_commit, Some(progress));
+    let status = opened.review.status(&pull.head_commit, Some(progress));
     frame.label_runs(vec![
-        Run::new(standing_word(standing), standing_color(standing)),
+        Run::new(status_word(status), status_color(status)),
         Run::new(
             format!("   {progress} changed files seen"),
             if progress.done() { GREEN } else { ORANGE },

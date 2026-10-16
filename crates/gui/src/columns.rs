@@ -8,7 +8,7 @@ use crate::theme::PIXEL;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, VariantArray)]
 pub(crate) enum InboxColumn {
-    Standing,
+    Status,
     Pull,
     Title,
     Author,
@@ -23,7 +23,7 @@ struct Literal(&'static str);
 impl InboxColumn {
     const fn key(self) -> Literal {
         Literal(match self {
-            Self::Standing => "standing",
+            Self::Status => "status",
             Self::Pull => "pull",
             Self::Title => "title",
             Self::Author => "author",
@@ -46,7 +46,7 @@ impl InboxColumn {
 
     fn default_cells(self) -> ColumnCells {
         let cells = match self {
-            Self::Standing => 11,
+            Self::Status => 11,
             Self::Pull | Self::Seen => 16,
             Self::Title => 48,
             Self::Author => 12,

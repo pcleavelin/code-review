@@ -189,9 +189,9 @@ pub(crate) const INBOX_FIELD: Control = Control::new(
     Element::new("field@inbox"),
     Words::new("filter by any words of the title, repository, author, branch or #number"),
 );
-pub(crate) const INBOX_STATE: Control = Control::new(
-    Element::new("inbox-state"),
-    Words::new("show only the pull requests in this state"),
+pub(crate) const INBOX_STATUS: Control = Control::new(
+    Element::new("inbox-status"),
+    Words::new("show only the pull requests of this status"),
 );
 pub(crate) const INBOX_REQUESTED: Control = Control::new(
     Element::new("inbox-requested"),
@@ -542,7 +542,7 @@ pub(crate) const CONTROLS: &[Control] = &[
     HIT_ROW,
     HIT_FILE_ROW,
     INBOX_FIELD,
-    INBOX_STATE,
+    INBOX_STATUS,
     INBOX_REQUESTED,
     PULL_ROW,
     PULLS_REFRESH,

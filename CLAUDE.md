@@ -9,7 +9,7 @@ Source view shows the head of the pull request with go to definition, hover and 
 answered by the language's server on that head.
 
 - **The human** reviews in the GUI: `review` with no arguments opens the Inbox (every open
-  pull request of every pinned repository, filtered by words and by standing), then Changes,
+  pull request of every pinned repository, filtered by words and by status), then Changes,
   the Source view with the diff and the forge's threads on it, the Review tab with the
   description, the conversation and the submit.
 - **The agent** (and anyone in a terminal) uses the CLI: the same review, the same state, the
@@ -96,7 +96,7 @@ rule applies.
 | **Symbol** | A top-level declaration, plus one level of members of impl / mod / trait / class bodies, in the tree. Name, kind, inclusive line range, depth 0 or 1. |
 | **Pin** | A repository the Inbox lists: a local clone named by path, or a URL cloned (blobless) into the clones folder. Kept in the pins file: `REVIEW_PINS`, else `<config>/code-review/pins`; clones in `REVIEW_CLONES`, else `<data>/code-review/clones`. Named `owner/name` from its remote; the short `name` works when it is unique. |
 | **Address** | A pull request on the command line: `owner/name#12`, `name#12`, `name!12` (GitLab), or `12` / `#12` inside a pinned clone or when one pinned repository has it. |
-| **Standing** | Where a pull request is for this reviewer: new (never opened), updated (its head moved since it was last opened), reviewing, reviewed (every change seen, no drafts). |
+| **Status** | Where a pull request is for this reviewer: new (never opened), updated (its head moved since it was last opened), reviewing, reviewed (every change seen, no drafts). |
 | **Thread** | A conversation on the forge: on a line of the code (open, resolved, outdated) or on the pull request itself. An outdated one, written on a line the pull request has changed since, is listed in the Review tab only and not drawn in the code. Read on open and on refresh, never stored; a reply is a draft that names its thread. Every note, the description and every draft is drawn as markdown: links, `#12`, `!12`, `@user` and commit hashes link to the forge, pictures are fetched once into a temporary cache and drawn in place; a click opens one over the window, fitted, to zoom (pinch, ctrl+wheel, + and -, 0 to fit, 1 for its own size) and move around (drag, scroll). |
 | **Submission** | A review someone submitted on the forge: its author, decision (comment, approve, request changes), summary, and the threads started in it. The Review tab and `discussion` show each as one block, in time order with the threads on the pull request itself; a later reply stays in its thread. A submission that says nothing (no summary, no decision, no thread of its own) shows no block. GitLab groups no notes into reviews, so its threads all stand alone. |
 | **Commit** | One commit of the pull request (`git log base..head`). The Commits view lists them; picking one shows its own changes against its parent, unified or split; comments stay on the whole pull request's changes. |

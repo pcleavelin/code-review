@@ -100,7 +100,7 @@ fn lines_of(start: Option<Line>, line: Line) -> Span {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Standing {
+pub enum PullStatus {
     New,
     Updated,
     Reviewing,
@@ -206,14 +206,14 @@ impl Review {
         self.looked = Some(head);
     }
 
-    pub fn standing(&self, head: &CommitId, progress: Option<Progress>) -> Standing {
+    pub fn status(&self, head: &CommitId, progress: Option<Progress>) -> PullStatus {
         match &self.looked {
-            None => Standing::New,
-            Some(looked) if looked != head => Standing::Updated,
+            None => PullStatus::New,
+            Some(looked) if looked != head => PullStatus::Updated,
             Some(_) if progress.is_some_and(Progress::done) && self.drafts.is_empty() => {
-                Standing::Reviewed
+                PullStatus::Reviewed
             }
-            Some(_) => Standing::Reviewing,
+            Some(_) => PullStatus::Reviewing,
         }
     }
 
