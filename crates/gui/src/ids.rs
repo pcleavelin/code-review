@@ -189,10 +189,6 @@ pub(crate) const INBOX_FIELD: Control = Control::new(
     Element::new("field@inbox"),
     Words::new("filter by any words of the title, repository, author, branch or #number"),
 );
-pub(crate) const INBOX_STATUS: Control = Control::new(
-    Element::new("inbox-status"),
-    Words::new("show only the pull requests of this status"),
-);
 pub(crate) const INBOX_REQUESTED: Control = Control::new(
     Element::new("inbox-requested"),
     Words::new(
@@ -421,6 +417,14 @@ pub(crate) const COLUMN_FIELD: Control = Control::new(
     Element::new("column-filter"),
     Words::new("keep the pull requests whose cell in this column has these words"),
 );
+pub(crate) const DROPDOWN: Control = Control::new(
+    Element::new("dropdown"),
+    Words::new("pick which values of this column are shown"),
+);
+pub(crate) const CHOICE: Control = Control::new(
+    Element::new("choice"),
+    Words::new("show or hide the rows with this value"),
+);
 pub(crate) const COLUMN_HEADER: Control = Control::new(
     Element::new("column-header"),
     Words::new("sort by this column; again to reverse"),
@@ -542,7 +546,6 @@ pub(crate) const CONTROLS: &[Control] = &[
     HIT_ROW,
     HIT_FILE_ROW,
     INBOX_FIELD,
-    INBOX_STATUS,
     INBOX_REQUESTED,
     PULL_ROW,
     PULLS_REFRESH,
@@ -599,6 +602,8 @@ pub(crate) const CONTROLS: &[Control] = &[
     CARD_LINK,
     CARD_COLLAPSE,
     COLUMN_FIELD,
+    DROPDOWN,
+    CHOICE,
     COLUMN_HEADER,
     COLUMN_EDGE,
     REPLY,
@@ -745,6 +750,10 @@ pub(crate) fn review() -> Id {
 
 pub(crate) fn tooltip_code() -> Id {
     Id::new("tip-code")
+}
+
+pub(crate) fn choices() -> Id {
+    Id::new("choices")
 }
 
 pub(crate) fn picker() -> Id {

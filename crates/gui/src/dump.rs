@@ -240,9 +240,9 @@ impl Dump for Reviewing {
             .map(|repo| repo.name().to_string())
             .collect();
         lines.line(format_args!(
-            "review inbox={inbox} repos=[{}] status_filter={:?} requested={:?} opening={} open={} draft={} submitting={:?}",
+            "review inbox={inbox} repos=[{}] statuses={:?} requested={:?} opening={} open={} draft={} submitting={:?}",
             pins.join(" "),
-            self.status_filter,
+            self.statuses.shown(),
             self.requested,
             Optional(self.opening),
             Optional(self.opened().map(|opened| opened.number)),

@@ -22,6 +22,7 @@ use ui::{Count, Label, Typed};
 
 use crate::app::App;
 use crate::diffs::{DiffJobs, Diffs, Loading, SidesKey};
+use crate::dropdown::Checks;
 use crate::field::Which;
 use crate::keys::Going;
 use crate::login::{self, Ended, Holdings, JiraLanded, LoginStatus, Logins};
@@ -277,7 +278,7 @@ pub(crate) struct Reviewing {
     pub(crate) desk: Desk,
     pub(crate) inbox: Inbox,
     pub(crate) waiting: BTreeMap<RepoName, Waiting>,
-    pub(crate) status_filter: Option<PullStatus>,
+    pub(crate) statuses: Checks<PullStatus>,
     pub(crate) requested: RequestedFrom,
     pub(crate) open: Option<OpenReview>,
     pub(crate) opening: Option<PrNumber>,
@@ -307,7 +308,7 @@ impl Reviewing {
             desk,
             inbox: Inbox::Asking,
             waiting: BTreeMap::new(),
-            status_filter: None,
+            statuses: Checks::default(),
             requested: RequestedFrom::Any,
             open: None,
             opening: None,
@@ -524,7 +525,7 @@ pub(crate) enum ReviewAct {
     OpenPull(RepoName, PrNumber),
     Pin,
     Unpin(RepoName),
-    ShowStatus(Option<PullStatus>),
+    ToggleStatus(PullStatus),
     ShowRequested(RequestedFrom),
     OpenChange(RelativePath),
     OpenPlace(CodePlace),
@@ -1074,7 +1075,7 @@ impl App {
             ReviewAct::OpenPull(repo, number) => self.open_pull(&repo, number),
             ReviewAct::Pin => self.pin(),
             ReviewAct::Unpin(name) => self.unpin(&name),
-            ReviewAct::ShowStatus(status) => self.model.review.status_filter = status,
+            ReviewAct::ToggleStatus(status) => self.model.review.statuses.toggle(status),
             ReviewAct::ShowRequested(requested) => self.model.review.requested = requested,
             ReviewAct::OpenChange(path) => self.model.open_change(&path),
             ReviewAct::OpenPlace(place) => self.model.open_place(&place),

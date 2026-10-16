@@ -238,7 +238,8 @@ Never claim a visual or interactive behaviour from reading the code; drive it an
   every background job have answered), `rect <id>`, `click-id <id> [ctrl|alt|shift]`,
   `dblclick-id <id>`, `hover-id <id>`, `absent <id>`, `shot <file.png>`, `dump`. A `script:`
   line on stderr fails the run. Id names are the ones in `crates/gui/src/ids.rs`: `name`,
-  `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, changed files `change/<n>`,
+  `name/<n>` for rows, `name@<key>` (inbox rows `pull/<n>`, an Inbox column's dropdown
+  `dropdown@<column>` and its entries `choice@<word>`, changed files `change/<n>`,
   commits `commit/<n>`, `all-changes` (in the Changes and Source toolbars `all-changes@changes`, `@source`), the split toggle `layout`, thread rows `thread/<n>`,
   a thread's reply button `reply@<thread id>`, a fold's buttons `fold-up@<path>:<first line>`,
   `fold-down@<path>:<last line>` and `fold@<path>:<first line>` (lines from 0), a file's header

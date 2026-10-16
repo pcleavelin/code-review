@@ -16,7 +16,8 @@ use strum::VariantArray;
 use ui::{Button, Capture, Count, Id, Input, Label, Measure, Px, Ui};
 
 use crate::action::Action;
-use crate::columns::{InboxColumn, InboxGrid};
+use crate::columns::{InboxGrid, WordColumn};
+use crate::dropdown::DropdownAct;
 use crate::dump::{self, Context, Dump, DumpLines};
 use crate::field::Which;
 use crate::grid::Grids;
@@ -207,6 +208,12 @@ impl App {
             }
             return;
         }
+        if self.model.dropdown.is_some() {
+            if keys::escaped(input) {
+                self.apply(Action::Dropdown(DropdownAct::Close));
+            }
+            return;
+        }
         if keys::palette_toggled(input) {
             self.apply(Action::Palette(PaletteAction::Toggle));
             return;
@@ -250,7 +257,7 @@ impl App {
             Which::JiraEmail,
         ]
         .into_iter()
-        .chain(InboxColumn::VARIANTS.iter().copied().map(Which::Column))
+        .chain(WordColumn::VARIANTS.iter().copied().map(Which::Column))
         {
             actions.push(Action::Type(which, edits.clone(), typed.clone()));
         }
@@ -316,7 +323,10 @@ impl platform::App for App {
         self.keys(input);
         self.model.refresh_palette();
         self.ui.capture(
-            if self.model.settings_menu.is_some() || self.model.viewer.is_some() {
+            if self.model.settings_menu.is_some()
+                || self.model.viewer.is_some()
+                || self.model.dropdown.is_some()
+            {
                 Capture::Floating
             } else {
                 Capture::Everything

@@ -29,6 +29,7 @@ pub(crate) fn build(model: &Model, frame: &mut Frame<'_>) {
     frame.finish();
     panel_tree::drag_band(model, frame);
     panel_tree::picker(model, frame);
+    inbox::choices(model, frame);
     palette::palette(model, frame);
     settings::settings(model, frame);
     viewer::viewer(model, frame);

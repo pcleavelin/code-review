@@ -1,4 +1,5 @@
 mod code;
+mod dropdown;
 
 use std::rc::Rc;
 
@@ -35,6 +36,7 @@ use crate::theme::{
 use crate::field::Fields;
 use crate::ids;
 pub(crate) use code::{AcrossBar, AcrossScroll, CodeBlock, Coded, Marks, Width};
+pub(crate) use dropdown::{Picked, Tally};
 
 #[derive(Clone, Copy, Debug)]
 struct Literal(&'static str);
@@ -142,6 +144,7 @@ pub(crate) enum Container {
     Picker { at: Point, width: Px },
     Palette { at: Point, width: Px },
     Settings { at: Point, width: Px },
+    Choices { at: Point, width: Px },
     PanelHeader,
     Comment { look: CommentLook, id: Id },
     Card(Id),
@@ -217,6 +220,7 @@ impl Container {
         let (padding, id) = match self {
             Self::Picker { .. } => (TOOLTIP_PADDING, ids::picker()),
             Self::Palette { .. } => (TOOLTIP_PADDING, ids::palette_box()),
+            Self::Choices { .. } => (TOOLTIP_PADDING, ids::choices()),
             _ => (TOOLTIP_PADDING, ids::settings_box()),
         };
         floating(at, Some(width), padding, ACCENT, Some(id))
@@ -358,7 +362,8 @@ impl Container {
             ),
             Self::Picker { at, width }
             | Self::Palette { at, width }
-            | Self::Settings { at, width } => self.box_shape(at, width),
+            | Self::Settings { at, width }
+            | Self::Choices { at, width } => self.box_shape(at, width),
             Self::PanelHeader => Shape::new(
                 Layout::row().grow_width().cross(Align::Center),
                 Style::background(TAB_STRIP).border(Sides::BOTTOM, BORDER),

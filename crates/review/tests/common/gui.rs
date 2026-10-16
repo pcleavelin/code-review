@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 #[macro_export]
 macro_rules! gui_scenarios {
     ($m:ident) => {
-        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer }
+        $m! { gui: open, deleted, split, copy, markdown, linked_file, working_copy, dropped, login, submissions, confirm_submit, submit_logged_out, keychain_stalled, requested, all_changes, stacked, edit_draft, inbox_grid, inbox_status, range_draft, jira_login, jira_first_login, jira_card, across, steady_scroll, picture_viewer }
     };
 }
 
@@ -1156,6 +1156,57 @@ quit
             "DUMP rect column-header@author = Some(Rect { x: 973, y: 154,",
             "DUMP rect column-header@author = Some(Rect { x: 1053, y: 154,",
             "DUMP field Column(Author) caret=3 first=0 rows=1 text=\"ann\"",
+        ],
+    }
+}
+
+pub(crate) fn inbox_status() -> Scenario {
+    Scenario {
+        script: "OPEN
+tab inbox
+wait 2
+absent column-filter@status
+absent choice@new
+click-id dropdown@status
+wait 2
+shot {shots}/open.png
+rect choice@new
+mouse <<DUMP rect choice@new|12,8>>
+click <<DUMP rect choice@new|12,8>>
+wait 2
+rect choice@new
+rect pull/0
+absent pull/1
+dump
+shot {shots}/filtered.png
+click <<DUMP rect choice@new|12,8>>
+wait 2
+rect choice@new
+rect pull/1
+key escape
+wait 2
+absent choice@new
+dump
+shot {shots}/closed.png
+click-id dropdown@status
+wait 2
+rect choice@reviewing
+click-id dropdown@status
+wait 2
+absent choice@reviewing
+click-id dropdown@status
+wait 2
+click <<DUMP rect pull/1|400,8>>
+wait 2
+absent choice@reviewing
+quit
+",
+        shows: &[
+            "statuses=[Updated, Reviewing, Reviewed]",
+            "statuses=[New, Updated, Reviewing, Reviewed]",
+            "DUMP rect pull/0 = Some(",
+            "DUMP rect pull/1 = Some(",
+            "DUMP rect choice@reviewing = Some(",
         ],
     }
 }

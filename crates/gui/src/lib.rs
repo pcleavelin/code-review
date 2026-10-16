@@ -2,6 +2,7 @@ mod action;
 mod app;
 mod columns;
 mod diffs;
+mod dropdown;
 mod dump;
 mod element_tip;
 mod field;

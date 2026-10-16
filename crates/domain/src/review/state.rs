@@ -99,7 +99,7 @@ fn lines_of(start: Option<Line>, line: Line) -> Span {
         .unwrap_or_else(|| Span::line(line))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, VariantArray)]
 pub enum PullStatus {
     New,
     Updated,
