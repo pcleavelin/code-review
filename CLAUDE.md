@@ -48,7 +48,9 @@ Work happens in a jj workspace of its own outside the repo directory
 uses the default working copy to try branches and moves its `@` at any time. Every file in
 the repo is the agent's to change when a task needs it, CLAUDE.md, the skills, xtask, the
 crate graph and the settings included; change it and say so in the reply rather than
-proposing and waiting.
+proposing and waiting. Once every bookmark of a request is done, they go into master in one
+merge commit (`jj new <bookmarks> -m "Merge ..."`, conflicts resolved, `gate --full` green,
+master moved onto it) without asking.
 
 ## Axioms
 
