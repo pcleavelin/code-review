@@ -9,7 +9,9 @@ description: Fix behaviour that differs from what the owner, CLAUDE.md, or a fea
    that reproduces it.
 2. Pin the failure before touching the code: a unit test in the crate at fault that fails
    on the current code, or, for behaviour only the binary reaches, a scenario step
-   (`add-test-scenario`) that fails before the fix.
+   (`add-test-scenario`) that fails before the fix. A GUI scenario is written here and run at
+   the end with every other GUI run (`finish` step 6), on the parent revision's build first to
+   watch it fail.
 3. Find the cause, not the symptom: follow the data from where the output goes wrong back to
    where it is read (the `io-*` crate's `wire.rs`, then `convert.rs`, then the caller). Fix it
    there, once, where every caller passes through. A fix that also changes what another feature
